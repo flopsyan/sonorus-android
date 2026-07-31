@@ -315,23 +315,42 @@ class SonorusApi(private val session: Session) {
     // number come from the folder structure, so the next scan would read them
     // back and an edit there would silently revert.
 
-    suspend fun editAlbum(id: Int, date: String? = null, genres: String? = null, cover: String? = null): AlbumResponse =
-        patch("/api/albums/$id", buildJsonObject {
-            date?.let { put("date", it) }
-            genres?.let { put("genres", it) }
-            cover?.let { put("cover", it) }
-        })
+    suspend fun editAlbum(
+        id: Int,
+        date: String? = null,
+        genres: String? = null,
+        cover: JsonElement? = null,
+    ): AlbumResponse = patch("/api/albums/$id", buildJsonObject {
+        date?.let { put("date", it) }
+        genres?.let { put("genres", it) }
+        cover?.let { put("cover", it) }
+    })
 
     /** Refused for a track that has an album - it takes these from the album. */
-    suspend fun editSingle(id: Int, date: String? = null, genres: String? = null, cover: String? = null): TrackResponse =
-        patch("/api/tracks/$id", buildJsonObject {
-            date?.let { put("date", it) }
-            genres?.let { put("genres", it) }
-            cover?.let { put("cover", it) }
-        })
+    suspend fun editSingle(
+        id: Int,
+        date: String? = null,
+        genres: String? = null,
+        cover: JsonElement? = null,
+    ): TrackResponse = patch("/api/tracks/$id", buildJsonObject {
+        date?.let { put("date", it) }
+        genres?.let { put("genres", it) }
+        cover?.let { put("cover", it) }
+    })
 
-    suspend fun editArtistCover(id: Int, cover: String): ArtistResponse =
+    suspend fun editArtistCover(id: Int, cover: JsonElement): ArtistResponse =
         patch("/api/artists/$id", buildJsonObject { put("cover", cover) })
+
+    /**
+     * The payload `writeCover` expects: the type and the raw bytes as base64,
+     * *not* a data URL. `JsonNull` is how a picture is removed - the server
+     * clears the column and sets the lock, so the next scan cannot put the
+     * embedded artwork back.
+     */
+    fun coverPayload(mime: String, base64: String): JsonElement = buildJsonObject {
+        put("type", mime)
+        put("data", base64)
+    }
 
     // --- Scan, import, notices ------------------------------------------------
 
@@ -397,18 +416,18 @@ class SonorusApi(private val session: Session) {
         }
     })
 
-    /** Raw access for the statistics, whose shape is built up in its own screen. */
-    suspend fun statsRaw(offsetMinutes: Int, range: String?, period: String?): JsonElement =
-        call(
-            Request.Builder().url(
-                url(
-                    "/api/stats",
-                    mapOf(
-                        "offset" to offsetMinutes.toString(),
-                        "range" to range,
-                        "period" to period,
-                    ),
-                )
-            ).get().build()
+    /**
+     * One period at a time. The offset is in **minutes** and is what makes day
+     * boundaries the listener's rather than the server's - the server stores
+     * `played_at` in UTC and applies this when it groups.
+     */
+    suspend fun stats(offsetMinutes: Int, range: String? = null, period: String? = null): StatsResponse =
+        get(
+            "/api/stats",
+            mapOf(
+                "offset" to offsetMinutes.toString(),
+                "range" to range,
+                "period" to period,
+            ),
         )
 }

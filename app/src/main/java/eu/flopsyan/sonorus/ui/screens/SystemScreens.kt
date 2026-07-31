@@ -1,6 +1,10 @@
 package eu.flopsyan.sonorus.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +18,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,12 +34,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import eu.flopsyan.sonorus.data.model.ScanState
 import eu.flopsyan.sonorus.ui.AppViewModel
 import eu.flopsyan.sonorus.ui.Fmt
+import eu.flopsyan.sonorus.ui.Routes
 import eu.flopsyan.sonorus.ui.components.Chip
 import eu.flopsyan.sonorus.ui.components.Progress
 import eu.flopsyan.sonorus.ui.components.RackLabelText
@@ -40,8 +49,12 @@ import eu.flopsyan.sonorus.ui.components.SonorusButton
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import eu.flopsyan.sonorus.ui.theme.ThemeMode
 import eu.flopsyan.sonorus.ui.theme.num
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** A panel with a front-panel label, the way every section of the web app looks. */
 @Composable
@@ -76,16 +89,74 @@ private fun Readout(label: String, value: String) {
     }
 }
 
+@Composable
+private fun LinkRow(label: String, hint: String, badge: Int? = null, onClick: () -> Unit) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.text)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = colors.textFaint)
+        }
+        if (badge != null && badge > 0) {
+            Text(
+                Fmt.number(badge),
+                style = num(11.sp),
+                color = colors.accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(colors.accentSoft)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.textFaint)
+    }
+}
+
 // --- Settings ---------------------------------------------------------------
 
 @UnstableApi
 @Composable
-fun SettingsScreen(vm: AppViewModel) {
+fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val colors = SonorusTheme.colors
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val theme by vm.theme.collectAsState()
     var scan by remember { mutableStateOf<ScanState?>(null) }
     var lastScan by remember { mutableStateOf<String?>(null) }
+    var importing by remember { mutableStateOf(false) }
+
+    // The client reads the file and posts its text, exactly like the web app -
+    // so there is no upload handling and nothing is written to disk.
+    val pickCsv = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        importing = true
+        scope.launch {
+            val name = uri.lastPathSegment?.substringAfterLast('/') ?: "CSV-Import"
+            runCatching {
+                val text = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                } ?: error("Die Datei konnte nicht gelesen werden.")
+                vm.api.importCsv(text, name)
+            }.onSuccess { answer ->
+                val obj = answer.jsonObject
+                val added = obj["added"]?.jsonPrimitive?.content ?: "0"
+                val open = obj["issues"]?.jsonPrimitive?.content ?: "0"
+                vm.say("$added Songs importiert, $open Mitteilung(en) offen.")
+                vm.refreshQuietly()
+            }.onFailure { vm.say(vm.message(it), true) }
+            importing = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         runCatching { vm.api.scanState() }.onSuccess {
@@ -141,6 +212,24 @@ fun SettingsScreen(vm: AppViewModel) {
             }
         }
 
+        Panel("Playlists importieren") {
+            Text(
+                "Eine CSV mit den Spalten playlist, title, artists und album. " +
+                    "Die Exporte der üblichen Streamingdienste werden auch erkannt.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textDim,
+            )
+            SonorusButton(if (importing) "Wird importiert …" else "CSV auswählen", enabled = !importing) {
+                // Some providers label CSV as text/comma-separated-values.
+                pickCsv.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*"))
+            }
+            LinkRow(
+                "Mitteilungen",
+                "Zeilen, die kein Song sein konnten",
+                badge = vm.bootstrap?.issues,
+            ) { onGo(Routes.NOTICES) }
+        }
+
         Panel("Darstellung") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Dunkel", theme == ThemeMode.DARK) { vm.setTheme(ThemeMode.DARK) }
@@ -152,26 +241,9 @@ fun SettingsScreen(vm: AppViewModel) {
         Panel("Konto") {
             Readout("Angemeldet als", vm.bootstrap?.user?.displayName.orEmpty())
             Readout("Server", vm.api.serverUrl)
+            LinkRow("Konten", "Wer auf diese Instanz zugreift") { onGo(Routes.ACCOUNTS) }
+            LinkRow("Profil", "Name, Avatar und Passwort") { onGo(Routes.PROFILE) }
             SonorusButton("Abmelden", danger = true) { vm.logout() }
-        }
-    }
-}
-
-// --- Statistics -------------------------------------------------------------
-
-@UnstableApi
-@Composable
-fun StatsScreen(vm: AppViewModel) {
-    val stats = vm.bootstrap?.stats
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-        Panel("Bibliothek") {
-            Readout("Songs", Fmt.number(stats?.tracks ?: 0))
-            Readout("Interpreten", Fmt.number(stats?.artists ?: 0))
-            Readout("Alben", Fmt.number(stats?.albums ?: 0))
-            Readout("Singles", Fmt.number(stats?.singles ?: 0))
-            Readout("Genres", Fmt.number(stats?.genres ?: 0))
-            Readout("Spielzeit", Fmt.durationRack(stats?.duration ?: 0.0))
-            Readout("Größe", Fmt.bytes(stats?.size ?: 0))
         }
     }
 }
@@ -181,13 +253,56 @@ fun StatsScreen(vm: AppViewModel) {
 @UnstableApi
 @Composable
 fun ProfileScreen(vm: AppViewModel) {
+    val colors = SonorusTheme.colors
+    val scope = rememberCoroutineScope()
     val user = vm.bootstrap?.user
+    var display by remember { mutableStateOf(user?.displayName.orEmpty()) }
+    var avatar by remember { mutableStateOf(user?.avatar.orEmpty()) }
+    var currentPass by remember { mutableStateOf("") }
+    var newPass by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         Panel("Profil") {
-            Readout("Name", user?.displayName.orEmpty())
             Readout("Benutzername", "@${user?.username.orEmpty()}")
             Readout("Rolle", if (user?.isAdmin == true) "Administrator" else "Benutzer")
+            DialogField("Anzeigename", display) { display = it }
+            DialogField("Avatar", avatar, placeholder = "Ein Buchstabe oder Emoji") { avatar = it }
         }
+
+        Panel("Passwort ändern") {
+            // The signature binds the password hash, so a change invalidates
+            // every existing session - the server hands back a fresh cookie.
+            DialogField("Aktuelles Passwort", currentPass, password = true) { currentPass = it }
+            DialogField("Neues Passwort", newPass, password = true) { newPass = it }
+            Text(
+                "Leer lassen, wenn nur der Name geändert werden soll.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textFaint,
+            )
+        }
+
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            SonorusButton(
+                if (busy) "Wird gespeichert …" else "Speichern",
+                primary = true,
+                enabled = !busy,
+            ) {
+                busy = true
+                scope.launch {
+                    runCatching {
+                        vm.api.updateProfile(display.trim(), avatar.trim(), currentPass, newPass)
+                    }.onSuccess {
+                        currentPass = ""
+                        newPass = ""
+                        vm.say("Profil gespeichert.")
+                        vm.refreshQuietly()
+                    }.onFailure { vm.say(vm.message(it), true) }
+                    busy = false
+                }
+            }
+        }
+
         Panel("Verbindung") {
             Readout("Server", vm.api.serverUrl)
             SonorusButton("Abmelden", danger = true) { vm.logout() }

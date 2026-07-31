@@ -7,6 +7,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import eu.flopsyan.sonorus.ui.screens.AccountsScreen
 import eu.flopsyan.sonorus.ui.screens.AlbumScreen
 import eu.flopsyan.sonorus.ui.screens.AlbumsScreen
 import eu.flopsyan.sonorus.ui.screens.ArtistScreen
@@ -16,6 +17,7 @@ import eu.flopsyan.sonorus.ui.screens.ArtistsScreen
 import eu.flopsyan.sonorus.ui.screens.GenreScreen
 import eu.flopsyan.sonorus.ui.screens.GenresScreen
 import eu.flopsyan.sonorus.ui.screens.HomeScreen
+import eu.flopsyan.sonorus.ui.screens.NoticesScreen
 import eu.flopsyan.sonorus.ui.screens.PlaylistScreen
 import eu.flopsyan.sonorus.ui.screens.ProfileScreen
 import eu.flopsyan.sonorus.ui.screens.SearchScreen
@@ -40,7 +42,9 @@ fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
         composable(Routes.ALBUMS) { AlbumsScreen(vm, go) }
         composable(Routes.GENRES) { GenresScreen(vm, go) }
         composable(Routes.SEARCH) { SearchScreen(vm, go) }
-        composable(Routes.SETTINGS) { SettingsScreen(vm) }
+        composable(Routes.SETTINGS) { SettingsScreen(vm, go) }
+        composable(Routes.NOTICES) { NoticesScreen(vm) }
+        composable(Routes.ACCOUNTS) { AccountsScreen(vm) }
         composable(Routes.STATS) { StatsScreen(vm) }
         composable(Routes.PROFILE) { ProfileScreen(vm) }
 

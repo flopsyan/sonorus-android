@@ -9,6 +9,8 @@ import eu.flopsyan.sonorus.data.SonorusApi
 import eu.flopsyan.sonorus.data.model.Bootstrap
 import eu.flopsyan.sonorus.data.model.Prefs
 import eu.flopsyan.sonorus.data.model.SortPref
+import eu.flopsyan.sonorus.data.model.Track
+import eu.flopsyan.sonorus.data.model.TreeResponse
 import eu.flopsyan.sonorus.player.PlayerController
 import eu.flopsyan.sonorus.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -199,6 +201,90 @@ class AppViewModel : ViewModel() {
                 .onFailure { say(message(it), true) }
         }
     }
+
+    // --- Playlist management --------------------------------------------------
+    // Every one of these answers with the whole tree, so the sidebar is redrawn
+    // from the server's answer rather than from a guess about what changed.
+
+    /** The track waiting for a playlist to be picked, if any. */
+    private val _pendingAdd = MutableStateFlow<Track?>(null)
+    val pendingAdd: StateFlow<Track?> = _pendingAdd.asStateFlow()
+
+    fun askForPlaylist(track: Track) {
+        _pendingAdd.value = track
+    }
+
+    /** The single whose edit dialog is open, if any. */
+    private val _editingSingle = MutableStateFlow<Track?>(null)
+    val editingSingle: StateFlow<Track?> = _editingSingle.asStateFlow()
+
+    fun editSingle(track: Track) {
+        _editingSingle.value = track
+    }
+
+    fun closeSingleEditor() {
+        _editingSingle.value = null
+    }
+
+    fun cancelAdd() {
+        _pendingAdd.value = null
+    }
+
+    private fun withTree(onDone: () -> Unit = {}, block: suspend () -> TreeResponse) {
+        viewModelScope.launch {
+            runCatching { block() }
+                .onSuccess { answer ->
+                    bootstrap?.let { _phase.value = AppPhase.Ready(it.copy(playlists = answer.tree)) }
+                    onDone()
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    fun createPlaylist(name: String, folderId: Int? = null, then: (() -> Unit)? = null) =
+        withTree(onDone = { then?.invoke(); say("Playlist \"$name\" angelegt.") }) {
+            api.createPlaylist(name, folderId)
+        }
+
+    /**
+     * Creates a playlist and puts the waiting track straight into it - the one
+     * flow where a new list is never wanted empty.
+     */
+    fun createPlaylistWithTrack(name: String, track: Track) {
+        viewModelScope.launch {
+            runCatching {
+                val created = api.createPlaylist(name, null)
+                val id = (created.tree.loose + created.tree.folders.flatMap { it.playlists })
+                    .firstOrNull { it.name == name }?.id
+                if (id != null) api.addToPlaylist(id, listOf(track.id))
+                created
+            }.onSuccess {
+                _pendingAdd.value = null
+                say("Zu \"$name\" hinzugefügt.")
+                refreshQuietly()
+            }.onFailure { say(message(it), true) }
+        }
+    }
+
+    fun renamePlaylist(id: Int, name: String, then: () -> Unit = {}) =
+        withTree(then) { api.renamePlaylist(id, name) }
+
+    fun pinPlaylist(id: Int, pinned: Boolean, then: () -> Unit = {}) =
+        withTree(then) { api.pinPlaylist(id, pinned) }
+
+    fun deletePlaylist(id: Int, then: () -> Unit = {}) =
+        withTree({ then(); say("Playlist gelöscht.") }) { api.deletePlaylist(id) }
+
+    fun createFolder(name: String) =
+        withTree({ say("Ordner \"$name\" angelegt.") }) { api.createFolder(name) }
+
+    fun renameFolder(id: Int, name: String) = withTree { api.renameFolder(id, name) }
+
+    /** Deleting a folder keeps its playlists - they move to the top level. */
+    fun deleteFolder(id: Int) =
+        withTree({ say("Ordner gelöscht, die Playlists sind erhalten.") }) { api.deleteFolder(id) }
+
+    fun movePlaylist(id: Int, folderId: Int?) = withTree { api.movePlaylist(id, folderId) }
 
     fun removeFromPlaylist(playlistId: Int, itemId: Int, onDone: () -> Unit) {
         viewModelScope.launch {

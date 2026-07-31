@@ -1,7 +1,9 @@
 package eu.flopsyan.sonorus.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,11 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -68,6 +75,10 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import eu.flopsyan.sonorus.data.model.Bootstrap
+import eu.flopsyan.sonorus.data.model.Playlist
+import eu.flopsyan.sonorus.ui.components.ConfirmDialog
+import eu.flopsyan.sonorus.ui.components.PlaylistPickerDialog
+import eu.flopsyan.sonorus.ui.components.TextPromptDialog
 import eu.flopsyan.sonorus.ui.components.PlayerBar
 import eu.flopsyan.sonorus.ui.components.RackLabelText
 import eu.flopsyan.sonorus.ui.screens.FullPlayer
@@ -114,6 +125,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                 drawerContentColor = colors.text,
             ) {
                 Sidebar(
+                    vm = vm,
                     data = data,
                     onGo = { target ->
                         scope.launch { drawer.close() }
@@ -181,6 +193,44 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
         }
     }
 
+    val pending by vm.pendingAdd.collectAsState()
+    var newListForTrack by remember { mutableStateOf(false) }
+
+    pending?.let { track ->
+        if (newListForTrack) {
+            TextPromptDialog(
+                title = "Neue Playlist",
+                label = "Name",
+                confirmLabel = "Anlegen",
+                onDismiss = { newListForTrack = false },
+                onConfirm = { name ->
+                    newListForTrack = false
+                    vm.createPlaylistWithTrack(name, track)
+                },
+            )
+        } else {
+            PlaylistPickerDialog(
+                tree = data.playlists,
+                onDismiss = { vm.cancelAdd() },
+                onNew = { newListForTrack = true },
+                onPick = { id, name ->
+                    vm.cancelAdd()
+                    vm.addToPlaylist(id, track.id, name)
+                },
+            )
+        }
+    }
+
+    val editingSingle by vm.editingSingle.collectAsState()
+    editingSingle?.let { track ->
+        eu.flopsyan.sonorus.ui.screens.EditSingleDialog(
+            vm = vm,
+            track = track,
+            onDismiss = { vm.closeSingleEditor() },
+            onSaved = { vm.refreshQuietly() },
+        )
+    }
+
     if (expanded && playerState.current != null) {
         FullPlayer(
             vm = vm,
@@ -206,9 +256,20 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
     else -> data.siteName
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@UnstableApi
 @Composable
-private fun Sidebar(data: Bootstrap, onGo: (String) -> Unit) {
+private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
     val colors = SonorusTheme.colors
+    // What the long press opened, if anything.
+    var menuFor by remember { mutableStateOf<Playlist?>(null) }
+    var renaming by remember { mutableStateOf<Playlist?>(null) }
+    var deleting by remember { mutableStateOf<Playlist?>(null) }
+    var newList by remember { mutableStateOf(false) }
+    var newFolder by remember { mutableStateOf(false) }
+    var renamingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var deletingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -242,25 +303,66 @@ private fun Sidebar(data: Bootstrap, onGo: (String) -> Unit) {
             ) { onGo(Routes.stars(listOf(value))) }
         }
 
-        if (data.playlists.folders.isNotEmpty() || data.playlists.loose.isNotEmpty()) {
-            SidebarLabel("Playlists")
-            for (folder in data.playlists.folders) {
-                SidebarLabel(folder.name, small = true)
-                for (p in folder.playlists) {
-                    SidebarRow(
-                        icon = if (p.pinned) Icons.Filled.PushPin else Icons.AutoMirrored.Filled.List,
-                        label = p.name,
-                        count = p.trackCount,
-                    ) { onGo(Routes.playlist(p.id)) }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 16.dp, start = 20.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            RackLabelText("Playlists")
+            Row {
+                IconButton(onClick = { newList = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Filled.PlaylistAdd, "Neue Playlist",
+                        tint = colors.textDim, modifier = Modifier.size(18.dp),
+                    )
+                }
+                IconButton(onClick = { newFolder = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Filled.CreateNewFolder, "Neuer Ordner",
+                        tint = colors.textDim, modifier = Modifier.size(18.dp),
+                    )
                 }
             }
-            for (p in data.playlists.loose) {
-                SidebarRow(
-                    icon = if (p.pinned) Icons.Filled.PushPin else Icons.AutoMirrored.Filled.List,
-                    label = p.name,
-                    count = p.trackCount,
-                ) { onGo(Routes.playlist(p.id)) }
+        }
+        Spacer(Modifier.height(4.dp))
+
+        for (folder in data.playlists.folders) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { renamingFolder = folder.id to folder.name },
+                    )
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                RackLabelText(folder.name)
+                IconButton(
+                    onClick = { deletingFolder = folder.id to folder.name },
+                    modifier = Modifier.size(26.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Close, "Ordner löschen",
+                        tint = colors.textFaint, modifier = Modifier.size(14.dp),
+                    )
+                }
             }
+            for (p in folder.playlists) {
+                PlaylistRow(p, onGo = onGo) { menuFor = p }
+            }
+        }
+        for (p in data.playlists.loose) {
+            PlaylistRow(p, onGo = onGo) { menuFor = p }
+        }
+        if (data.playlists.folders.isEmpty() && data.playlists.loose.isEmpty()) {
+            Text(
+                "Noch keine Playlist. Lang auf eine tippen öffnet ihr Menü.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textFaint,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            )
         }
 
         SidebarLabel("System")
@@ -269,11 +371,171 @@ private fun Sidebar(data: Bootstrap, onGo: (String) -> Unit) {
             icon = Icons.Filled.Notifications,
             label = "Mitteilungen",
             count = data.issues.takeIf { it > 0 },
-        ) { onGo(Routes.SETTINGS) }
+        ) { onGo(Routes.NOTICES) }
         SidebarRow(Icons.Filled.Settings, "Einstellungen") { onGo(Routes.SETTINGS) }
         SidebarRow(Icons.Filled.Person, data.user.displayName.ifEmpty { data.user.username }) {
             onGo(Routes.PROFILE)
         }
+    }
+
+    menuFor?.let { p ->
+        PlaylistMenu(
+            playlist = p,
+            onDismiss = { menuFor = null },
+            onOpen = { menuFor = null; onGo(Routes.playlist(p.id)) },
+            onRename = { menuFor = null; renaming = p },
+            onPin = { menuFor = null; vm.pinPlaylist(p.id, !p.pinned) },
+            onDelete = { menuFor = null; deleting = p },
+        )
+    }
+    renaming?.let { p ->
+        TextPromptDialog(
+            title = "Playlist umbenennen",
+            label = "Name",
+            initial = p.name,
+            onDismiss = { renaming = null },
+            onConfirm = { name -> renaming = null; vm.renamePlaylist(p.id, name) },
+        )
+    }
+    deleting?.let { p ->
+        ConfirmDialog(
+            title = "Playlist löschen",
+            message = "\"${p.name}\" wird endgültig gelöscht. Die Songs selbst bleiben erhalten.",
+            onDismiss = { deleting = null },
+            onConfirm = { deleting = null; vm.deletePlaylist(p.id) },
+        )
+    }
+    if (newList) {
+        TextPromptDialog(
+            title = "Neue Playlist",
+            label = "Name",
+            confirmLabel = "Anlegen",
+            onDismiss = { newList = false },
+            onConfirm = { name -> newList = false; vm.createPlaylist(name) },
+        )
+    }
+    if (newFolder) {
+        TextPromptDialog(
+            title = "Neuer Ordner",
+            label = "Name",
+            confirmLabel = "Anlegen",
+            onDismiss = { newFolder = false },
+            onConfirm = { name -> newFolder = false; vm.createFolder(name) },
+        )
+    }
+    renamingFolder?.let { (id, name) ->
+        TextPromptDialog(
+            title = "Ordner umbenennen",
+            label = "Name",
+            initial = name,
+            onDismiss = { renamingFolder = null },
+            onConfirm = { next -> renamingFolder = null; vm.renameFolder(id, next) },
+        )
+    }
+    deletingFolder?.let { (id, name) ->
+        ConfirmDialog(
+            title = "Ordner löschen",
+            // Worth saying out loud, because it is not what "delete" usually means.
+            message = "\"$name\" wird gelöscht. Die Playlists darin bleiben erhalten und rücken nach oben.",
+            onDismiss = { deletingFolder = null },
+            onConfirm = { deletingFolder = null; vm.deleteFolder(id) },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PlaylistRow(p: Playlist, onGo: (String) -> Unit, onMenu: () -> Unit) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .combinedClickable(
+                onClick = { onGo(Routes.playlist(p.id)) },
+                onLongClick = onMenu,
+            )
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // A pinned list wears the pin instead of the list icon - the marker and
+        // the position say the same thing twice, on purpose.
+        Icon(
+            if (p.pinned) Icons.Filled.PushPin else Icons.AutoMirrored.Filled.List,
+            null,
+            tint = if (p.pinned) colors.accent else colors.textDim,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            p.name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(Fmt.number(p.trackCount), style = num(11.sp), color = colors.textFaint)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlaylistMenu(
+    playlist: Playlist,
+    onDismiss: () -> Unit,
+    onOpen: () -> Unit,
+    onRename: () -> Unit,
+    onPin: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val colors = SonorusTheme.colors
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = colors.surface,
+    ) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            Text(
+                playlist.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.text,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            )
+            SheetItem(Icons.AutoMirrored.Filled.List, "Öffnen", onOpen)
+            SheetItem(
+                Icons.Filled.PushPin,
+                if (playlist.pinned) "Nicht mehr anheften" else "Anheften",
+                onPin,
+            )
+            SheetItem(Icons.Filled.Edit, "Umbenennen", onRename)
+            SheetItem(Icons.Filled.Delete, "Löschen", onDelete, danger = true)
+        }
+    }
+}
+
+@Composable
+private fun SheetItem(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    danger: Boolean = false,
+) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(icon, null, tint = if (danger) colors.danger else colors.textDim)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (danger) colors.danger else colors.text,
+        )
     }
 }
 

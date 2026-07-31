@@ -19,6 +19,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +52,7 @@ private fun DetailHead(
     round: Boolean = false,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
+    onEdit: (() -> Unit)? = null,
 ) {
     val colors = SonorusTheme.colors
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -84,6 +88,7 @@ private fun DetailHead(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SonorusButton("Abspielen", primary = true, onClick = onPlay)
             SonorusButton("Zufällig", onClick = onShuffle)
+            onEdit?.let { SonorusButton("Bearbeiten", onClick = it) }
         }
     }
 }
@@ -96,9 +101,19 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("album", id) { vm.api.album(id) }
     val player by vm.player.state.collectAsState()
 
+    var editing by remember { mutableStateOf(false) }
+
     LoadBox(load) { data ->
         val album = data.album
         val tracks = album.tracks
+        if (editing) {
+            EditAlbumDialog(
+                vm = vm,
+                album = album,
+                onDismiss = { editing = false },
+                onSaved = { load.reload() },
+            )
+        }
         TrackList(
             tracks = tracks,
             currentTrackId = player.current?.id,
@@ -120,6 +135,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         vm.player.setShuffle(true)
                         vm.player.playTracks(tracks, 0, "Album: ${album.title}")
                     },
+                    onEdit = { editing = true },
                 )
             },
         )
@@ -134,9 +150,20 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("artist", id) { vm.api.artist(id) }
     val player by vm.player.state.collectAsState()
 
+    var editing by remember { mutableStateOf(false) }
+
     LoadBox(load) { data ->
         val artist = data.artist
         val tracks = artist.tracks
+        if (editing) {
+            EditArtistDialog(
+                vm = vm,
+                artistId = artist.id,
+                currentCover = if (artist.hasOwnCover) artist.cover else null,
+                onDismiss = { editing = false },
+                onSaved = { load.reload() },
+            )
+        }
         TrackList(
             tracks = tracks,
             currentTrackId = player.current?.id,
@@ -157,6 +184,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                             vm.player.setShuffle(true)
                             vm.player.playTracks(tracks, 0, artist.name)
                         },
+                        onEdit = { editing = true },
                     )
 
                     // Only the ratings this artist actually has get a switch -

@@ -75,16 +75,16 @@ fun trackActions(
     tracks: List<Track>,
     source: String,
     onGo: (String) -> Unit,
-    onAddToPlaylist: (Track) -> Unit = {},
     onRemove: ((Track) -> Unit)? = null,
 ) = TrackActions(
     onPlay = { index -> vm.player.playTracks(tracks, index, source) },
     onPlayNext = { vm.player.playNext(listOf(it)) },
     onEnqueue = { vm.player.enqueue(listOf(it)) },
     onRate = { track, value -> vm.rate(track.id, value, track.stars) },
-    onAddToPlaylist = onAddToPlaylist,
+    onAddToPlaylist = { vm.askForPlaylist(it) },
     onGoArtist = { it.artistId?.let { id -> onGo(Routes.artist(id)) } },
     onGoAlbum = { it.albumId?.let { id -> onGo(Routes.album(id)) } },
+    onEdit = { vm.editSingle(it) },
     onRemove = onRemove,
 )
 

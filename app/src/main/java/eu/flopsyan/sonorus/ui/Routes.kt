@@ -22,6 +22,8 @@ object Routes {
     const val SETTINGS = "settings"
     const val STATS = "stats"
     const val PROFILE = "profile"
+    const val NOTICES = "notices"
+    const val ACCOUNTS = "accounts"
 
     fun artist(id: Int) = "artists/$id"
     fun artistSingles(id: Int) = "artists/$id/singles"
