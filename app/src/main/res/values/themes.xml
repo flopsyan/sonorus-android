@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws everything; this theme only needs to hand the window the
+         right background so there is no white flash before the first frame.
+         Dark by default, exactly like the web app. -->
+    <style name="Theme.Sonorus" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/sonorus_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

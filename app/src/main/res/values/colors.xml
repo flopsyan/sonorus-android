@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The one warm amber lamp colour the whole app is built around. -->
+    <color name="ic_launcher_background">#f5a524</color>
+    <!-- Deep violet-tinted ink: the chassis. -->
+    <color name="sonorus_bg">#100e14</color>
+</resources>
