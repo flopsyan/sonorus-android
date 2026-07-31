@@ -1,0 +1,228 @@
+package eu.flopsyan.sonorus.ui
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.media3.common.util.UnstableApi
+import eu.flopsyan.sonorus.SonorusApp
+import eu.flopsyan.sonorus.data.ApiException
+import eu.flopsyan.sonorus.data.SonorusApi
+import eu.flopsyan.sonorus.data.model.Bootstrap
+import eu.flopsyan.sonorus.data.model.Prefs
+import eu.flopsyan.sonorus.data.model.SortPref
+import eu.flopsyan.sonorus.player.PlayerController
+import eu.flopsyan.sonorus.ui.theme.ThemeMode
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
+
+/** Where the app is before it can show anything. */
+sealed interface AppPhase {
+    data object Starting : AppPhase
+    data class NeedsLogin(val message: String = "") : AppPhase
+    data class Ready(val bootstrap: Bootstrap) : AppPhase
+}
+
+/** A one-off message shown in a snackbar, like the web app's toasts. */
+data class Toast(val text: String, val isError: Boolean = false, val id: Long = System.nanoTime())
+
+@UnstableApi
+class AppViewModel : ViewModel() {
+
+    private val app: SonorusApp get() = SonorusApp.instance
+    val api: SonorusApi get() = app.api
+    val player: PlayerController get() = app.player
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    private val _phase = MutableStateFlow<AppPhase>(AppPhase.Starting)
+    val phase: StateFlow<AppPhase> = _phase.asStateFlow()
+
+    private val _toast = MutableStateFlow<Toast?>(null)
+    val toast: StateFlow<Toast?> = _toast.asStateFlow()
+
+    private val _theme = MutableStateFlow(ThemeMode.DARK)
+    val theme: StateFlow<ThemeMode> = _theme.asStateFlow()
+
+    /** The last loaded bootstrap, kept so the sidebar can redraw after a change. */
+    val bootstrap: Bootstrap? get() = (_phase.value as? AppPhase.Ready)?.bootstrap
+
+    init {
+        start()
+        // A finished play changes the star playlists and the home page, so the
+        // shell reloads what it shows in the sidebar.
+        player.onPlayCounted = { refreshQuietly() }
+    }
+
+    fun start() {
+        viewModelScope.launch {
+            if (!app.session.isConfigured) {
+                _phase.value = AppPhase.NeedsLogin()
+                return@launch
+            }
+            _phase.value = AppPhase.Starting
+            runCatching { api.bootstrap() }
+                .onSuccess { applyBootstrap(it) }
+                .onFailure { error ->
+                    // Only a genuine auth failure sends the user back to the
+                    // login form; a server that is merely unreachable would
+                    // otherwise look like wrong credentials.
+                    val code = (error as? ApiException)?.code
+                    if (code == "auth_required" || code == "bad_login") {
+                        _phase.value = AppPhase.NeedsLogin(message(error))
+                    } else {
+                        _phase.value = AppPhase.NeedsLogin(message(error))
+                    }
+                }
+        }
+    }
+
+    fun login(server: String, user: String, pass: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            runCatching {
+                api.login(server, user, pass)
+                api.bootstrap()
+            }.onSuccess {
+                applyBootstrap(it)
+                onDone(true)
+            }.onFailure {
+                _phase.value = AppPhase.NeedsLogin(message(it))
+                onDone(false)
+            }
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            player.clearQueue()
+            api.logout()
+            _phase.value = AppPhase.NeedsLogin()
+        }
+    }
+
+    private fun applyBootstrap(data: Bootstrap) {
+        _phase.value = AppPhase.Ready(data)
+        // Player settings live on the account so they follow to another device.
+        val p = data.prefs.player
+        player.setVolume(p.volume)
+        player.setMuted(p.muted)
+        player.setShuffle(p.shuffle)
+        player.setRepeat(p.repeat)
+    }
+
+    /** Reloads the sidebar numbers without flipping the screen to a spinner. */
+    fun refreshQuietly() {
+        viewModelScope.launch {
+            runCatching { api.bootstrap() }.onSuccess { _phase.value = AppPhase.Ready(it) }
+        }
+    }
+
+    // --- Preferences ----------------------------------------------------------
+    // `users.prefs` is the answer to every "das soll dauerhaft so bleiben", and
+    // it lives on the account rather than on the device.
+
+    val prefs: Prefs get() = bootstrap?.prefs ?: Prefs()
+
+    fun savePlayerPrefs() {
+        val s = player.state.value
+        val value = json.encodeToJsonElement(
+            eu.flopsyan.sonorus.data.model.PlayerPrefs(
+                volume = s.volume,
+                muted = s.muted,
+                shuffle = s.shuffle,
+                repeat = s.repeat,
+            )
+        )
+        viewModelScope.launch { runCatching { api.setPref("player", value) } }
+    }
+
+    fun saveSort(key: String, sort: SortPref) {
+        viewModelScope.launch { runCatching { api.setPref(key, json.encodeToJsonElement(sort)) } }
+        // Keep the local copy in step so a screen reopened right away agrees.
+        bootstrap?.let { b ->
+            val next = when (key) {
+                "albumSort" -> b.prefs.copy(albumSort = sort)
+                "trackSort" -> b.prefs.copy(trackSort = sort)
+                else -> b.prefs
+            }
+            _phase.value = AppPhase.Ready(b.copy(prefs = next))
+        }
+    }
+
+    fun saveStatsRange(range: String) {
+        viewModelScope.launch { runCatching { api.setPref("statsRange", JsonPrimitive(range)) } }
+        bootstrap?.let { _phase.value = AppPhase.Ready(it.copy(prefs = it.prefs.copy(statsRange = range))) }
+    }
+
+    fun setTheme(mode: ThemeMode) {
+        _theme.value = mode
+    }
+
+    // --- Ratings --------------------------------------------------------------
+
+    /**
+     * Clicking the rating a track already has clears it, exactly like the web
+     * app. [onDone] carries the new value back so a list can redraw its row.
+     */
+    fun rate(trackId: Int, stars: Int, current: Int, onDone: (Int) -> Unit = {}) {
+        val next = if (current == stars) 0 else stars
+        viewModelScope.launch {
+            runCatching { api.rate(trackId, next) }
+                .onSuccess {
+                    onDone(it.stars)
+                    refreshQuietly()
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    /** Starts a random run through the library, like the button on the home page. */
+    fun shufflePlay() {
+        viewModelScope.launch {
+            runCatching { api.shuffle(60) }
+                .onSuccess { player.playTracks(it.tracks, 0, "Zufall") }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    /** Adds a track to a playlist and refreshes the sidebar counts. */
+    fun addToPlaylist(playlistId: Int, trackId: Int, playlistName: String) {
+        viewModelScope.launch {
+            runCatching { api.addToPlaylist(playlistId, listOf(trackId)) }
+                .onSuccess {
+                    say("Zu \"$playlistName\" hinzugefügt.")
+                    refreshQuietly()
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    fun removeFromPlaylist(playlistId: Int, itemId: Int, onDone: () -> Unit) {
+        viewModelScope.launch {
+            runCatching { api.removeFromPlaylist(playlistId, itemId) }
+                .onSuccess {
+                    onDone()
+                    refreshQuietly()
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    // --- Messages -------------------------------------------------------------
+
+    fun say(text: String, isError: Boolean = false) {
+        _toast.value = Toast(text, isError)
+    }
+
+    fun clearToast() {
+        _toast.value = null
+    }
+
+    fun message(error: Throwable): String = when (error) {
+        is ApiException -> error.message
+        else -> error.message?.takeIf { it.isNotBlank() } ?: "Der Server ist nicht erreichbar."
+    }
+}
