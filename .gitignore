@@ -12,3 +12,6 @@ local.properties
 *.apk
 *.keystore
 !debug.keystore
+
+# The release signing secrets. Never committed.
+keystore.properties
