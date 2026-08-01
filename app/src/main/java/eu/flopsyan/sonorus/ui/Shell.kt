@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,6 +47,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -55,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -67,10 +70,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -87,8 +92,13 @@ import eu.flopsyan.sonorus.ui.theme.num
 import kotlinx.coroutines.launch
 
 /**
- * The app around the pages: the library tree in a drawer, the transport across
- * the bottom, and the full-screen player over both.
+ * The app around the pages: the library tree in a drawer, the tabs and the
+ * transport across the bottom, and the full-screen player over all of it.
+ *
+ * The bottom row carries the five places that are reached most often plus the
+ * ratings and playlists, which arrive as a sheet rather than a page because
+ * they are a *choice of list*, not a list themselves. The drawer keeps the full
+ * tree, so nothing that lived there has moved out of reach.
  *
  * The transport is one player, not two: the full screen is the same state shown
  * larger, exactly the decision the web app made ("there is no second player"),
@@ -106,6 +116,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val playerState by vm.player.state.collectAsState()
     val toast by vm.toast.collectAsState()
     var expanded by remember { mutableStateOf(false) }
+    var listsOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(toast) {
         toast?.let {
@@ -165,9 +176,9 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                 )
             },
             bottomBar = {
-                val current = playerState.current
-                if (current != null) {
-                    Box(Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
+                Column {
+                    val current = playerState.current
+                    if (current != null) {
                         PlayerBar(
                             track = current,
                             playing = playerState.playing,
@@ -184,11 +195,45 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                             },
                         )
                     }
+                    BottomTabs(
+                        route = route,
+                        listsOpen = listsOpen,
+                        onGo = { target ->
+                            // A tab is a place, not a step: switching between
+                            // them must not pile up a back stack.
+                            nav.navigate(target) {
+                                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        onLists = { listsOpen = true },
+                    )
                 }
             },
         ) { padding ->
             Box(Modifier.padding(padding)) {
                 SonorusNavHost(vm, nav)
+            }
+        }
+    }
+
+    if (listsOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { listsOpen = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = colors.surface,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 24.dp)
+            ) {
+                PlaylistLibrary(vm, data) { target ->
+                    listsOpen = false
+                    nav.navigate(target) { launchSingleTop = true }
+                }
             }
         }
     }
@@ -256,20 +301,92 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
     else -> data.siteName
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * The row of places along the bottom edge.
+ *
+ * The last tab is not a destination: ratings and playlists are many lists, so
+ * it opens the sheet that lets one be picked. It still lights up while such a
+ * list is on screen, because that is where the user came from.
+ */
+@Composable
+private fun BottomTabs(
+    route: String?,
+    listsOpen: Boolean,
+    onGo: (String) -> Unit,
+    onLists: () -> Unit,
+) {
+    val colors = SonorusTheme.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.surface)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+    ) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
+        Row(Modifier.fillMaxWidth()) {
+            Tab(Icons.Filled.Home, "Start", route == Routes.HOME) { onGo(Routes.HOME) }
+            Tab(Icons.Filled.MusicNote, "Alle Songs", route == Routes.TRACKS) { onGo(Routes.TRACKS) }
+            Tab(Icons.Filled.Person, "Interpreten", route.inSection("artists")) { onGo(Routes.ARTISTS) }
+            Tab(Icons.Filled.Album, "Alben", route.inSection("albums")) { onGo(Routes.ALBUMS) }
+            Tab(Icons.Filled.Category, "Genres", route.inSection("genres")) { onGo(Routes.GENRES) }
+            Tab(
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                label = "Playlists",
+                selected = listsOpen || route.inSection("playlists") || route.inSection("stars"),
+                onClick = onLists,
+            )
+        }
+    }
+}
+
+/** True when the current route belongs to [prefix], including its detail pages. */
+private fun String?.inSection(prefix: String) =
+    this == prefix || this?.startsWith("$prefix/") == true
+
+@Composable
+private fun RowScope.Tab(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = SonorusTheme.colors
+    val tint = if (selected) colors.accent else colors.textDim
+    Column(
+        Modifier
+            .weight(1f)
+            .clickable(onClick = onClick)
+            .padding(start = 2.dp, end = 2.dp, bottom = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // The lamp over the selected tab, the one amber marker the rest of the
+        // chassis uses too.
+        Box(
+            Modifier
+                .padding(top = 4.dp)
+                .width(18.dp)
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (selected) colors.accent else colors.surface)
+        )
+        Spacer(Modifier.height(6.dp))
+        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(3.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            color = if (selected) colors.text else colors.textFaint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 @UnstableApi
 @Composable
 private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
     val colors = SonorusTheme.colors
-    // What the long press opened, if anything.
-    var menuFor by remember { mutableStateOf<Playlist?>(null) }
-    var renaming by remember { mutableStateOf<Playlist?>(null) }
-    var deleting by remember { mutableStateOf<Playlist?>(null) }
-    var newList by remember { mutableStateOf(false) }
-    var newFolder by remember { mutableStateOf(false) }
-    var renamingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
-    var deletingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
-
     Column(
         Modifier
             .fillMaxSize()
@@ -293,6 +410,43 @@ private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
         SidebarRow(Icons.Filled.Album, "Alben", data.stats.albums) { onGo(Routes.ALBUMS) }
         SidebarRow(Icons.Filled.Category, "Genres", data.stats.genres) { onGo(Routes.GENRES) }
 
+        PlaylistLibrary(vm, data, onGo)
+
+        SidebarLabel("System")
+        SidebarRow(Icons.Filled.BarChart, "Statistik") { onGo(Routes.STATS) }
+        SidebarRow(
+            icon = Icons.Filled.Notifications,
+            label = "Mitteilungen",
+            count = data.issues.takeIf { it > 0 },
+        ) { onGo(Routes.NOTICES) }
+        SidebarRow(Icons.Filled.Settings, "Einstellungen") { onGo(Routes.SETTINGS) }
+        SidebarRow(Icons.Filled.Person, data.user.displayName.ifEmpty { data.user.username }) {
+            onGo(Routes.PROFILE)
+        }
+    }
+}
+
+/**
+ * The ratings first, the playlists under them - the same block the drawer has
+ * always shown, now also what the "Playlists" tab opens. Both callers get their
+ * own copy of the little dialogs, which is why the state lives here and not in
+ * the shell.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@UnstableApi
+@Composable
+private fun PlaylistLibrary(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
+    val colors = SonorusTheme.colors
+    // What the long press opened, if anything.
+    var menuFor by remember { mutableStateOf<Playlist?>(null) }
+    var renaming by remember { mutableStateOf<Playlist?>(null) }
+    var deleting by remember { mutableStateOf<Playlist?>(null) }
+    var newList by remember { mutableStateOf(false) }
+    var newFolder by remember { mutableStateOf(false) }
+    var renamingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var deletingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
+
+    Column {
         SidebarLabel("Bewertungen")
         // 5 down to 1, then "Nicht bewertet" - the order the web sidebar uses.
         for (value in listOf(5, 4, 3, 2, 1, 0)) {
@@ -363,18 +517,6 @@ private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
                 color = colors.textFaint,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
-        }
-
-        SidebarLabel("System")
-        SidebarRow(Icons.Filled.BarChart, "Statistik") { onGo(Routes.STATS) }
-        SidebarRow(
-            icon = Icons.Filled.Notifications,
-            label = "Mitteilungen",
-            count = data.issues.takeIf { it > 0 },
-        ) { onGo(Routes.NOTICES) }
-        SidebarRow(Icons.Filled.Settings, "Einstellungen") { onGo(Routes.SETTINGS) }
-        SidebarRow(Icons.Filled.Person, data.user.displayName.ifEmpty { data.user.username }) {
-            onGo(Routes.PROFILE)
         }
     }
 
@@ -491,7 +633,7 @@ private fun PlaylistMenu(
     onDelete: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
-    androidx.compose.material3.ModalBottomSheet(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = colors.surface,
     ) {
