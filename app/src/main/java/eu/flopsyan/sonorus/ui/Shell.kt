@@ -239,6 +239,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     }
 
     val pending by vm.pendingAdd.collectAsState()
+    val canCreateList by vm.pendingAddCanCreate.collectAsState()
     var newListForTrack by remember { mutableStateOf(false) }
 
     pending?.let { track ->
@@ -256,6 +257,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
         } else {
             PlaylistPickerDialog(
                 tree = data.playlists,
+                allowCreate = canCreateList,
                 onDismiss = { vm.cancelAdd() },
                 onNew = { newListForTrack = true },
                 onPick = { id, name ->

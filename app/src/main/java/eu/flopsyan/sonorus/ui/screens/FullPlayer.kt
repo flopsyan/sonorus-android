@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -188,16 +189,38 @@ fun FullPlayer(
                         color = colors.textDim,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable {
-                            track.artistId?.let { onGo(Routes.artist(it)) }
-                        },
+                        // A song on a "Various" compilation names an interpret
+                        // that has no page of its own, so there the line is not
+                        // a target at all instead of a tap that does nothing.
+                        modifier = track.artistId?.let { artistId ->
+                            Modifier.clickable { onGo(Routes.artist(artistId)) }
+                        } ?: Modifier,
                     )
                     Spacer(Modifier.height(12.dp))
-                    // The full screen shows the stars again - below 760 px both
-                    // star widgets are hidden in the bar, so this is one of the
-                    // three ways to hand out a rating on a phone.
-                    Stars(track.stars, size = 30) { value ->
-                        vm.rate(track.id, value, track.stars)
+                    // The full screen shows the stars again - the bar has no
+                    // room for them, so this is one of the ways to hand out a
+                    // rating on a phone. Next to them the one other thing worth
+                    // doing with a song you are hearing: put it on a list.
+                    // Deliberately nothing beyond that - the row's own menu
+                    // carries the rest.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Stars(track.stars, size = 30) { value ->
+                            vm.rate(track.id, value, track.stars)
+                        }
+                        IconButton(
+                            onClick = { vm.askForPlaylist(track, allowCreate = false) },
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Add,
+                                "Zu Playlist hinzufügen",
+                                tint = colors.textDim,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
                     }
                 }
 

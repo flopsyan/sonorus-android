@@ -152,21 +152,25 @@ fun PlaylistPickerDialog(
     onDismiss: () -> Unit,
     onNew: () -> Unit,
     onPick: (Int, String) -> Unit,
+    /** Off where the picker is meant to be one decision, see [onNew]'s caller. */
+    allowCreate: Boolean = true,
 ) {
     val colors = SonorusTheme.colors
     SonorusDialog("Zu Playlist hinzufügen", onDismiss) {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onNew)
-                    .padding(vertical = 12.dp, horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.List, null, tint = colors.accent)
-                Text("Neue Playlist …", color = colors.accent, style = MaterialTheme.typography.bodyLarge)
+            if (allowCreate) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onNew)
+                        .padding(vertical = 12.dp, horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.List, null, tint = colors.accent)
+                    Text("Neue Playlist …", color = colors.accent, style = MaterialTheme.typography.bodyLarge)
+                }
             }
 
             for (folder in tree.folders) {

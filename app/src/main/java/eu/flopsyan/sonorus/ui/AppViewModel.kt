@@ -210,7 +210,16 @@ class AppViewModel : ViewModel() {
     private val _pendingAdd = MutableStateFlow<Track?>(null)
     val pendingAdd: StateFlow<Track?> = _pendingAdd.asStateFlow()
 
-    fun askForPlaylist(track: Track) {
+    /**
+     * Whether that picker may also create a list. The plus in the full screen
+     * player says no: that button promises one decision - which list - and an
+     * entry opening a second dialog on top of it is one step more than that.
+     */
+    private val _pendingAddCanCreate = MutableStateFlow(true)
+    val pendingAddCanCreate: StateFlow<Boolean> = _pendingAddCanCreate.asStateFlow()
+
+    fun askForPlaylist(track: Track, allowCreate: Boolean = true) {
+        _pendingAddCanCreate.value = allowCreate
         _pendingAdd.value = track
     }
 
