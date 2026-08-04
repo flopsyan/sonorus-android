@@ -9,6 +9,9 @@ Was die App gegenüber der Web-App bringt: Wiedergabe läuft im Hintergrund
 weiter, und die Benachrichtigung zeichnet Android selbst - mit Titel, Cover,
 Fortschritt und Vor/Zurück, statt dessen, was der Browser gerade gewährt.
 
+Im großen Player wird das **Cover zur Seite gewischt**, um zum nächsten oder
+vorherigen Song zu springen; nach unten gewischt schließt es den Player.
+
 ## APK bauen
 
 ```bash
