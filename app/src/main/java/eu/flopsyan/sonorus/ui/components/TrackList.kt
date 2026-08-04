@@ -54,6 +54,12 @@ data class TrackActions(
     val onGoAlbum: (Track) -> Unit = {},
     val onEdit: (Track) -> Unit = {},
     val onRemove: ((Track) -> Unit)? = null,
+    /**
+     * The rating to draw. A row is a snapshot of a response, so the stars it
+     * carries stop being true the moment one is handed out - the view model
+     * answers with what it last set instead.
+     */
+    val starsOf: (Track) -> Int = { it.stars },
 )
 
 @Composable
@@ -83,6 +89,7 @@ fun TrackList(
                 isCurrent = track.id == currentTrackId,
                 showAlbum = showAlbum,
                 showYear = showYear,
+                stars = actions.starsOf(track),
                 coverUrl = coverUrl(track),
                 modifier = Modifier.padding(horizontal = 6.dp),
                 onPlay = { actions.onPlay(index) },
@@ -157,7 +164,7 @@ fun TrackMenu(track: Track, index: Int, actions: TrackActions, onDismiss: () -> 
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 RackLabelText("Bewerten")
-                Stars(track.stars, size = 28) { value ->
+                Stars(actions.starsOf(track), size = 28) { value ->
                     actions.onRate(track, value)
                     onDismiss()
                 }

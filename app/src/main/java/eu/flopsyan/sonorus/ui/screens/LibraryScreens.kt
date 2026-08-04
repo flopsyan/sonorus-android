@@ -81,12 +81,16 @@ fun trackActions(
     onPlay = { index -> vm.player.playTracks(tracks, index, source) },
     onPlayNext = { vm.player.playNext(listOf(it)) },
     onEnqueue = { vm.player.enqueue(listOf(it)) },
-    onRate = { track, value -> vm.rate(track.id, value, track.stars) },
+    // The current rating is the one the view model knows, not the one the row
+    // was fetched with - otherwise tapping the star a song already has would
+    // fail to clear it as soon as that star was given on this phone.
+    onRate = { track, value -> vm.rate(track.id, value, vm.starsOf(track)) },
     onAddToPlaylist = { vm.askForPlaylist(it) },
     onGoArtist = { it.artistId?.let { id -> onGo(Routes.artist(id)) } },
     onGoAlbum = { it.albumId?.let { id -> onGo(Routes.album(id)) } },
     onEdit = { vm.editSingle(it) },
     onRemove = onRemove,
+    starsOf = { vm.starsOf(it) },
 )
 
 // --- Home -------------------------------------------------------------------

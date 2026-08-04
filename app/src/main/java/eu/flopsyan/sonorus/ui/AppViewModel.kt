@@ -1,5 +1,6 @@
 package eu.flopsyan.sonorus.ui
 
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
@@ -166,6 +167,25 @@ class AppViewModel : ViewModel() {
     // --- Ratings --------------------------------------------------------------
 
     /**
+     * The ratings handed out on this phone since the screens fetched their data.
+     *
+     * A [Track] is one immutable row of a server response, and nothing on a
+     * screen refetches after a rating - so without this the star the user just
+     * gave would be accepted by the server and still be drawn the old way, which
+     * looks exactly like nothing happened. Refetching the whole list instead is
+     * the wrong trade on a list of several hundred songs, and it would not help
+     * the full player at all: its track comes from the playback queue, not from
+     * a screen's load.
+     *
+     * So every place that draws a rating asks [starsOf] instead of reading the
+     * row, and the map is what makes the answer current.
+     */
+    private val ratings = mutableStateMapOf<Int, Int>()
+
+    /** The rating to draw for [track]: what this phone last set, else the row's. */
+    fun starsOf(track: Track): Int = ratings[track.id] ?: track.stars
+
+    /**
      * Clicking the rating a track already has clears it, exactly like the web
      * app. [onDone] carries the new value back so a list can redraw its row.
      */
@@ -174,6 +194,10 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             runCatching { api.rate(trackId, next) }
                 .onSuccess {
+                    // The server's answer, not `next` - it is the one that counts,
+                    // and writing it before the request would have to be undone
+                    // again when the request fails.
+                    ratings[trackId] = it.stars
                     onDone(it.stars)
                     refreshQuietly()
                 }

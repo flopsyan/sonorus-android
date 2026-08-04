@@ -39,6 +39,11 @@ import kotlinx.serialization.json.JsonNull
  *
  * Nothing is written into the music folder; the edit lives in the database and
  * sets a lock so the next scan does not put the file's version back.
+ *
+ * An album edit belongs to the **album**, not to the songs that are in it at the
+ * moment: renaming a file, retagging it or dropping a new one into the folder
+ * cannot take it back, and a song that joins later is given the same date, the
+ * same genres and the same cover.
  */
 @UnstableApi
 @Composable
@@ -49,7 +54,9 @@ fun EditAlbumDialog(vm: AppViewModel, album: Album, onDismiss: () -> Unit, onSav
     // Shown and taken exactly as precise as it is known - the album page is the
     // only place that prints the full date.
     var date by remember { mutableStateOf(Fmt.releaseDateInput(album.releaseDate)) }
-    var genres by remember { mutableStateOf("") }
+    // The album's own list once it has one, the union of its songs' before that.
+    // The server decides which, so the phone and the web app show the same thing.
+    var genres by remember { mutableStateOf(album.genres.joinToString(", ")) }
     val cover = remember { CoverChoice() }
     var busy by remember { mutableStateOf(false) }
 
@@ -65,7 +72,9 @@ fun EditAlbumDialog(vm: AppViewModel, album: Album, onDismiss: () -> Unit, onSav
                     vm.api.editAlbum(
                         id = album.id,
                         date = date.trim(),
-                        genres = genres.trim().takeIf { it.isNotEmpty() },
+                        // Sent even when empty: emptying the field is an edit of
+                        // its own, and the album keeps it that way.
+                        genres = genres.trim(),
                         cover = coverPayload(vm, cover),
                     )
                 }.onSuccess {
@@ -84,8 +93,8 @@ fun EditAlbumDialog(vm: AppViewModel, album: Album, onDismiss: () -> Unit, onSav
             DialogField("Erscheinungsdatum", date, placeholder = "17.05.2013, 05.2013 oder 2013") { date = it }
             DialogField("Genres", genres, placeholder = "Mit Komma trennen") { genres = it }
             Text(
-                "Genres werden auf alle Songs des Albums geschrieben. " +
-                    "Leer lassen ändert sie nicht.",
+                "Datum, Genres und Cover gehören zum Album und gelten für alle seine Songs - " +
+                    "auch für später hinzugefügte oder umbenannte.",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textFaint,
             )

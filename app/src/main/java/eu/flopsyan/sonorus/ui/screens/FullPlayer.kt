@@ -6,8 +6,13 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -47,9 +53,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -64,6 +73,9 @@ import eu.flopsyan.sonorus.ui.components.RackLabelText
 import eu.flopsyan.sonorus.ui.components.Stars
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import eu.flopsyan.sonorus.ui.theme.num
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /**
  * The player as a full screen, the way Spotify does it - explicitly a phone
@@ -86,6 +98,9 @@ fun FullPlayer(
     val colors = SonorusTheme.colors
     var showQueue by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
+    // How far the artwork is dragged sideways at the moment. Zero unless a wipe
+    // is running, and animated back there when it ends.
+    val swipe = remember { Animatable(0f) }
 
     Dialog(
         onDismissRequest = onClose,
@@ -157,16 +172,23 @@ fun FullPlayer(
                             .fillMaxWidth()
                             .weight(1f)
                             .pointerInput(Unit) {
-                                // A wipe down over the artwork closes it.
-                                detectVerticalDragGestures { _, drag ->
-                                    if (drag > 24) onClose()
-                                }
+                                coverGestures(
+                                    swipe = swipe,
+                                    onNext = { vm.player.next() },
+                                    onPrevious = { vm.player.previous() },
+                                    onClose = onClose,
+                                )
                             },
                         contentAlignment = Alignment.Center,
                     ) {
                         Cover(
                             vm.api.coverUrl(track.cover),
-                            Modifier.fillMaxWidth().aspectRatio(1f),
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                // The artwork follows the finger, so a wipe says
+                                // what it is about to do before it is let go.
+                                .offset { IntOffset(swipe.value.toInt(), 0) },
                             RoundedCornerShape(14.dp),
                             track.title,
                         )
@@ -207,8 +229,11 @@ fun FullPlayer(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        Stars(track.stars, size = 30) { value ->
-                            vm.rate(track.id, value, track.stars)
+                        // The queue holds the track as it was when it was added,
+                        // so its own stars go stale the moment one is given here.
+                        val stars = vm.starsOf(track)
+                        Stars(stars, size = 30) { value ->
+                            vm.rate(track.id, value, stars)
                         }
                         IconButton(
                             onClick = { vm.askForPlaylist(track, allowCreate = false) },
@@ -327,5 +352,69 @@ fun FullPlayer(
                 }
             }
         }
+    }
+}
+
+/**
+ * The gestures on the artwork: **wipe sideways for the next or the previous
+ * song**, wipe down to close - the two a phone player is expected to have.
+ *
+ * Both live in one handler on purpose. Two of them side by side would each
+ * claim the same finger, and a drag that starts a little diagonally would run
+ * both. So the first clear movement decides once what this gesture is, and the
+ * other axis is ignored for the rest of it.
+ *
+ * The artwork follows the finger through [swipe] while it is horizontal, which
+ * is what makes the gesture readable before it is let go: nothing happens until
+ * a quarter of the width is behind it, and a wipe that stops short slides back
+ * instead of skipping a song by accident.
+ */
+private suspend fun PointerInputScope.coverGestures(
+    swipe: Animatable<Float, AnimationVector1D>,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onClose: () -> Unit,
+) = coroutineScope {
+    val skipAfter = size.width / 4f
+    // Further than the slop that decides the axis, so closing stays a deliberate
+    // pull rather than something a shaky tap can do.
+    val closeAfter = viewConfiguration.touchSlop * 4
+
+    while (true) {
+        val down = awaitPointerEventScope { awaitFirstDown() }
+        // A new grab takes the artwork over from the animation that is putting it
+        // back, so a quick second wipe is not fought over.
+        swipe.stop()
+
+        var dx = 0f
+        var dy = 0f
+        var horizontal: Boolean? = null
+        var closed = false
+
+        awaitPointerEventScope {
+            drag(down.id) { change ->
+                val moved = change.positionChange()
+                dx += moved.x
+                dy += moved.y
+                if (horizontal == null && maxOf(abs(dx), abs(dy)) > viewConfiguration.touchSlop) {
+                    horizontal = abs(dx) > abs(dy)
+                }
+                if (horizontal == true) {
+                    change.consume()
+                    launch { swipe.snapTo(swipe.value + moved.x) }
+                } else if (horizontal == false && dy > closeAfter && !closed) {
+                    closed = true
+                    change.consume()
+                    onClose()
+                }
+            }
+        }
+
+        // Left is forward: the song after this one comes in from the right, the
+        // way a list moves under a finger.
+        if (horizontal == true) {
+            if (dx <= -skipAfter) onNext() else if (dx >= skipAfter) onPrevious()
+        }
+        launch { swipe.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
     }
 }

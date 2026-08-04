@@ -66,6 +66,13 @@ data class Album(
     val cover: String? = null,
     val trackCount: Int = 0,
     val duration: Double = 0.0,
+    /**
+     * The genres of the album, which is a fact about the album and not about
+     * whatever songs are in it right now - the server hands them down to every
+     * one of them, the ones the folder gains later included. Only the detail
+     * endpoint fills this; a grid row does not ask for it.
+     */
+    val genres: List<String> = emptyList(),
     val tracks: List<Track> = emptyList(),
 )
 

@@ -54,6 +54,9 @@ fun TrackRow(
     isCurrent: Boolean = false,
     showAlbum: Boolean = false,
     showYear: Boolean = false,
+    /** The rating to draw. Passed in, because a row given a star has to redraw
+     *  without its whole list being fetched again. */
+    stars: Int = track.stars,
     coverUrl: String? = null,
     onPlay: () -> Unit,
     onMenu: () -> Unit,
@@ -134,8 +137,8 @@ fun TrackRow(
                     .background(colors.dangerSoft)
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
-        } else if (track.stars > 0) {
-            Stars(track.stars, size = 12, enabled = false)
+        } else if (stars > 0) {
+            Stars(stars, size = 12, enabled = false)
         }
 
         if (showYear) {
