@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import eu.flopsyan.sonorus.data.model.Track
 import eu.flopsyan.sonorus.ui.theme.RackLabel
 import eu.flopsyan.sonorus.ui.theme.num
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
@@ -95,6 +97,68 @@ fun Cover(
 @Composable
 fun RoundCover(url: String?, modifier: Modifier = Modifier, contentDescription: String? = null) =
     Cover(url, modifier, CircleShape, contentDescription)
+
+/**
+ * The artwork of a collection that has none of its own - a playlist, a star
+ * playlist, a genre: the covers of the first four albums in it as a 2x2 mosaic.
+ * Below four it is the first cover alone, the way a genre card has always
+ * looked, and without any it falls back to [Cover]'s plate.
+ *
+ * Build the list with [albumCovers]: it counts albums and not songs, because
+ * four tracks off one record would otherwise fill all four tiles with the same
+ * picture and say nothing about what is in the list.
+ */
+@Composable
+fun CoverMosaic(
+    urls: List<String>,
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(8.dp),
+    contentDescription: String? = null,
+) {
+    if (urls.size < 4) {
+        Cover(urls.firstOrNull(), modifier, shape, contentDescription)
+        return
+    }
+    Column(
+        modifier
+            .clip(shape)
+            .background(SonorusTheme.colors.surface2)
+    ) {
+        for (row in 0 until 2) {
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+                for (col in 0 until 2) {
+                    AsyncImage(
+                        model = urls[row * 2 + col],
+                        // One description for the whole tile: four of them read
+                        // out as four pictures, and this is one piece of artwork.
+                        contentDescription = if (row == 0 && col == 0) contentDescription else null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The cover of each of the first [limit] albums in a track list, in the order
+ * the list has them. A track without artwork is skipped, a second track off an
+ * album already taken is skipped, and a single - which belongs to no album -
+ * stands for itself.
+ */
+fun albumCovers(tracks: List<Track>, limit: Int = 4): List<String> {
+    val seen = mutableSetOf<String>()
+    val covers = mutableListOf<String>()
+    for (track in tracks) {
+        val cover = track.cover
+        if (cover.isNullOrEmpty()) continue
+        if (!seen.add(track.albumId?.let { "album-$it" } ?: "track-${track.id}")) continue
+        covers += cover
+        if (covers.size == limit) break
+    }
+    return covers
+}
 
 /**
  * The rating widget. Clicking the star a track already has clears the rating,

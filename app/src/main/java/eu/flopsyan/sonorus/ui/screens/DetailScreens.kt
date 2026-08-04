@@ -32,7 +32,8 @@ import eu.flopsyan.sonorus.ui.AppViewModel
 import eu.flopsyan.sonorus.ui.Fmt
 import eu.flopsyan.sonorus.ui.LoadBox
 import eu.flopsyan.sonorus.ui.Routes
-import eu.flopsyan.sonorus.ui.components.Cover
+import eu.flopsyan.sonorus.ui.components.CoverMosaic
+import eu.flopsyan.sonorus.ui.components.albumCovers
 import eu.flopsyan.sonorus.ui.components.EmptyNote
 import eu.flopsyan.sonorus.ui.components.MediaCard
 import eu.flopsyan.sonorus.ui.components.RackLabelText
@@ -43,12 +44,20 @@ import eu.flopsyan.sonorus.ui.rememberLoad
 import eu.flopsyan.sonorus.ui.starLabel
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 
-/** The head of a detail page: artwork, title, a quiet line, and the buttons. */
+/**
+ * The head of a detail page: artwork, title, a quiet line, and the buttons.
+ * Shared by everything that is a collection you put on - an album, an artist, a
+ * playlist, a star playlist, a genre - which is why it is not private.
+ *
+ * [coverUrls] is a list rather than one picture: a collection without artwork of
+ * its own shows the covers of the first four albums in it (see [CoverMosaic]),
+ * and everything with one simply passes a list of one.
+ */
 @Composable
-private fun DetailHead(
+fun DetailHead(
     title: String,
     subtitle: String,
-    coverUrl: String?,
+    coverUrls: List<String>,
     round: Boolean = false,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
@@ -60,8 +69,8 @@ private fun DetailHead(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Cover(
-                coverUrl,
+            CoverMosaic(
+                coverUrls,
                 Modifier.size(112.dp),
                 if (round) CircleShape else RoundedCornerShape(10.dp),
                 title,
@@ -129,7 +138,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.plural(album.trackCount, "Song", "Songs"),
                         Fmt.durationLong(album.duration),
                     ).joinToString(" · "),
-                    coverUrl = vm.api.coverUrl(album.cover),
+                    coverUrls = listOfNotNull(vm.api.coverUrl(album.cover)),
                     onPlay = { vm.player.playTracks(tracks, 0, "Album: ${album.title}") },
                     onShuffle = {
                         vm.player.setShuffle(true)
@@ -177,7 +186,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                             Fmt.plural(artist.albums.size, "Album", "Alben"),
                             Fmt.plural(tracks.size, "Song", "Songs"),
                         ).joinToString(" · "),
-                        coverUrl = vm.api.coverUrl(artist.cover),
+                        coverUrls = listOfNotNull(vm.api.coverUrl(artist.cover)),
                         round = true,
                         onPlay = { vm.player.playTracks(tracks, 0, artist.name) },
                         onShuffle = {
@@ -255,7 +264,7 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                 DetailHead(
                     title = "Singles",
                     subtitle = "${data.artist.name} · ${Fmt.plural(singles.size, "Song", "Songs")}",
-                    coverUrl = vm.api.coverUrl(singles.firstNotNullOfOrNull { it.cover }),
+                    coverUrls = albumCovers(singles).mapNotNull { vm.api.coverUrl(it) },
                     onPlay = { vm.player.playTracks(singles, 0, "Singles") },
                     onShuffle = {
                         vm.player.setShuffle(true)
@@ -292,12 +301,21 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
             actions = trackActions(vm, filtered, data.artist.name, onGo),
             showAlbum = true,
             header = {
+                val label = values.sortedDescending().joinToString(", ") { starLabel(it) }
                 Column {
-                    Text(
-                        data.artist.name,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = SonorusTheme.colors.text,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    DetailHead(
+                        title = label,
+                        subtitle = listOf(
+                            data.artist.name,
+                            Fmt.plural(filtered.size, "Song", "Songs"),
+                            Fmt.durationLong(filtered.sumOf { it.duration }),
+                        ).joinToString(" · "),
+                        coverUrls = albumCovers(filtered).mapNotNull { vm.api.coverUrl(it) },
+                        onPlay = { vm.player.playTracks(filtered, 0, label) },
+                        onShuffle = {
+                            vm.player.setShuffle(true)
+                            vm.player.playTracks(filtered, 0, label)
+                        },
                     )
                     PickerRow(
                         items = ratings.map { it to starLabel(it) },
@@ -338,11 +356,15 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
             header = {
                 DetailHead(
                     title = data.playlist.name,
+                    // Counted from the tracks, not from `playlist.trackCount`:
+                    // GET /api/playlists/:id answers { playlist, tracks } and
+                    // carries neither count, so the head used to read
+                    // "0 Songs - 0 Sek." over a list that was plainly not empty.
                     subtitle = listOf(
-                        Fmt.plural(data.playlist.trackCount, "Song", "Songs"),
-                        Fmt.durationLong(data.playlist.duration),
+                        Fmt.plural(tracks.size, "Song", "Songs"),
+                        Fmt.durationLong(tracks.sumOf { it.duration }),
                     ).joinToString(" · "),
-                    coverUrl = vm.api.coverUrl(tracks.firstNotNullOfOrNull { it.cover }),
+                    coverUrls = albumCovers(tracks).mapNotNull { vm.api.coverUrl(it) },
                     onPlay = { vm.player.playTracks(tracks, 0, data.playlist.name) },
                     onShuffle = {
                         vm.player.setShuffle(true)

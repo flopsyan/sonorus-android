@@ -54,6 +54,7 @@ import eu.flopsyan.sonorus.ui.Fmt
 import eu.flopsyan.sonorus.ui.LoadBox
 import eu.flopsyan.sonorus.ui.Routes
 import eu.flopsyan.sonorus.ui.components.Chip
+import eu.flopsyan.sonorus.ui.components.albumCovers
 import eu.flopsyan.sonorus.ui.components.EmptyNote
 import eu.flopsyan.sonorus.ui.components.Loading
 import eu.flopsyan.sonorus.ui.components.MediaCard
@@ -378,11 +379,20 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
             showAlbum = true,
             header = {
                 Column {
-                    Text(
-                        data.genre.name,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = SonorusTheme.colors.text,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    // The same head an album gets: a genre is a collection you
+                    // put on, so it is introduced like one.
+                    DetailHead(
+                        title = data.genre.name,
+                        subtitle = listOf(
+                            Fmt.plural(data.genre.tracks.size, "Song", "Songs"),
+                            Fmt.durationLong(data.genre.tracks.sumOf { it.duration }),
+                        ).joinToString(" · "),
+                        coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.api.coverUrl(it) },
+                        onPlay = { vm.player.playTracks(data.genre.tracks, 0, data.genre.name) },
+                        onShuffle = {
+                            vm.player.setShuffle(true)
+                            vm.player.playTracks(data.genre.tracks, 0, data.genre.name)
+                        },
                     )
                     all.value?.genres?.let { genres ->
                         PickerRow(
@@ -441,11 +451,21 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
             showAlbum = true,
             header = {
                 Column {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = SonorusTheme.colors.text,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    // A star playlist is a playlist, so it is introduced like
+                    // one: the covers of the first four albums in it next to
+                    // what the selection adds up to.
+                    DetailHead(
+                        title = title,
+                        subtitle = listOf(
+                            Fmt.plural(data.tracks.size, "Song", "Songs"),
+                            Fmt.durationLong(data.tracks.sumOf { it.duration }),
+                        ).joinToString(" · "),
+                        coverUrls = albumCovers(data.tracks).mapNotNull { vm.api.coverUrl(it) },
+                        onPlay = { vm.player.playTracks(data.tracks, 0, title) },
+                        onShuffle = {
+                            vm.player.setShuffle(true)
+                            vm.player.playTracks(data.tracks, 0, title)
+                        },
                     )
                     PickerRow(
                         items = listOf(5, 4, 3, 2, 1, 0).map { it to starLabel(it) },
