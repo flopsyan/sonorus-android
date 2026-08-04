@@ -352,7 +352,9 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 MediaCard(
                     title = genre.name,
                     subtitle = Fmt.plural(genre.trackCount, "Song", "Songs"),
-                    coverUrl = vm.api.coverUrl(genre.cover),
+                    // The same artwork the genre's own page carries, so the grid
+                    // and the page it leads to introduce it the same way.
+                    coverUrls = genre.covers.mapNotNull { vm.api.coverUrl(it) },
                 ) { onGo(Routes.genre(listOf(genre.id))) }
             }
         }
@@ -396,7 +398,14 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                     )
                     all.value?.genres?.let { genres ->
                         PickerRow(
-                            items = genres.map { it.id to it.name },
+                            // The switches that are on come first: a library of a
+                            // hundred genres makes a row that scrolls a long way,
+                            // and a switch you cannot see is one you cannot turn
+                            // off again. `sortedBy` is stable, so both halves keep
+                            // the alphabetical order the server sends.
+                            items = genres
+                                .sortedBy { it.id !in data.genre.ids }
+                                .map { it.id to it.name },
                             selected = data.genre.ids,
                             onPick = { onGo(Routes.genre(it)) },
                         )

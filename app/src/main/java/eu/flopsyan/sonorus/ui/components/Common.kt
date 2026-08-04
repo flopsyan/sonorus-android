@@ -347,13 +347,20 @@ fun Progress(done: Int, total: Int, indeterminate: Boolean, modifier: Modifier =
     }
 }
 
-/** A card in a grid: square artwork, title, one quiet line under it. */
+/**
+ * A card in a grid: square artwork, title, one quiet line under it.
+ *
+ * [coverUrls] is the collection case - a card for something that has no artwork
+ * of its own carries the covers of what is in it, the same mosaic as the page it
+ * leads to. Everything with one cover of its own passes [coverUrl] instead.
+ */
 @Composable
 fun MediaCard(
     title: String,
     subtitle: String,
-    coverUrl: String?,
+    coverUrl: String? = null,
     modifier: Modifier = Modifier,
+    coverUrls: List<String> = emptyList(),
     round: Boolean = false,
     onClick: () -> Unit,
 ) {
@@ -364,8 +371,8 @@ fun MediaCard(
             .clickable(onClick = onClick)
             .padding(8.dp),
     ) {
-        Cover(
-            coverUrl,
+        CoverMosaic(
+            coverUrls.ifEmpty { listOfNotNull(coverUrl) },
             Modifier.fillMaxWidth().aspectRatio(1f),
             shape = if (round) CircleShape else RoundedCornerShape(8.dp),
             contentDescription = title,

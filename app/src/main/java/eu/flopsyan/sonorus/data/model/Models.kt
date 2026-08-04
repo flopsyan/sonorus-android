@@ -95,6 +95,12 @@ data class Artist(
 data class Genre(
     val id: Int,
     val name: String = "",
+    /**
+     * The covers of the first four records in the genre, for the mosaic on its
+     * card. `cover` is the first of them and is only still read so a phone whose
+     * APK is older than the server it talks to keeps its artwork.
+     */
+    val covers: List<String> = emptyList(),
     val cover: String? = null,
     val trackCount: Int = 0,
 )
