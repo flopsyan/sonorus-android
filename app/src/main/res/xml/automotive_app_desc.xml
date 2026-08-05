@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What Android Auto is told the app is for. Without this file (and the
+  com.google.android.gms.car.application meta-data pointing at it) the car never
+  offers Sonorus at all, however complete the media session behind it is.
+-->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

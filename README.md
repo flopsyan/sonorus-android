@@ -12,6 +12,18 @@ Fortschritt und Vor/Zurück, statt dessen, was der Browser gerade gewährt.
 Im großen Player wird das **Cover zur Seite gewischt**, um zum nächsten oder
 vorherigen Song zu springen; nach unten gewischt schließt es den Player.
 
+## Android Auto
+
+Im Auto steht Sonorus unter den Medien-Apps und lässt sich dort durchblättern:
+Zufallsmix, Zuletzt gehört, Playlists, Bewertungen, Interpreten, Alben, Genres
+und Alle Songs. Ein Tippen auf einen Song spielt **die Liste**, in der er steht,
+ab genau dieser Stelle - dasselbe, was ein Tippen am Handy tut. Die Sprachsuche
+("Spiele …") sucht über Titel, Interpret und Album zugleich.
+
+Das Auto steuert denselben Player wie das Handy: eine Fahrt zählt ganz normal in
+die Statistik, und die Warteschlange ist danach am Handy dieselbe. Heruntergeladene
+Songs spielt es von der Platte, und ohne Netz zeigt es genau diese Downloads.
+
 ## Downloads und Offline-Betrieb
 
 Songs, Alben, Playlists, Genres und Bewertungslisten lassen sich auf das Gerät

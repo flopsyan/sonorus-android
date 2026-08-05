@@ -23,6 +23,12 @@
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.Sonorus">
 
+        <!-- Declares Sonorus to Android Auto as a media app. Without this the
+             car never lists it, whatever the session behind it can do. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -35,14 +41,21 @@
             </intent-filter>
         </activity>
 
-        <!-- The MediaSessionService is what gives us a real system notification
-             and playback that survives the app going to the background. -->
+        <!-- The MediaLibraryService is what gives us a real system notification
+             and playback that survives the app going to the background - and,
+             because it is a library and not just a session, a browsable library
+             for Android Auto. The second action is the one the car looks for:
+             it connects as a plain MediaBrowser, which media3 answers from the
+             same session. The app's own MediaController finds the service by
+             the first (SessionToken checks MediaLibraryService before the
+             rest), so nothing about the phone changes. -->
         <service
             android:name=".player.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 

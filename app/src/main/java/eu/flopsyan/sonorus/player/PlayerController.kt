@@ -205,15 +205,35 @@ class PlayerController(
     /** A missing file has no business in the queue - it cannot be played. */
     private fun playable(tracks: List<Track>) = tracks.filter { !it.missing }
 
+    /** A queue in the order playback will follow, and where it starts. */
+    data class Queued(val tracks: List<Track>, val startIndex: Int)
+
     /**
      * Plays a list from [startIndex]. The index is remapped onto the filtered
      * list, or clicking row 5 of a list with a missing row 2 would start the
      * wrong song.
      */
     fun playTracks(tracks: List<Track>, startIndex: Int = 0, source: String = "") {
+        val queued = adoptQueue(tracks, startIndex, source)
+        if (queued.tracks.isEmpty()) return
+        pushPlaylist(queued.tracks, queued.startIndex, 0)
+        exoPlayer.playWhenReady = true
+    }
+
+    /**
+     * The same queue, but for a caller that hands the songs to ExoPlayer itself:
+     * Android Auto, where the session sets the playlist the moment a row is
+     * tapped. Only the app's own view of the queue is written here - pushing the
+     * playlist as well would build it twice and prepare the player twice.
+     *
+     * The order it returns is the one that must be handed over: shuffle is a
+     * rewritten order in this app, not a mode of ExoPlayer's, and the car has to
+     * play the same order the phone would.
+     */
+    fun adoptQueue(tracks: List<Track>, startIndex: Int = 0, source: String = ""): Queued {
         val wanted = tracks.getOrNull(startIndex)
         val list = playable(tracks)
-        if (list.isEmpty()) return
+        if (list.isEmpty()) return Queued(emptyList(), 0)
         val start = wanted?.let { w -> list.indexOfFirst { it.id == w.id }.takeIf { it >= 0 } } ?: 0
 
         history.clear()
@@ -229,9 +249,8 @@ class PlayerController(
 
         _state.value = _state.value.copy(queue = list, order = order, pos = pos, source = source)
         resetListening()
-        pushPlaylist(order.map { list[it] }, pos, 0)
-        exoPlayer.playWhenReady = true
         startTicker()
+        return Queued(order.map { list[it] }, pos)
     }
 
     fun enqueue(tracks: List<Track>) {
@@ -450,7 +469,7 @@ class PlayerController(
      * is no network. That is what makes a download worth having on a mobile
      * connection: the same song, and not a byte of data for it.
      */
-    private fun mediaItem(track: Track): MediaItem {
+    fun mediaItem(track: Track): MediaItem {
         val local = library.store.fileOf(track.id)
         return MediaItem.Builder()
             .setUri(local?.let { Uri.fromFile(it) } ?: api.streamUrl(track.id).toUri())
