@@ -22,8 +22,8 @@ android {
         applicationId = "eu.flopsyan.sonorus"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
     }
 
     signingConfigs {
@@ -100,4 +100,9 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+
+    // The offline library and the download index are deliberately free of
+    // Android, so both can be tested on a plain JVM - which is the only way to
+    // test them at all without a device in a plane.
+    testImplementation(libs.junit)
 }
