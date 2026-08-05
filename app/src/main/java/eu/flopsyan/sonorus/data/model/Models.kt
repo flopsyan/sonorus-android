@@ -322,6 +322,8 @@ data class StarsResponse(
 @Serializable
 data class HomeResponse(
     val stats: LibraryStats = LibraryStats(),
+    /** How many songs still have no star. Zero means there is nothing to rate. */
+    val unrated: Int = 0,
     val newestAlbums: List<Album> = emptyList(),
     val recentlyAdded: List<Track> = emptyList(),
     val recentlyPlayed: List<Track> = emptyList(),

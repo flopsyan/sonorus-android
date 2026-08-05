@@ -239,8 +239,12 @@ class SonorusApi(private val session: Session) {
 
     suspend fun home(): HomeResponse = get("/api/home")
 
-    suspend fun shuffle(limit: Int = 60): ShuffleResponse =
-        get("/api/shuffle", mapOf("limit" to limit.toString()))
+    /** `unrated` narrows the random run to what has no star yet. */
+    suspend fun shuffle(limit: Int = 60, unrated: Boolean = false): ShuffleResponse =
+        get(
+            "/api/shuffle",
+            mapOf("limit" to limit.toString(), "unrated" to if (unrated) "1" else null),
+        )
 
     suspend fun search(q: String): SearchResponse = get("/api/search", mapOf("q" to q))
 

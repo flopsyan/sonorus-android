@@ -206,11 +206,24 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    /** Starts a random run through the library, like the button on the home page. */
-    fun shufflePlay() {
+    /**
+     * Starts a random run through the library, like the button on the home page.
+     *
+     * With [unrated] it draws only from what has no star yet, which is the other
+     * thing a random run is for: rating a library is a job done by ear, and
+     * picking the next unrated song out of a list of a few thousand by hand is
+     * the part that makes it stop happening.
+     */
+    fun shufflePlay(unrated: Boolean = false) {
         viewModelScope.launch {
-            runCatching { api.shuffle(60) }
-                .onSuccess { player.playTracks(it.tracks, 0, "Zufall") }
+            runCatching { api.shuffle(60, unrated) }
+                .onSuccess {
+                    if (it.tracks.isEmpty()) {
+                        say(if (unrated) "Alles ist bewertet." else "Hier gibt es nichts zum Abspielen.")
+                    } else {
+                        player.playTracks(it.tracks, 0, if (unrated) "Unbewertete" else "Zufall")
+                    }
+                }
                 .onFailure { say(message(it), true) }
         }
     }

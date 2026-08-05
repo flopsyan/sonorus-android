@@ -110,6 +110,15 @@ fun HomeScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     SonorusButton("Zufällig abspielen", primary = true, modifier = Modifier.weight(1f)) {
                         vm.shufflePlay()
                     }
+                    // The other reason to start a random run: rating a library
+                    // is done by ear, and picking the next unrated song out of
+                    // a list of a few thousand by hand is what makes it stop
+                    // happening. Only offered while there is anything left.
+                    if (data.unrated > 0) {
+                        SonorusButton("Unbewertete", modifier = Modifier.weight(1f)) {
+                            vm.shufflePlay(unrated = true)
+                        }
+                    }
                 }
             }
             if (data.recentlyPlayed.isNotEmpty()) {
