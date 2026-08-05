@@ -15,6 +15,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -38,6 +41,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import eu.flopsyan.sonorus.data.download.DownloadStatus
 import eu.flopsyan.sonorus.data.model.Track
 import eu.flopsyan.sonorus.ui.Fmt
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
@@ -60,6 +64,11 @@ data class TrackActions(
      * answers with what it last set instead.
      */
     val starsOf: (Track) -> Int = { it.stars },
+    /** What this phone has of the song - the same reasoning as [starsOf]. */
+    val statusOf: (Track) -> DownloadStatus = { DownloadStatus.NONE },
+    val onDownload: (Track) -> Unit = {},
+    val onCancelDownload: (Track) -> Unit = {},
+    val onRemoveDownload: (Track) -> Unit = {},
 )
 
 @Composable
@@ -90,6 +99,7 @@ fun TrackList(
                 showAlbum = showAlbum,
                 showYear = showYear,
                 stars = actions.starsOf(track),
+                downloaded = actions.statusOf(track) == DownloadStatus.DONE,
                 coverUrl = coverUrl(track),
                 modifier = Modifier.padding(horizontal = 6.dp),
                 onPlay = { actions.onPlay(index) },
@@ -183,6 +193,27 @@ fun TrackMenu(track: Track, index: Int, actions: TrackActions, onDismiss: () -> 
             }
             MenuItem(Icons.AutoMirrored.Filled.PlaylistAdd, "Zu Playlist hinzufügen") {
                 onDismiss(); actions.onAddToPlaylist(track)
+            }
+            // A missing file has nothing to download, and the label says what
+            // tapping does right now rather than what the feature is called.
+            if (!track.missing) {
+                when (actions.statusOf(track)) {
+                    DownloadStatus.DONE -> MenuItem(Icons.Filled.DownloadDone, "Download entfernen") {
+                        onDismiss(); actions.onRemoveDownload(track)
+                    }
+                    DownloadStatus.RUNNING -> MenuItem(Icons.Filled.Close, "Download abbrechen") {
+                        onDismiss(); actions.onCancelDownload(track)
+                    }
+                    DownloadStatus.QUEUED -> MenuItem(Icons.Filled.Close, "Aus der Warteschlange nehmen") {
+                        onDismiss(); actions.onCancelDownload(track)
+                    }
+                    DownloadStatus.FAILED -> MenuItem(Icons.Filled.Download, "Download erneut versuchen") {
+                        onDismiss(); actions.onDownload(track)
+                    }
+                    DownloadStatus.NONE -> MenuItem(Icons.Filled.Download, "Herunterladen") {
+                        onDismiss(); actions.onDownload(track)
+                    }
+                }
             }
             if (track.artistId != null) {
                 MenuItem(Icons.Filled.Person, "Zum Interpreten") {

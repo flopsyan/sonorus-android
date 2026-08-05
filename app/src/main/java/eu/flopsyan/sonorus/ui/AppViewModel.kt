@@ -6,9 +6,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import eu.flopsyan.sonorus.SonorusApp
 import eu.flopsyan.sonorus.data.ApiException
+import eu.flopsyan.sonorus.data.Library
 import eu.flopsyan.sonorus.data.SonorusApi
+import eu.flopsyan.sonorus.data.download.Downloads
 import eu.flopsyan.sonorus.data.model.Bootstrap
 import eu.flopsyan.sonorus.data.model.Lyrics
+import eu.flopsyan.sonorus.data.model.Playlist
 import eu.flopsyan.sonorus.data.model.Prefs
 import eu.flopsyan.sonorus.data.model.SortPref
 import eu.flopsyan.sonorus.data.model.Track
@@ -18,6 +21,7 @@ import eu.flopsyan.sonorus.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -40,6 +44,19 @@ class AppViewModel : ViewModel() {
     val api: SonorusApi get() = app.api
     val player: PlayerController get() = app.player
 
+    /**
+     * Where the screens get their data. Not [api] directly: offline the same
+     * answers come out of the downloads, and no screen has to know which.
+     */
+    val lib: Library get() = app.library
+    val downloads: Downloads get() = app.downloads
+
+    /** True while the app is working out of its downloads. */
+    val offline: StateFlow<Boolean> get() = lib.offline
+
+    /** Artwork, from this phone when it is here and from the server otherwise. */
+    fun coverUrl(path: String?): String? = lib.coverUrl(path)
+
     private val json = Json { ignoreUnknownKeys = true }
 
     private val _phase = MutableStateFlow<AppPhase>(AppPhase.Starting)
@@ -59,24 +76,65 @@ class AppViewModel : ViewModel() {
         // A finished play changes the star playlists and the home page, so the
         // shell reloads what it shows in the sidebar.
         player.onPlayCounted = { refreshQuietly() }
+        // A phone that finds a network again picks the server back up by itself.
+        // `drop(1)` skips the value the flow already holds - the start above has
+        // just acted on it.
+        viewModelScope.launch {
+            lib.online.drop(1).collect { online ->
+                if (online && !lib.manualOffline.value) {
+                    lib.markReachable()
+                    start()
+                }
+            }
+        }
     }
 
+    /**
+     * Brings the app up.
+     *
+     * The order matters and is the point of the whole feature: **a phone with no
+     * network never makes a request.** It reads the downloads and is on the
+     * library, rather than sitting in a connect timeout and then offering a
+     * login form for a server that is not there. A server that is merely
+     * unreachable is the same case; only a genuine auth failure sends the user
+     * back to the form, because that is the only one a login can fix.
+     */
     fun start() {
         viewModelScope.launch {
             if (!app.session.isConfigured) {
                 _phase.value = AppPhase.NeedsLogin()
                 return@launch
             }
-            _phase.value = AppPhase.Starting
-            runCatching { api.bootstrap() }
-                .onSuccess { applyBootstrap(it) }
+            if (lib.offline.value) {
+                if (lib.hasSnapshot) {
+                    applyBootstrap(lib.bootstrap())
+                } else {
+                    _phase.value = AppPhase.NeedsLogin(
+                        "Keine Verbindung - und es ist noch nichts heruntergeladen."
+                    )
+                }
+                return@launch
+            }
+            // Only a cold start shows the spinner. Coming back from offline the
+            // shell is already up and playing, and tearing it down for a moment
+            // would throw the navigation away and blink the player bar.
+            if (_phase.value !is AppPhase.Ready) _phase.value = AppPhase.Starting
+            runCatching { lib.bootstrap() }
+                .onSuccess {
+                    lib.markReachable()
+                    applyBootstrap(it)
+                }
                 .onFailure { error ->
-                    // Only a genuine auth failure sends the user back to the
-                    // login form; a server that is merely unreachable would
-                    // otherwise look like wrong credentials.
                     val code = (error as? ApiException)?.code
-                    if (code == "auth_required" || code == "bad_login") {
-                        _phase.value = AppPhase.NeedsLogin(message(error))
+                    val auth = code == "auth_required" || code == "bad_login"
+                    if (!auth && lib.hasSnapshot) {
+                        // `markUnreachable` is what makes the next line read the
+                        // downloads instead of the server, and it has to have
+                        // taken effect before it runs - see [Library.offline].
+                        lib.markUnreachable()
+                        runCatching { applyBootstrap(lib.bootstrap()) }
+                            .onSuccess { say("Server nicht erreichbar - du hörst deine Downloads.") }
+                            .onFailure { _phase.value = AppPhase.NeedsLogin(message(error)) }
                     } else {
                         _phase.value = AppPhase.NeedsLogin(message(error))
                     }
@@ -88,7 +146,12 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             runCatching {
                 api.login(server, user, pass)
-                api.bootstrap()
+                lib.markReachable()
+                // Through the library, not the API: this is the answer that gets
+                // stored for the first offline start, and a phone that logged in
+                // and then lost the network would otherwise have nothing at all
+                // to fall back on.
+                lib.bootstrap()
             }.onSuccess {
                 applyBootstrap(it)
                 onDone(true)
@@ -120,8 +183,70 @@ class AppViewModel : ViewModel() {
     /** Reloads the sidebar numbers without flipping the screen to a spinner. */
     fun refreshQuietly() {
         viewModelScope.launch {
-            runCatching { api.bootstrap() }.onSuccess { _phase.value = AppPhase.Ready(it) }
+            runCatching { lib.bootstrap() }.onSuccess { _phase.value = AppPhase.Ready(it) }
         }
+    }
+
+    /**
+     * Says no to everything that would have to reach the server, and says why.
+     * Every write goes through here: a rating handed out in a plane cannot be
+     * kept, and a screen that pretends otherwise is worse than one that does not
+     * take it.
+     */
+    private fun needsServer(): Boolean {
+        if (!lib.offline.value) return false
+        say("Offline - das geht erst wieder mit Verbindung.", true)
+        return true
+    }
+
+    // --- Downloads ------------------------------------------------------------
+
+    /**
+     * Puts songs on this phone. Anything already here is skipped rather than
+     * fetched twice, and a missing file is never queued - it cannot be played
+     * online either.
+     */
+    fun download(tracks: List<Track>) {
+        if (needsServer()) return
+        val fresh = tracks.filter { !it.missing && !downloads.store.isDownloaded(it.id) }
+        if (fresh.isEmpty()) {
+            say("Ist schon heruntergeladen.")
+            return
+        }
+        downloads.add(fresh)
+        say(
+            when {
+                !downloads.allowedNow -> "In die Warteschlange - es wartet auf WLAN."
+                fresh.size == 1 -> "Wird heruntergeladen."
+                else -> "${fresh.size} Songs werden heruntergeladen."
+            }
+        )
+    }
+
+    /** A playlist keeps its order, which nothing in a track could say. */
+    fun downloadPlaylist(playlist: Playlist, tracks: List<Track>) {
+        if (needsServer()) return
+        downloads.addPlaylist(playlist, tracks.filter { !it.missing })
+        say("\"${playlist.name}\" wird heruntergeladen.")
+    }
+
+    fun removeDownloads(tracks: List<Track>) {
+        downloads.removeAll(tracks.map { it.id })
+        say(if (tracks.size == 1) "Download entfernt." else "${tracks.size} Downloads entfernt.")
+    }
+
+    fun clearDownloads() {
+        downloads.clear()
+        say("Alle Downloads entfernt.")
+    }
+
+    /**
+     * The user's own offline switch. Turning it off is also the way back after
+     * the app fell offline by itself, so it re-reads the library either way.
+     */
+    fun setOfflineMode(on: Boolean) {
+        lib.setManualOffline(on)
+        start()
     }
 
     // --- Preferences ----------------------------------------------------------
@@ -191,6 +316,7 @@ class AppViewModel : ViewModel() {
      * app. [onDone] carries the new value back so a list can redraw its row.
      */
     fun rate(trackId: Int, stars: Int, current: Int, onDone: (Int) -> Unit = {}) {
+        if (needsServer()) return
         val next = if (current == stars) 0 else stars
         viewModelScope.launch {
             runCatching { api.rate(trackId, next) }
@@ -216,7 +342,7 @@ class AppViewModel : ViewModel() {
      */
     fun shufflePlay(unrated: Boolean = false) {
         viewModelScope.launch {
-            runCatching { api.shuffle(60, unrated) }
+            runCatching { lib.shuffle(60, unrated) }
                 .onSuccess {
                     if (it.tracks.isEmpty()) {
                         say(if (unrated) "Alles ist bewertet." else "Hier gibt es nichts zum Abspielen.")
@@ -230,6 +356,7 @@ class AppViewModel : ViewModel() {
 
     /** Adds a track to a playlist and refreshes the sidebar counts. */
     fun addToPlaylist(playlistId: Int, trackId: Int, playlistName: String) {
+        if (needsServer()) return
         viewModelScope.launch {
             runCatching { api.addToPlaylist(playlistId, listOf(trackId)) }
                 .onSuccess {
@@ -265,7 +392,7 @@ class AppViewModel : ViewModel() {
         val id = track?.id ?: return
         if (!track.hasLyrics) return
         viewModelScope.launch {
-            runCatching { api.lyrics(id) }
+            runCatching { lib.lyrics(id) }
                 // A track change while the answer was on its way must not land
                 // on the song that is playing now.
                 .onSuccess { if (lyricsFor == id) _lyrics.value = it.lyrics }
@@ -289,6 +416,7 @@ class AppViewModel : ViewModel() {
     val pendingAddCanCreate: StateFlow<Boolean> = _pendingAddCanCreate.asStateFlow()
 
     fun askForPlaylist(track: Track, allowCreate: Boolean = true) {
+        if (needsServer()) return
         _pendingAddCanCreate.value = allowCreate
         _pendingAdd.value = track
     }
@@ -298,6 +426,7 @@ class AppViewModel : ViewModel() {
     val editingSingle: StateFlow<Track?> = _editingSingle.asStateFlow()
 
     fun editSingle(track: Track) {
+        if (needsServer()) return
         _editingSingle.value = track
     }
 
@@ -310,6 +439,7 @@ class AppViewModel : ViewModel() {
     }
 
     private fun withTree(onDone: () -> Unit = {}, block: suspend () -> TreeResponse) {
+        if (needsServer()) return
         viewModelScope.launch {
             runCatching { block() }
                 .onSuccess { answer ->
@@ -330,6 +460,7 @@ class AppViewModel : ViewModel() {
      * flow where a new list is never wanted empty.
      */
     fun createPlaylistWithTrack(name: String, track: Track) {
+        if (needsServer()) return
         viewModelScope.launch {
             runCatching {
                 val created = api.createPlaylist(name, null)
@@ -366,6 +497,7 @@ class AppViewModel : ViewModel() {
     fun movePlaylist(id: Int, folderId: Int?) = withTree { api.movePlaylist(id, folderId) }
 
     fun removeFromPlaylist(playlistId: Int, itemId: Int, onDone: () -> Unit) {
+        if (needsServer()) return
         viewModelScope.launch {
             runCatching { api.removeFromPlaylist(playlistId, itemId) }
                 .onSuccess {

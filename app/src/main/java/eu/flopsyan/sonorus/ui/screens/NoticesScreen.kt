@@ -41,6 +41,8 @@ import eu.flopsyan.sonorus.ui.components.SonorusButton
 import eu.flopsyan.sonorus.ui.rememberLoad
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import kotlinx.coroutines.launch
+import eu.flopsyan.sonorus.ui.components.ServerOnlyNote
+import eu.flopsyan.sonorus.ui.LocalOffline
 
 /**
  * The import notices.
@@ -54,6 +56,7 @@ import kotlinx.coroutines.launch
 @UnstableApi
 @Composable
 fun NoticesScreen(vm: AppViewModel) {
+    if (LocalOffline.current) return ServerOnlyNote("Die Mitteilungen")
     val colors = SonorusTheme.colors
     val scope = rememberCoroutineScope()
     var issues by remember { mutableStateOf<List<ImportIssue>?>(null) }

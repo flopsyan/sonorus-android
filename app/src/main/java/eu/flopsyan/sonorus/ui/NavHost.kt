@@ -14,6 +14,7 @@ import eu.flopsyan.sonorus.ui.screens.ArtistScreen
 import eu.flopsyan.sonorus.ui.screens.ArtistSinglesScreen
 import eu.flopsyan.sonorus.ui.screens.ArtistStarsScreen
 import eu.flopsyan.sonorus.ui.screens.ArtistsScreen
+import eu.flopsyan.sonorus.ui.screens.DownloadsScreen
 import eu.flopsyan.sonorus.ui.screens.GenreScreen
 import eu.flopsyan.sonorus.ui.screens.GenresScreen
 import eu.flopsyan.sonorus.ui.screens.HomeScreen
@@ -42,6 +43,7 @@ fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
         composable(Routes.ALBUMS) { AlbumsScreen(vm, go) }
         composable(Routes.GENRES) { GenresScreen(vm, go) }
         composable(Routes.SEARCH) { SearchScreen(vm, go) }
+        composable(Routes.DOWNLOADS) { DownloadsScreen(vm, go) }
         composable(Routes.SETTINGS) { SettingsScreen(vm, go) }
         composable(Routes.NOTICES) { NoticesScreen(vm) }
         composable(Routes.ACCOUNTS) { AccountsScreen(vm) }

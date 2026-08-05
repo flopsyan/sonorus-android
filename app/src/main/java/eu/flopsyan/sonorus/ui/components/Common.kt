@@ -263,6 +263,15 @@ fun EmptyNote(text: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * What a page that lives entirely on the server says while there is none.
+ * Statistics, notices and accounts have nothing downloadable in them - there is
+ * no shorter version of them to show, only an honest sentence.
+ */
+@Composable
+fun ServerOnlyNote(what: String, modifier: Modifier = Modifier) =
+    EmptyNote("$what gibt es nur mit Verbindung zum Server.", modifier)
+
 @Composable
 fun SonorusButton(
     text: String,

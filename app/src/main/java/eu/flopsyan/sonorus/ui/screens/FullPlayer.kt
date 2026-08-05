@@ -215,7 +215,7 @@ fun FullPlayer(
                         contentAlignment = Alignment.Center,
                     ) {
                         Cover(
-                            vm.api.coverUrl(track.cover),
+                            vm.coverUrl(track.cover),
                             Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)

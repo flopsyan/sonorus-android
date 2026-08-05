@@ -100,7 +100,7 @@ fun EditAlbumDialog(vm: AppViewModel, album: Album, onDismiss: () -> Unit, onSav
             )
             CoverField(
                 choice = cover,
-                currentUrl = vm.api.coverUrl(album.cover),
+                currentUrl = vm.coverUrl(album.cover),
                 onPicked = { uri ->
                     scope.launch {
                         cover.source = CoverImage.load(context, uri)
@@ -169,7 +169,7 @@ fun EditSingleDialog(vm: AppViewModel, track: Track, onDismiss: () -> Unit, onSa
             DialogField("Genres", genres, placeholder = "Mit Komma trennen") { genres = it }
             CoverField(
                 choice = cover,
-                currentUrl = vm.api.coverUrl(track.cover),
+                currentUrl = vm.coverUrl(track.cover),
                 onPicked = { uri ->
                     scope.launch {
                         cover.source = CoverImage.load(context, uri)
@@ -228,7 +228,7 @@ fun EditArtistDialog(
     ) {
         CoverField(
             choice = cover,
-            currentUrl = vm.api.coverUrl(currentCover),
+            currentUrl = vm.coverUrl(currentCover),
             onPicked = { uri ->
                 scope.launch {
                     cover.source = CoverImage.load(context, uri)

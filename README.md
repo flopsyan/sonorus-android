@@ -12,6 +12,28 @@ Fortschritt und Vor/Zurück, statt dessen, was der Browser gerade gewährt.
 Im großen Player wird das **Cover zur Seite gewischt**, um zum nächsten oder
 vorherigen Song zu springen; nach unten gewischt schließt es den Player.
 
+## Downloads und Offline-Betrieb
+
+Songs, Alben, Playlists, Genres und Bewertungslisten lassen sich auf das Gerät
+laden ("Herunterladen" im Kopf einer Sammlung oder im Menü eines Songs). Was
+geladen ist, spielt danach **immer** von der Platte - auch mit Verbindung, was
+unterwegs Datenvolumen spart.
+
+**Ohne Netz startet die App direkt in ihre Downloads**, ohne Zwischenschritt:
+kein Login-Formular, kein Wartebalken, keine Anfrage, die erst in einen Timeout
+laufen müsste. Bibliothek, Interpreten, Alben, Genres, Playlists, Suche und
+Songtexte kommen dann aus dem, was auf dem Gerät liegt; ein Streifen unter der
+Titelleiste sagt, dass die kurze Bibliothek gemeint ist. Sobald wieder ein
+Server erreichbar ist, wechselt die App von selbst zurück.
+
+Was eine Verbindung braucht, ist offline abgeschaltet und sagt das auch:
+Bewerten, Playlists ändern, Statistik, Mitteilungen, Konten, Scan und Import.
+
+Unter **Downloads** (Seitenleiste) steht, was auf dem Gerät liegt und wie viel
+Platz es braucht. Dort sitzen auch die beiden Schalter: *Nur über WLAN* und ein
+*Offline-Modus* von Hand, der auch bei bestehender Verbindung bei den Downloads
+bleibt.
+
 ## APK bauen
 
 ```bash

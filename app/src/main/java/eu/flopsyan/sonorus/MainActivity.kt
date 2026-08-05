@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -23,6 +24,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import eu.flopsyan.sonorus.player.PlaybackService
 import eu.flopsyan.sonorus.ui.AppPhase
 import eu.flopsyan.sonorus.ui.AppViewModel
+import eu.flopsyan.sonorus.ui.LocalOffline
 import eu.flopsyan.sonorus.ui.Shell
 import eu.flopsyan.sonorus.ui.components.Loading
 import eu.flopsyan.sonorus.ui.screens.LoginScreen
@@ -60,19 +62,23 @@ private fun SonorusRoot() {
     val vm: AppViewModel = viewModel()
     val phase by vm.phase.collectAsState()
     val theme by vm.theme.collectAsState()
+    val offline by vm.offline.collectAsState()
 
-    SonorusTheme(mode = theme) {
-        Box(Modifier.fillMaxSize().background(SonorusTheme.colors.bg)) {
-            when (val current = phase) {
-                is AppPhase.Starting -> Loading()
-                is AppPhase.NeedsLogin -> LoginScreen(
-                    initialServer = vm.api.serverUrl,
-                    initialUser = SonorusApp.instance.session.username,
-                    error = current.message,
-                    busy = false,
-                    onLogin = { server, user, pass -> vm.login(server, user, pass) { } },
-                )
-                is AppPhase.Ready -> Shell(vm, current.bootstrap)
+    // Which source answers is a fact about the whole tree, not about one screen.
+    CompositionLocalProvider(LocalOffline provides offline) {
+        SonorusTheme(mode = theme) {
+            Box(Modifier.fillMaxSize().background(SonorusTheme.colors.bg)) {
+                when (val current = phase) {
+                    is AppPhase.Starting -> Loading()
+                    is AppPhase.NeedsLogin -> LoginScreen(
+                        initialServer = vm.api.serverUrl,
+                        initialUser = SonorusApp.instance.session.username,
+                        error = current.message,
+                        busy = false,
+                        onLogin = { server, user, pass -> vm.login(server, user, pass) { } },
+                    )
+                    is AppPhase.Ready -> Shell(vm, current.bootstrap)
+                }
             }
         }
     }

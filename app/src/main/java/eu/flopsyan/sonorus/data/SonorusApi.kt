@@ -46,7 +46,11 @@ class SonorusApi(private val session: Session) {
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(session.cookieJar)
-        .connectTimeout(20, TimeUnit.SECONDS)
+        // Ten seconds, not the library's thirty: this is the *connect*, and the
+        // only thing a longer one buys is a longer wait before the app decides
+        // the server is gone and shows the downloads instead. A handshake that
+        // has not happened in ten seconds is not going to.
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         // A streamed file must not be cut off mid-track on a slow connection.
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -106,6 +110,18 @@ class SonorusApi(private val session: Session) {
             }
         }
         session.store(base, user, pass)
+    }
+
+    /**
+     * Logs in again with the credentials already stored, and lets ten callers
+     * at once cause one login rather than ten.
+     *
+     * [call] does this by itself for the JSON API. A download speaks HTTP
+     * directly - it streams a file rather than parsing a body - so it needs the
+     * same recovery in a form it can use.
+     */
+    suspend fun relogin() {
+        loginLock.withLock { login(session.serverUrl, session.username, session.password) }
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {

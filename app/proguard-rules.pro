@@ -21,7 +21,13 @@
 
 # The data classes themselves: their field names are the JSON keys, so
 # obfuscating them would rename the wire format.
--keep @kotlinx.serialization.Serializable class eu.flopsyan.sonorus.data.model.** { *; }
+#
+# Not only `data.model`: the offline index under `data.download` is JSON too,
+# and that one is written by one build of the app and read by the *next*. A
+# field R8 renames differently between two releases would make the index
+# unreadable - which is to say: an update would silently throw away every
+# download on the phone. So the rule covers everything marked @Serializable.
+-keep @kotlinx.serialization.Serializable class eu.flopsyan.sonorus.** { *; }
 
 -keepclassmembers class kotlinx.serialization.json.** {
     *** Companion;

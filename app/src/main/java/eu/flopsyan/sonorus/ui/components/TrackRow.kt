@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
@@ -57,6 +58,8 @@ fun TrackRow(
     /** The rating to draw. Passed in, because a row given a star has to redraw
      *  without its whole list being fetched again. */
     stars: Int = track.stars,
+    /** Drawn as the small arrow that says this song plays without a network. */
+    downloaded: Boolean = false,
     coverUrl: String? = null,
     onPlay: () -> Unit,
     onMenu: () -> Unit,
@@ -139,6 +142,18 @@ fun TrackRow(
             )
         } else if (stars > 0) {
             Stars(stars, size = 12, enabled = false)
+        }
+
+        // The one marker a downloaded row wears, in the amber the rest of the
+        // chassis uses. Small on purpose: it is a fact about the row, not an
+        // action - the menu is where a download is started or taken back.
+        if (downloaded) {
+            Icon(
+                Icons.Filled.DownloadDone,
+                contentDescription = "Heruntergeladen",
+                tint = colors.accent,
+                modifier = Modifier.size(14.dp),
+            )
         }
 
         if (showYear) {

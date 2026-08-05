@@ -53,6 +53,8 @@ import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import eu.flopsyan.sonorus.ui.theme.num
 import java.util.Calendar
 import java.util.TimeZone
+import eu.flopsyan.sonorus.ui.components.ServerOnlyNote
+import eu.flopsyan.sonorus.ui.LocalOffline
 
 /**
  * The listening statistics.
@@ -65,6 +67,9 @@ import java.util.TimeZone
 @UnstableApi
 @Composable
 fun StatsScreen(vm: AppViewModel) {
+    // The play log lives on the server and nowhere else, so there is no shorter
+    // version of this page to draw out of the downloads.
+    if (LocalOffline.current) return ServerOnlyNote("Die Statistik")
     val colors = SonorusTheme.colors
     // The listener's day boundaries, not the server's.
     val offset = remember {
@@ -340,7 +345,7 @@ private fun TopList(
             ) {
                 Text("${i + 1}", style = num(12.sp), color = colors.textFaint, modifier = Modifier.width(20.dp))
                 Cover(
-                    vm.api.coverUrl(entry.cover),
+                    vm.coverUrl(entry.cover),
                     Modifier.size(38.dp),
                     if (round) androidx.compose.foundation.shape.CircleShape else RoundedCornerShape(6.dp),
                     entry.title,

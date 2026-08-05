@@ -77,28 +77,37 @@ fun trackActions(
     source: String,
     onGo: (String) -> Unit,
     onRemove: ((Track) -> Unit)? = null,
-) = TrackActions(
-    onPlay = { index -> vm.player.playTracks(tracks, index, source) },
-    onPlayNext = { vm.player.playNext(listOf(it)) },
-    onEnqueue = { vm.player.enqueue(listOf(it)) },
-    // The current rating is the one the view model knows, not the one the row
-    // was fetched with - otherwise tapping the star a song already has would
-    // fail to clear it as soon as that star was given on this phone.
-    onRate = { track, value -> vm.rate(track.id, value, vm.starsOf(track)) },
-    onAddToPlaylist = { vm.askForPlaylist(it) },
-    onGoArtist = { it.artistId?.let { id -> onGo(Routes.artist(id)) } },
-    onGoAlbum = { it.albumId?.let { id -> onGo(Routes.album(id)) } },
-    onEdit = { vm.editSingle(it) },
-    onRemove = onRemove,
-    starsOf = { vm.starsOf(it) },
-)
+): TrackActions {
+    // Read here, so a row redraws the moment its download finishes - the same
+    // reasoning the ratings map follows.
+    val downloads by vm.downloads.state.collectAsState()
+    return TrackActions(
+        onPlay = { index -> vm.player.playTracks(tracks, index, source) },
+        onPlayNext = { vm.player.playNext(listOf(it)) },
+        onEnqueue = { vm.player.enqueue(listOf(it)) },
+        // The current rating is the one the view model knows, not the one the row
+        // was fetched with - otherwise tapping the star a song already has would
+        // fail to clear it as soon as that star was given on this phone.
+        onRate = { track, value -> vm.rate(track.id, value, vm.starsOf(track)) },
+        onAddToPlaylist = { vm.askForPlaylist(it) },
+        onGoArtist = { it.artistId?.let { id -> onGo(Routes.artist(id)) } },
+        onGoAlbum = { it.albumId?.let { id -> onGo(Routes.album(id)) } },
+        onEdit = { vm.editSingle(it) },
+        onRemove = onRemove,
+        starsOf = { vm.starsOf(it) },
+        statusOf = { downloads.statusOf(it.id) },
+        onDownload = { vm.download(listOf(it)) },
+        onCancelDownload = { vm.downloads.cancel(it.id) },
+        onRemoveDownload = { vm.removeDownloads(listOf(it)) },
+    )
+}
 
 // --- Home -------------------------------------------------------------------
 
 @UnstableApi
 @Composable
 fun HomeScreen(vm: AppViewModel, onGo: (String) -> Unit) {
-    val load = rememberLoad("home") { vm.api.home() }
+    val load = rememberLoad("home") { vm.lib.home() }
     LoadBox(load) { data ->
         val playing = vm.player.state
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -144,7 +153,7 @@ fun HomeScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                         album.artist.takeIf { it.isNotEmpty() },
                                         Fmt.year(album.releaseDate, album.year).takeIf { it.isNotEmpty() },
                                     ).joinToString(" · "),
-                                    coverUrl = vm.api.coverUrl(album.cover),
+                                    coverUrl = vm.coverUrl(album.cover),
                                     modifier = Modifier.width(150.dp),
                                 ) { onGo(Routes.album(album.id)) }
                             }
@@ -168,7 +177,7 @@ private fun Shelf(label: String, tracks: List<Track>, vm: AppViewModel, onGo: (S
                 MediaCard(
                     title = track.title,
                     subtitle = track.artist,
-                    coverUrl = vm.api.coverUrl(track.cover),
+                    coverUrl = vm.coverUrl(track.cover),
                     modifier = Modifier.width(150.dp),
                 ) {
                     vm.player.playTracks(tracks, tracks.indexOf(track), label)
@@ -197,7 +206,7 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     // simply starts from what the account remembers.
     var sort by remember { mutableStateOf(vm.prefs.trackSort.key) }
     var dir by remember { mutableStateOf(vm.prefs.trackSort.dir) }
-    val load = rememberLoad("tracks", sort, dir) { vm.api.tracks(sort = sort, dir = dir, limit = 5000) }
+    val load = rememberLoad("tracks", sort, dir) { vm.lib.tracks(sort = sort, dir = dir, limit = 5000) }
     val player by vm.player.state.collectAsState()
 
     LoadBox(load) { data ->
@@ -273,7 +282,7 @@ private fun SortRow(
 @UnstableApi
 @Composable
 fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
-    val load = rememberLoad("artists") { vm.api.artists() }
+    val load = rememberLoad("artists") { vm.lib.artists() }
     LoadBox(load) { data ->
         if (data.artists.isEmpty()) return@LoadBox EmptyNote("Noch keine Interpreten.")
         LazyVerticalGrid(
@@ -285,7 +294,7 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 MediaCard(
                     title = artist.name,
                     subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
-                    coverUrl = vm.api.coverUrl(artist.cover),
+                    coverUrl = vm.coverUrl(artist.cover),
                     round = true,
                 ) { onGo(Routes.artist(artist.id)) }
             }
@@ -307,7 +316,7 @@ private val ALBUM_SORTS = listOf(
 fun AlbumsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     var sort by remember { mutableStateOf(vm.prefs.albumSort.key) }
     var dir by remember { mutableStateOf(vm.prefs.albumSort.dir) }
-    val load = rememberLoad("albums", sort, dir) { vm.api.albums(sort = sort, dir = dir) }
+    val load = rememberLoad("albums", sort, dir) { vm.lib.albums(sort = sort, dir = dir) }
 
     LoadBox(load) { data ->
         Column(Modifier.fillMaxSize()) {
@@ -337,7 +346,7 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
                     album.artist.takeIf { it.isNotEmpty() },
                     Fmt.year(album.releaseDate, album.year).takeIf { it.isNotEmpty() },
                 ).joinToString(" · "),
-                coverUrl = vm.api.coverUrl(album.cover),
+                coverUrl = vm.coverUrl(album.cover),
             ) { onGo(Routes.album(album.id)) }
         }
     }
@@ -348,7 +357,7 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
 @UnstableApi
 @Composable
 fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
-    val load = rememberLoad("genres") { vm.api.genres() }
+    val load = rememberLoad("genres") { vm.lib.genres() }
     LoadBox(load) { data ->
         if (data.genres.isEmpty()) {
             return@LoadBox EmptyNote(
@@ -367,7 +376,7 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     subtitle = Fmt.plural(genre.trackCount, "Song", "Songs"),
                     // The same artwork the genre's own page carries, so the grid
                     // and the page it leads to introduce it the same way.
-                    coverUrls = genre.covers.mapNotNull { vm.api.coverUrl(it) },
+                    coverUrls = genre.covers.mapNotNull { vm.coverUrl(it) },
                 ) { onGo(Routes.genre(listOf(genre.id))) }
             }
         }
@@ -382,8 +391,8 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 @UnstableApi
 @Composable
 fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
-    val selection = rememberLoad("genre", ids.joinToString(",")) { vm.api.genre(ids) }
-    val all = rememberLoad("all-genres") { vm.api.genres() }
+    val selection = rememberLoad("genre", ids.joinToString(",")) { vm.lib.genre(ids) }
+    val all = rememberLoad("all-genres") { vm.lib.genres() }
     val player by vm.player.state.collectAsState()
 
     LoadBox(selection) { data ->
@@ -402,12 +411,13 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                             Fmt.plural(data.genre.tracks.size, "Song", "Songs"),
                             Fmt.durationLong(data.genre.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
-                        coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.api.coverUrl(it) },
+                        coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.coverUrl(it) },
                         onPlay = { vm.player.playTracks(data.genre.tracks, 0, data.genre.name) },
                         onShuffle = {
                             vm.player.setShuffle(true)
                             vm.player.playTracks(data.genre.tracks, 0, data.genre.name)
                         },
+                        download = { CollectionDownload(vm, data.genre.tracks) },
                     )
                     all.value?.genres?.let { genres ->
                         PickerRow(
@@ -460,7 +470,7 @@ fun PickerRow(
 @UnstableApi
 @Composable
 fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
-    val load = rememberLoad("stars", values.joinToString(",")) { vm.api.stars(values) }
+    val load = rememberLoad("stars", values.joinToString(",")) { vm.lib.stars(values) }
     val player by vm.player.state.collectAsState()
     val counts = vm.bootstrap?.stars?.mapKeys { it.key.toIntOrNull() ?: -1 } ?: emptyMap()
 
@@ -482,12 +492,13 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
                             Fmt.plural(data.tracks.size, "Song", "Songs"),
                             Fmt.durationLong(data.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
-                        coverUrls = albumCovers(data.tracks).mapNotNull { vm.api.coverUrl(it) },
+                        coverUrls = albumCovers(data.tracks).mapNotNull { vm.coverUrl(it) },
                         onPlay = { vm.player.playTracks(data.tracks, 0, title) },
                         onShuffle = {
                             vm.player.setShuffle(true)
                             vm.player.playTracks(data.tracks, 0, title)
                         },
+                        download = { CollectionDownload(vm, data.tracks) },
                     )
                     PickerRow(
                         items = listOf(5, 4, 3, 2, 1, 0).map { it to starLabel(it) },
@@ -509,7 +520,7 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val colors = SonorusTheme.colors
     var query by remember { mutableStateOf("") }
     val load = rememberLoad("search", query) {
-        if (query.isBlank()) null else vm.api.search(query.trim())
+        if (query.isBlank()) null else vm.lib.search(query.trim())
     }
     val player by vm.player.state.collectAsState()
 
@@ -560,7 +571,7 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                                 MediaCard(
                                                     title = artist.name,
                                                     subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
-                                                    coverUrl = vm.api.coverUrl(artist.cover),
+                                                    coverUrl = vm.coverUrl(artist.cover),
                                                     round = true,
                                                     modifier = Modifier.width(130.dp),
                                                 ) { onGo(Routes.artist(artist.id)) }
@@ -578,7 +589,7 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                                 MediaCard(
                                                     title = album.title,
                                                     subtitle = album.artist,
-                                                    coverUrl = vm.api.coverUrl(album.cover),
+                                                    coverUrl = vm.coverUrl(album.cover),
                                                     modifier = Modifier.width(130.dp),
                                                 ) { onGo(Routes.album(album.id)) }
                                             }

@@ -55,6 +55,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import eu.flopsyan.sonorus.ui.components.ServerOnlyNote
+import eu.flopsyan.sonorus.ui.LocalOffline
 
 /** A panel with a front-panel label, the way every section of the web app looks. */
 @Composable
@@ -129,6 +131,8 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val theme by vm.theme.collectAsState()
+    val offline by vm.offline.collectAsState()
+    val downloads by vm.downloads.state.collectAsState()
     var scan by remember { mutableStateOf<ScanState?>(null) }
     var lastScan by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf(false) }
@@ -158,7 +162,9 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
         }
     }
 
-    LaunchedEffect(Unit) {
+    // Offline there is nothing to ask and nothing that could answer.
+    LaunchedEffect(offline) {
+        if (offline) return@LaunchedEffect
         runCatching { vm.api.scanState() }.onSuccess {
             scan = it.scan
             lastScan = it.lastScan
@@ -177,6 +183,15 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Panel("Downloads") {
+            Readout("Songs auf dem Gerät", Fmt.number(downloads.done.size))
+            Readout("Belegt", Fmt.bytes(downloads.bytes))
+            LinkRow(
+                "Downloads verwalten",
+                "Was ohne Verbindung spielt, und wie geladen wird",
+            ) { onGo(Routes.DOWNLOADS) }
+        }
+
         Panel("Bibliothek") {
             val state = scan
             Readout("Songs", Fmt.number(vm.bootstrap?.stats?.tracks ?: 0))
@@ -189,7 +204,14 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             Readout("Größe", Fmt.bytes(vm.bootstrap?.stats?.size ?: 0))
             if (lastScan != null) Readout("Letzter Scan", Fmt.dateTime(lastScan))
 
-            if (state != null && state.running) {
+            if (offline) {
+                Text(
+                    "Offline. Die Zahlen sind die deiner Downloads; scannen und " +
+                        "importieren gehen erst wieder mit Verbindung.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textFaint,
+                )
+            } else if (state != null && state.running) {
                 Text(
                     "${state.phase}: ${Fmt.number(state.done)} von ${Fmt.number(state.total)}",
                     style = MaterialTheme.typography.bodySmall,
@@ -212,7 +234,7 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             }
         }
 
-        Panel("Playlists importieren") {
+        if (!offline) Panel("Playlists importieren") {
             Text(
                 "Eine CSV mit den Spalten playlist, title, artists und album. " +
                     "Die Exporte der üblichen Streamingdienste werden auch erkannt.",
@@ -241,9 +263,13 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
         Panel("Konto") {
             Readout("Angemeldet als", vm.bootstrap?.user?.displayName.orEmpty())
             Readout("Server", vm.api.serverUrl)
-            LinkRow("Konten", "Wer auf diese Instanz zugreift") { onGo(Routes.ACCOUNTS) }
-            LinkRow("Profil", "Name, Avatar und Passwort") { onGo(Routes.PROFILE) }
-            SonorusButton("Abmelden", danger = true) { vm.logout() }
+            if (!offline) {
+                LinkRow("Konten", "Wer auf diese Instanz zugreift") { onGo(Routes.ACCOUNTS) }
+                LinkRow("Profil", "Name, Avatar und Passwort") { onGo(Routes.PROFILE) }
+            }
+            // Logging out throws the session away, and with it the way back into
+            // the downloads without a server. So offline it is not offered.
+            if (!offline) SonorusButton("Abmelden", danger = true) { vm.logout() }
         }
     }
 }
@@ -253,6 +279,7 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 @UnstableApi
 @Composable
 fun ProfileScreen(vm: AppViewModel) {
+    if (LocalOffline.current) return ServerOnlyNote("Das Profil")
     val colors = SonorusTheme.colors
     val scope = rememberCoroutineScope()
     val user = vm.bootstrap?.user

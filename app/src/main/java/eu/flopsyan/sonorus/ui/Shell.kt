@@ -33,8 +33,10 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -115,6 +117,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val snackbar = remember { SnackbarHostState() }
     val playerState by vm.player.state.collectAsState()
     val toast by vm.toast.collectAsState()
+    val offline by vm.offline.collectAsState()
     var expanded by remember { mutableStateOf(false) }
     var listsOpen by remember { mutableStateOf(false) }
 
@@ -184,7 +187,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                             playing = playerState.playing,
                             positionMs = playerState.positionMs,
                             durationMs = playerState.durationMs,
-                            coverUrl = vm.api.coverUrl(current.cover),
+                            coverUrl = vm.coverUrl(current.cover),
                             onToggle = { vm.player.toggle() },
                             onNext = { vm.player.next() },
                             onPrevious = { vm.player.previous() },
@@ -212,7 +215,11 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                 }
             },
         ) { padding ->
-            Box(Modifier.padding(padding)) {
+            Column(Modifier.padding(padding)) {
+                // One line, always visible while it applies. A library that
+                // silently shows a tenth of itself is the kind of thing that
+                // reads as a bug rather than as a mode.
+                if (offline) OfflineBanner { nav.navigate(Routes.DOWNLOADS) { launchSingleTop = true } }
                 SonorusNavHost(vm, nav)
             }
         }
@@ -297,6 +304,7 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
     Routes.ALBUMS -> "Alben"
     Routes.GENRES -> "Genres"
     Routes.SEARCH -> "Suche"
+    Routes.DOWNLOADS -> "Downloads"
     Routes.SETTINGS -> "Einstellungen"
     Routes.STATS -> "Statistik"
     Routes.PROFILE -> "Profil"
@@ -338,6 +346,32 @@ private fun BottomTabs(
                 onClick = onLists,
             )
         }
+    }
+}
+
+/**
+ * The strip that says the library on screen is the short one. Tapping it leads
+ * to the downloads, which is both the explanation and the only thing that can
+ * be done about it.
+ */
+@Composable
+private fun OfflineBanner(onClick: () -> Unit) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.accentSoft)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(Icons.Filled.CloudOff, null, tint = colors.accent, modifier = Modifier.size(16.dp))
+        Text(
+            "Offline - du hörst deine Downloads",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.accent,
+        )
     }
 }
 
@@ -411,6 +445,14 @@ private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
         SidebarRow(Icons.Filled.Person, "Interpreten", data.stats.artists) { onGo(Routes.ARTISTS) }
         SidebarRow(Icons.Filled.Album, "Alben", data.stats.albums) { onGo(Routes.ALBUMS) }
         SidebarRow(Icons.Filled.Category, "Genres", data.stats.genres) { onGo(Routes.GENRES) }
+        // Not a sixth kind of list but a place: what is on the phone rather than
+        // on the server, and the one page that still works with nothing behind it.
+        val downloads by vm.downloads.state.collectAsState()
+        SidebarRow(
+            icon = Icons.Filled.DownloadForOffline,
+            label = "Downloads",
+            count = downloads.done.size,
+        ) { onGo(Routes.DOWNLOADS) }
 
         PlaylistLibrary(vm, data, onGo)
 

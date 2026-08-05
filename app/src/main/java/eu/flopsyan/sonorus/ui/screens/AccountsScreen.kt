@@ -50,6 +50,8 @@ import eu.flopsyan.sonorus.ui.components.SonorusDialog
 import eu.flopsyan.sonorus.ui.rememberLoad
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import kotlinx.coroutines.launch
+import eu.flopsyan.sonorus.ui.components.ServerOnlyNote
+import eu.flopsyan.sonorus.ui.LocalOffline
 
 /**
  * The account list.
@@ -65,6 +67,7 @@ import kotlinx.coroutines.launch
 @UnstableApi
 @Composable
 fun AccountsScreen(vm: AppViewModel) {
+    if (LocalOffline.current) return ServerOnlyNote("Die Konten")
     val colors = SonorusTheme.colors
     val scope = rememberCoroutineScope()
     val isAdmin = vm.bootstrap?.user?.isAdmin == true

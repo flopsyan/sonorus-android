@@ -1,13 +1,16 @@
 package eu.flopsyan.sonorus.player
 
 import android.content.Context
+import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import eu.flopsyan.sonorus.data.Library
 import eu.flopsyan.sonorus.data.SonorusApi
 import eu.flopsyan.sonorus.data.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +67,7 @@ data class PlayerState(
 class PlayerController(
     context: Context,
     private val api: SonorusApi,
+    private val library: Library,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
 ) {
 
@@ -78,10 +82,18 @@ class PlayerController(
 
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(context)
         .setMediaSourceFactory(
-            // The stream endpoint needs the session cookie, so it has to go
-            // through the same OkHttp client the API uses. The stock data source
-            // would send no cookie at all and get a 401 on every track.
-            DefaultMediaSourceFactory(OkHttpDataSource.Factory(api.client))
+            // Two kinds of source, one factory. `DefaultDataSource` reads
+            // `file://` itself and hands everything else to the base factory -
+            // which has to be the OkHttp client the API uses, because the stream
+            // endpoint needs the session cookie and the stock data source would
+            // send none and get a 401 on every track.
+            //
+            // Handing OkHttp the file URIs instead would break offline playback
+            // outright: it speaks HTTP and nothing else. This one line is what
+            // lets a downloaded song play with no network at all.
+            DefaultMediaSourceFactory(
+                DefaultDataSource.Factory(context, OkHttpDataSource.Factory(api.client))
+            )
         )
         .setHandleAudioBecomingNoisy(true)
         .build()
@@ -143,6 +155,11 @@ class PlayerController(
 
         val track = _state.value.current ?: return
         val duration = track.duration
+        // A play is written on the server, so offline there is nothing to write
+        // and no point in a request per song that can only time out. What was
+        // heard in a plane is not counted - the server timestamps a play when it
+        // arrives, so sending it later would file it under the wrong day.
+        if (library.offline.value) return
         if (!playCounted && duration > 0 && listened >= countThreshold(duration)) {
             playCounted = true
             reported = listened.roundToInt()
@@ -428,20 +445,30 @@ class PlayerController(
         return null
     }
 
-    private fun mediaItem(track: Track): MediaItem = MediaItem.Builder()
-        .setUri(api.streamUrl(track.id))
-        .setMediaId(track.id.toString())
-        .setMediaMetadata(
-            MediaMetadata.Builder()
-                .setTitle(track.title)
-                .setArtist(track.artist)
-                .setAlbumTitle(track.album.ifEmpty { null })
-                .setArtworkUri(api.coverUrl(track.cover)?.toUri())
-                .setTrackNumber(track.trackNo)
-                .setReleaseYear(track.year)
-                .build()
-        )
-        .build()
+    /**
+     * A downloaded song is played from the phone, always - not only when there
+     * is no network. That is what makes a download worth having on a mobile
+     * connection: the same song, and not a byte of data for it.
+     */
+    private fun mediaItem(track: Track): MediaItem {
+        val local = library.store.fileOf(track.id)
+        return MediaItem.Builder()
+            .setUri(local?.let { Uri.fromFile(it) } ?: api.streamUrl(track.id).toUri())
+            .setMediaId(track.id.toString())
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(track.title)
+                    .setArtist(track.artist)
+                    .setAlbumTitle(track.album.ifEmpty { null })
+                    // The downloaded cover for the same reason: the notification
+                    // draws artwork, and offline there is nothing to fetch.
+                    .setArtworkUri(library.coverUrl(track.cover)?.toUri())
+                    .setTrackNumber(track.trackNo)
+                    .setReleaseYear(track.year)
+                    .build()
+            )
+            .build()
+    }
 
     private fun pushPlaylist(tracks: List<Track>, index: Int, positionMs: Long) {
         exoPlayer.setMediaItems(tracks.map(::mediaItem), index, positionMs)

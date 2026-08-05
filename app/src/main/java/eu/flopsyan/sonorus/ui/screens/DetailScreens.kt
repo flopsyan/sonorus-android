@@ -27,11 +27,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import eu.flopsyan.sonorus.data.model.Playlist
 import eu.flopsyan.sonorus.data.model.Track
 import eu.flopsyan.sonorus.ui.AppViewModel
 import eu.flopsyan.sonorus.ui.Fmt
 import eu.flopsyan.sonorus.ui.LoadBox
 import eu.flopsyan.sonorus.ui.Routes
+import eu.flopsyan.sonorus.ui.components.ConfirmDialog
 import eu.flopsyan.sonorus.ui.components.CoverMosaic
 import eu.flopsyan.sonorus.ui.components.albumCovers
 import eu.flopsyan.sonorus.ui.components.EmptyNote
@@ -62,6 +64,8 @@ fun DetailHead(
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     onEdit: (() -> Unit)? = null,
+    /** The download control, which every collection has and only its head draws. */
+    download: (@Composable () -> Unit)? = null,
 ) {
     val colors = SonorusTheme.colors
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -94,11 +98,66 @@ fun DetailHead(
             }
         }
         Spacer(Modifier.height(14.dp))
+        // Two rows: the transport first, then what is done *with* the collection
+        // rather than to it. Four buttons do not fit across a phone.
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SonorusButton("Abspielen", primary = true, onClick = onPlay)
             SonorusButton("Zufällig", onClick = onShuffle)
-            onEdit?.let { SonorusButton("Bearbeiten", onClick = it) }
         }
+        if (download != null || onEdit != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                download?.invoke()
+                onEdit?.let { SonorusButton("Bearbeiten", onClick = it) }
+            }
+        }
+    }
+}
+
+/**
+ * The download control of a whole collection - an album, a playlist, a genre, a
+ * rating, an artist.
+ *
+ * One button with several states rather than a switch, because there are
+ * several different things to say: nothing here yet, part of it, it is coming,
+ * it is all here. Taking it back asks first - on a phone a mistap would
+ * otherwise throw away an hour of downloading.
+ *
+ * [playlist] is passed for a playlist and for nothing else. A playlist's order
+ * exists nowhere but on the server, so it is stored along with the songs; every
+ * other collection can be rebuilt from the songs themselves.
+ */
+@UnstableApi
+@Composable
+fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist? = null) {
+    val state by vm.downloads.state.collectAsState()
+    var confirming by remember { mutableStateOf(false) }
+
+    val here = tracks.filter { !it.missing }
+    if (here.isEmpty()) return
+    val done = here.count { it.id in state.done }
+    val busy = here.count { it.id == state.active || it.id in state.queued }
+    val start = { if (playlist != null) vm.downloadPlaylist(playlist, here) else vm.download(here) }
+
+    when {
+        busy > 0 -> SonorusButton("Lädt … $done/${here.size}", enabled = false) {}
+        done == here.size -> SonorusButton("Heruntergeladen") { confirming = true }
+        done > 0 -> SonorusButton("Rest laden ($done/${here.size})") { start() }
+        else -> SonorusButton("Herunterladen") { start() }
+    }
+
+    if (confirming) {
+        ConfirmDialog(
+            title = "Download entfernen",
+            message = "${Fmt.plural(done, "Song", "Songs")} werden von diesem Gerät gelöscht. " +
+                "Auf dem Server bleibt alles, wie es ist.",
+            confirmLabel = "Entfernen",
+            onDismiss = { confirming = false },
+            onConfirm = {
+                confirming = false
+                vm.removeDownloads(here)
+            },
+        )
     }
 }
 
@@ -107,7 +166,7 @@ fun DetailHead(
 @UnstableApi
 @Composable
 fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
-    val load = rememberLoad("album", id) { vm.api.album(id) }
+    val load = rememberLoad("album", id) { vm.lib.album(id) }
     val player by vm.player.state.collectAsState()
 
     var editing by remember { mutableStateOf(false) }
@@ -138,13 +197,14 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.plural(album.trackCount, "Song", "Songs"),
                         Fmt.durationLong(album.duration),
                     ).joinToString(" · "),
-                    coverUrls = listOfNotNull(vm.api.coverUrl(album.cover)),
+                    coverUrls = listOfNotNull(vm.coverUrl(album.cover)),
                     onPlay = { vm.player.playTracks(tracks, 0, "Album: ${album.title}") },
                     onShuffle = {
                         vm.player.setShuffle(true)
                         vm.player.playTracks(tracks, 0, "Album: ${album.title}")
                     },
                     onEdit = { editing = true },
+                    download = { CollectionDownload(vm, tracks) },
                 )
             },
         )
@@ -156,7 +216,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 @UnstableApi
 @Composable
 fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
-    val load = rememberLoad("artist", id) { vm.api.artist(id) }
+    val load = rememberLoad("artist", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
 
     var editing by remember { mutableStateOf(false) }
@@ -186,7 +246,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                             Fmt.plural(artist.albums.size, "Album", "Alben"),
                             Fmt.plural(tracks.size, "Song", "Songs"),
                         ).joinToString(" · "),
-                        coverUrls = listOfNotNull(vm.api.coverUrl(artist.cover)),
+                        coverUrls = listOfNotNull(vm.coverUrl(artist.cover)),
                         round = true,
                         onPlay = { vm.player.playTracks(tracks, 0, artist.name) },
                         onShuffle = {
@@ -194,6 +254,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                             vm.player.playTracks(tracks, 0, artist.name)
                         },
                         onEdit = { editing = true },
+                        download = { CollectionDownload(vm, tracks) },
                     )
 
                     // Only the ratings this artist actually has get a switch -
@@ -219,7 +280,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                                     MediaCard(
                                         title = album.title,
                                         subtitle = Fmt.year(album.releaseDate, album.year),
-                                        coverUrl = vm.api.coverUrl(album.cover),
+                                        coverUrl = vm.coverUrl(album.cover),
                                         modifier = Modifier.width(140.dp),
                                     ) { onGo(Routes.album(album.id)) }
                                 }
@@ -230,7 +291,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                                         MediaCard(
                                             title = "Singles",
                                             subtitle = Fmt.plural(artist.singles.size, "Song", "Songs"),
-                                            coverUrl = vm.api.coverUrl(artist.singles.firstNotNullOfOrNull { it.cover }),
+                                            coverUrl = vm.coverUrl(artist.singles.firstNotNullOfOrNull { it.cover }),
                                             modifier = Modifier.width(140.dp),
                                         ) { onGo(Routes.artistSingles(id)) }
                                     }
@@ -249,7 +310,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 @UnstableApi
 @Composable
 fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
-    val load = rememberLoad("singles", id) { vm.api.artist(id) }
+    val load = rememberLoad("singles", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
 
     LoadBox(load) { data ->
@@ -264,12 +325,13 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                 DetailHead(
                     title = "Singles",
                     subtitle = "${data.artist.name} · ${Fmt.plural(singles.size, "Song", "Songs")}",
-                    coverUrls = albumCovers(singles).mapNotNull { vm.api.coverUrl(it) },
+                    coverUrls = albumCovers(singles).mapNotNull { vm.coverUrl(it) },
                     onPlay = { vm.player.playTracks(singles, 0, "Singles") },
                     onShuffle = {
                         vm.player.setShuffle(true)
                         vm.player.playTracks(singles, 0, "Singles")
                     },
+                    download = { CollectionDownload(vm, singles) },
                 )
             },
         )
@@ -285,7 +347,7 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 @UnstableApi
 @Composable
 fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (String) -> Unit) {
-    val load = rememberLoad("artist-stars", id) { vm.api.artist(id) }
+    val load = rememberLoad("artist-stars", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
 
     LoadBox(load) { data ->
@@ -310,12 +372,13 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
                             Fmt.plural(filtered.size, "Song", "Songs"),
                             Fmt.durationLong(filtered.sumOf { it.duration }),
                         ).joinToString(" · "),
-                        coverUrls = albumCovers(filtered).mapNotNull { vm.api.coverUrl(it) },
+                        coverUrls = albumCovers(filtered).mapNotNull { vm.coverUrl(it) },
                         onPlay = { vm.player.playTracks(filtered, 0, label) },
                         onShuffle = {
                             vm.player.setShuffle(true)
                             vm.player.playTracks(filtered, 0, label)
                         },
+                        download = { CollectionDownload(vm, filtered) },
                     )
                     PickerRow(
                         items = ratings.map { it to starLabel(it) },
@@ -333,7 +396,7 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
 @UnstableApi
 @Composable
 fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
-    val load = rememberLoad("playlist", id) { vm.api.playlist(id) }
+    val load = rememberLoad("playlist", id) { vm.lib.playlist(id) }
     val player by vm.player.state.collectAsState()
 
     LoadBox(load) { data ->
@@ -364,12 +427,14 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.plural(tracks.size, "Song", "Songs"),
                         Fmt.durationLong(tracks.sumOf { it.duration }),
                     ).joinToString(" · "),
-                    coverUrls = albumCovers(tracks).mapNotNull { vm.api.coverUrl(it) },
+                    coverUrls = albumCovers(tracks).mapNotNull { vm.coverUrl(it) },
                     onPlay = { vm.player.playTracks(tracks, 0, data.playlist.name) },
                     onShuffle = {
                         vm.player.setShuffle(true)
                         vm.player.playTracks(tracks, 0, data.playlist.name)
                     },
+                    // The one collection whose order has to be stored with it.
+                    download = { CollectionDownload(vm, tracks, data.playlist) },
                 )
             },
         )

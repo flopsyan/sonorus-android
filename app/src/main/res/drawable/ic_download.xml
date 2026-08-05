@@ -1,0 +1,12 @@
+<!-- The download notification's small icon. A single path, monochrome: Android
+     tints it and draws nothing but its silhouette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M11,3L13,3L13,13.17L16.59,9.59L18,11L12,17L6,11L7.41,9.59L11,13.17L11,3ZM5,19L19,19L19,21L5,21L5,19Z" />
+</vector>
