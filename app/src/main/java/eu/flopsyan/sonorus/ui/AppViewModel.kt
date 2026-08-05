@@ -8,6 +8,7 @@ import eu.flopsyan.sonorus.SonorusApp
 import eu.flopsyan.sonorus.data.ApiException
 import eu.flopsyan.sonorus.data.SonorusApi
 import eu.flopsyan.sonorus.data.model.Bootstrap
+import eu.flopsyan.sonorus.data.model.Lyrics
 import eu.flopsyan.sonorus.data.model.Prefs
 import eu.flopsyan.sonorus.data.model.SortPref
 import eu.flopsyan.sonorus.data.model.Track
@@ -223,6 +224,38 @@ class AppViewModel : ViewModel() {
                     refreshQuietly()
                 }
                 .onFailure { say(message(it), true) }
+        }
+    }
+
+    // --- Lyrics ---------------------------------------------------------------
+    // The words come out of the audio file itself - nothing is looked up
+    // anywhere - so a song either carries them or it does not. `hasLyrics` on
+    // the track says which, and a track that has none is never asked about.
+
+    private val _lyrics = MutableStateFlow(Lyrics())
+    val lyrics: StateFlow<Lyrics> = _lyrics.asStateFlow()
+
+    /** Which track [_lyrics] belongs to, so the same one is not fetched twice. */
+    private var lyricsFor: Int? = null
+
+    /**
+     * Fetches the lyrics of [track], unless they are the ones already held.
+     *
+     * Only the full-screen player asks, and only while it is open: nothing else
+     * shows them, and a request per track change in the background would be
+     * paid for by a phone that never looks.
+     */
+    fun loadLyrics(track: Track?) {
+        if (lyricsFor == track?.id) return
+        lyricsFor = track?.id
+        _lyrics.value = Lyrics()
+        val id = track?.id ?: return
+        if (!track.hasLyrics) return
+        viewModelScope.launch {
+            runCatching { api.lyrics(id) }
+                // A track change while the answer was on its way must not land
+                // on the song that is playing now.
+                .onSuccess { if (lyricsFor == id) _lyrics.value = it.lyrics }
         }
     }
 

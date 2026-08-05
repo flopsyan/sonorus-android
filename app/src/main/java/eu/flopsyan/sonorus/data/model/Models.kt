@@ -39,6 +39,11 @@ data class Track(
     val lossless: Boolean = false,
     val genres: List<String> = emptyList(),
     val stars: Int = 0,
+    /**
+     * Whether the file carries a lyric at all. The words themselves are their
+     * own endpoint - a text block per row of every list is not a projection.
+     */
+    val hasLyrics: Boolean = false,
     val addedAt: String = "",
     /** The file is gone. Kept for its rating and playlist entries only. */
     val missing: Boolean = false,
@@ -74,6 +79,37 @@ data class Album(
      */
     val genres: List<String> = emptyList(),
     val tracks: List<Track> = emptyList(),
+)
+
+/**
+ * The lyric of one song, as it came out of the audio file. Sonorus looks
+ * nothing up anywhere, so a song either carries one or it does not.
+ *
+ * [lines] is empty unless the file also said *when* each line is sung - that is
+ * what tells a lyric that can follow the song from one that can only be read.
+ */
+@Serializable
+data class Lyrics(
+    val text: String = "",
+    val lines: List<LyricsLine> = emptyList(),
+    val synced: Boolean = false,
+) {
+    /** The line being sung at [seconds], or -1 before the first one. */
+    fun lineAt(seconds: Double): Int {
+        var at = -1
+        for (i in lines.indices) {
+            if (lines[i].time > seconds) break
+            at = i
+        }
+        return at
+    }
+}
+
+@Serializable
+data class LyricsLine(
+    /** Seconds into the track. */
+    val time: Double = 0.0,
+    val text: String = "",
 )
 
 /** The row shape of the artist grid. */
@@ -255,6 +291,9 @@ data class TracksResponse(val total: Int = 0, val tracks: List<Track> = emptyLis
 
 @Serializable
 data class TrackResponse(val track: Track)
+
+@Serializable
+data class LyricsResponse(val lyrics: Lyrics = Lyrics())
 
 @Serializable
 data class ArtistsResponse(val artists: List<ArtistSummary> = emptyList())

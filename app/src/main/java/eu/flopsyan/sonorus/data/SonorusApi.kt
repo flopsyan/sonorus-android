@@ -214,6 +214,12 @@ class SonorusApi(private val session: Session) {
 
     suspend fun track(id: Int): TrackResponse = get("/api/tracks/$id")
 
+    /**
+     * The words of one song. Its own endpoint on purpose: a text block has no
+     * business riding along in the track projection every list selects.
+     */
+    suspend fun lyrics(id: Int): LyricsResponse = get("/api/tracks/$id/lyrics")
+
     suspend fun artists(q: String = ""): ArtistsResponse = get("/api/artists", mapOf("q" to q))
 
     suspend fun artist(id: Int): ArtistResponse = get("/api/artists/$id")

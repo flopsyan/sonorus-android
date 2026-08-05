@@ -29,11 +29,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -46,6 +48,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.util.UnstableApi
+import eu.flopsyan.sonorus.data.model.Lyrics
 import eu.flopsyan.sonorus.player.PlayerState
 import eu.flopsyan.sonorus.ui.AppViewModel
 import eu.flopsyan.sonorus.ui.Fmt
@@ -97,7 +102,16 @@ fun FullPlayer(
     val track = state.current ?: return
     val colors = SonorusTheme.colors
     var showQueue by remember { mutableStateOf(false) }
+    var showLyrics by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
+
+    // The words come out of the file itself, and only this screen shows them -
+    // so only this screen asks for them, and only while it is open.
+    val lyrics by vm.lyrics.collectAsState()
+    LaunchedEffect(track.id) { vm.loadLyrics(track) }
+    // Which line is being sung. -1 before the first one, and always -1 for a
+    // lyric the file gave no timestamps for: there is nothing to point at then.
+    val activeLine = lyrics.lineAt(state.positionMs / 1000.0)
     // How far the artwork is dragged sideways at the moment. Zero unless a wipe
     // is running, and animated back there when it ends.
     val swipe = remember { Animatable(0f) }
@@ -122,7 +136,24 @@ fun FullPlayer(
                     }
                     Spacer(Modifier.size(8.dp))
                     RackLabelText(state.source.ifEmpty { "Wiedergabe" }, Modifier.weight(1f))
-                    IconButton(onClick = { showQueue = !showQueue }) {
+                    // Only offered for a song that has a text - a button opening
+                    // an empty page is noise.
+                    if (track.hasLyrics) {
+                        IconButton(onClick = {
+                            showLyrics = !showLyrics
+                            if (showLyrics) showQueue = false
+                        }) {
+                            Icon(
+                                Icons.Filled.Lyrics,
+                                "Songtext",
+                                tint = if (showLyrics) colors.accent else colors.text,
+                            )
+                        }
+                    }
+                    IconButton(onClick = {
+                        showQueue = !showQueue
+                        if (showQueue) showLyrics = false
+                    }) {
                         Icon(
                             Icons.AutoMirrored.Filled.QueueMusic,
                             "Warteschlange",
@@ -165,6 +196,8 @@ fun FullPlayer(
                             }
                         }
                     }
+                } else if (showLyrics) {
+                    LyricsView(lyrics, activeLine, Modifier.weight(1f))
                 } else {
                     Spacer(Modifier.height(12.dp))
                     Box(
@@ -194,6 +227,25 @@ fun FullPlayer(
                         )
                     }
                     Spacer(Modifier.height(20.dp))
+                    // The one line of the lyric a phone has room for without
+                    // leaving the player, in the gap between the artwork and the
+                    // title. Only a timed lyric has a line to point at, and a
+                    // song without one must not reserve the space. Tapping it
+                    // opens the rest.
+                    if (activeLine >= 0) {
+                        Text(
+                            lyrics.lines[activeLine].text,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.accent,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showLyrics = true },
+                        )
+                        Spacer(Modifier.height(14.dp))
+                    }
                     Text(
                         track.title,
                         style = MaterialTheme.typography.headlineSmall,
@@ -352,6 +404,75 @@ fun FullPlayer(
                 }
             }
         }
+    }
+}
+
+/**
+ * The whole lyric, in the place the artwork usually holds.
+ *
+ * Whether it can follow the song is the file's decision, not ours: with
+ * timestamps the line being sung is lit and scrolled to, and without them the
+ * text simply stands there instead of waiting for a cue that never comes.
+ *
+ * Deliberately no "the reader scrolled, stop following" rule here, unlike the
+ * web panel: the list is the whole screen and a finger that scrolls it is a
+ * finger that has stopped watching, so the next line pulling it back is what
+ * you want a moment later anyway.
+ */
+@Composable
+private fun LyricsView(lyrics: Lyrics, activeLine: Int, modifier: Modifier = Modifier) {
+    val colors = SonorusTheme.colors
+    val listState = rememberLazyListState()
+
+    // Half the visible height up, so the line being sung sits in the middle
+    // rather than at the top edge where the next ones are hidden below it.
+    LaunchedEffect(activeLine) {
+        if (activeLine < 0) return@LaunchedEffect
+        val middle = listState.layoutInfo.viewportSize.height / 2
+        listState.animateScrollToItem(activeLine, -middle)
+    }
+
+    if (lyrics.lines.isEmpty() && lyrics.text.isEmpty()) {
+        Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text(
+                "In dieser Datei steckt kein Songtext.",
+                color = colors.textDim,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
+        return
+    }
+
+    // Without timestamps there is no line list, so the plain text is split into
+    // one item per line and nothing is ever highlighted.
+    val lines = lyrics.lines.map { it.text }.ifEmpty { lyrics.text.split("\n") }
+    LazyColumn(modifier.fillMaxWidth(), state = listState) {
+        itemsIndexed(lines) { i, line ->
+            Text(
+                line,
+                style = if (i == activeLine) {
+                    MaterialTheme.typography.titleLarge
+                } else {
+                    MaterialTheme.typography.titleMedium
+                },
+                color = when {
+                    // Nothing is lit for an untimed lyric, so it reads as one
+                    // block instead of sitting there greyed out.
+                    activeLine < 0 && lyrics.lines.isEmpty() -> colors.text
+                    i == activeLine -> colors.accent
+                    // Already sung stays readable - it is the context for the
+                    // line that is running - while what is ahead is quieter.
+                    i < activeLine -> colors.textDim
+                    else -> colors.textFaint
+                },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            )
+        }
+        // Without this the last lines can never reach the middle of the screen,
+        // and the text stops following right where a song usually says the thing
+        // you looked it up for.
+        item { Spacer(Modifier.height(220.dp)) }
     }
 }
 
