@@ -60,10 +60,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -81,6 +84,19 @@ import eu.flopsyan.sonorus.ui.theme.num
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+
+/**
+ * How far ahead of the voice a lyric line is shown, in seconds.
+ *
+ * Reading a line costs a moment, so a line lit exactly on its own timestamp is
+ * already half sung by the time it has been read - which is the whole reason
+ * singing along to it does not work. Nothing says Spotify draws a line early;
+ * its own guidance is to time a line to the first word being sung. Half a
+ * second is what the sync tool behind it allows a line to be placed *ahead* of
+ * that, so it is the largest head start a synced lyric is ever built with, and
+ * small enough that it never reads as the wrong line.
+ */
+private const val LYRICS_LEAD_SECONDS = 0.5
 
 /**
  * The player as a full screen, the way Spotify does it - explicitly a phone
@@ -109,9 +125,10 @@ fun FullPlayer(
     // so only this screen asks for them, and only while it is open.
     val lyrics by vm.lyrics.collectAsState()
     LaunchedEffect(track.id) { vm.loadLyrics(track) }
-    // Which line is being sung. -1 before the first one, and always -1 for a
-    // lyric the file gave no timestamps for: there is nothing to point at then.
-    val activeLine = lyrics.lineAt(state.positionMs / 1000.0)
+    // Which line is being sung - a touch early on purpose, see
+    // [LYRICS_LEAD_SECONDS]. -1 before the first one, and always -1 for a lyric
+    // the file gave no timestamps for: there is nothing to point at then.
+    val activeLine = lyrics.lineAt(state.positionMs / 1000.0 + LYRICS_LEAD_SECONDS)
     // How far the artwork is dragged sideways at the moment. Zero unless a wipe
     // is running, and animated back there when it ends.
     val swipe = remember { Animatable(0f) }
@@ -197,7 +214,19 @@ fun FullPlayer(
                         }
                     }
                 } else if (showLyrics) {
-                    LyricsView(lyrics, activeLine, Modifier.weight(1f))
+                    LyricsView(
+                        lyrics,
+                        activeLine,
+                        // Landing the same head start before the line keeps the
+                        // tapped line the lit one once the jump is through -
+                        // seeking to the timestamp itself would hand the light
+                        // straight to the next line on a densely sung song.
+                        onSeek = { seconds ->
+                            val at = (seconds - LYRICS_LEAD_SECONDS).coerceAtLeast(0.0)
+                            vm.player.seekTo((at * 1000).toLong())
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
                 } else {
                     Spacer(Modifier.height(12.dp))
                     Box(
@@ -408,11 +437,32 @@ fun FullPlayer(
 }
 
 /**
+ * The lyric list is the one thing in the app read at arm's length while singing
+ * along, so it is set far larger than any shared typography token - which is
+ * why these two are its own styles and not `MaterialTheme.typography`.
+ */
+private val LyricLine = TextStyle(
+    fontSize = 22.sp,
+    lineHeight = 30.sp,
+    fontWeight = FontWeight.SemiBold,
+    letterSpacing = (-0.02).em,
+)
+private val LyricLineActive = LyricLine.copy(
+    fontSize = 26.sp,
+    lineHeight = 34.sp,
+    fontWeight = FontWeight.Bold,
+)
+
+/**
  * The whole lyric, in the place the artwork usually holds.
  *
  * Whether it can follow the song is the file's decision, not ours: with
  * timestamps the line being sung is lit and scrolled to, and without them the
  * text simply stands there instead of waiting for a cue that never comes.
+ *
+ * A timed line is also a target: tapping one seeks the song to it, which is the
+ * fastest way back to the chorus and the reason the list is worth opening while
+ * something is playing at all.
  *
  * Deliberately no "the reader scrolled, stop following" rule here, unlike the
  * web panel: the list is the whole screen and a finger that scrolls it is a
@@ -420,7 +470,12 @@ fun FullPlayer(
  * you want a moment later anyway.
  */
 @Composable
-private fun LyricsView(lyrics: Lyrics, activeLine: Int, modifier: Modifier = Modifier) {
+private fun LyricsView(
+    lyrics: Lyrics,
+    activeLine: Int,
+    onSeek: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = SonorusTheme.colors
     val listState = rememberLazyListState()
 
@@ -449,13 +504,13 @@ private fun LyricsView(lyrics: Lyrics, activeLine: Int, modifier: Modifier = Mod
     val lines = lyrics.lines.map { it.text }.ifEmpty { lyrics.text.split("\n") }
     LazyColumn(modifier.fillMaxWidth(), state = listState) {
         itemsIndexed(lines) { i, line ->
+            // Tapping a line jumps the song to it, the way Spotify does. Only a
+            // timed lyric can offer that - without timestamps there is nowhere
+            // to jump to, and that is exactly when `lyrics.lines` is empty.
+            val at = lyrics.lines.getOrNull(i)?.time
             Text(
                 line,
-                style = if (i == activeLine) {
-                    MaterialTheme.typography.titleLarge
-                } else {
-                    MaterialTheme.typography.titleMedium
-                },
+                style = if (i == activeLine) LyricLineActive else LyricLine,
                 color = when {
                     // Nothing is lit for an untimed lyric, so it reads as one
                     // block instead of sitting there greyed out.
@@ -466,7 +521,12 @@ private fun LyricsView(lyrics: Lyrics, activeLine: Int, modifier: Modifier = Mod
                     i < activeLine -> colors.textDim
                     else -> colors.textFaint
                 },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                // The padding sits inside the tap, so the whole strip is the
+                // target and not just the glyphs.
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (at != null) Modifier.clickable { onSeek(at) } else Modifier)
+                    .padding(vertical = 8.dp),
             )
         }
         // Without this the last lines can never reach the middle of the screen,
