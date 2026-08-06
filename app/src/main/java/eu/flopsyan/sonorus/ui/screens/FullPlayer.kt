@@ -91,12 +91,16 @@ import kotlin.math.abs
  * Reading a line costs a moment, so a line lit exactly on its own timestamp is
  * already half sung by the time it has been read - which is the whole reason
  * singing along to it does not work. Nothing says Spotify draws a line early;
- * its own guidance is to time a line to the first word being sung. Half a
- * second is what the sync tool behind it allows a line to be placed *ahead* of
- * that, so it is the largest head start a synced lyric is ever built with, and
- * small enough that it never reads as the wrong line.
+ * its own guidance is to time a line to the first word being sung, and the sync
+ * tool behind it allows a line to sit at most half a second ahead of that.
+ *
+ * A full second is therefore deliberately *more* than any synced lyric is built
+ * with, and it is what a karaoke lead-in has always been: enough to read the
+ * line, draw breath and come in on the beat. The trade is that a song whose
+ * lines follow each other faster than a second will show the next one while the
+ * current is still being sung. Turned up from half a second on 2026-08-06.
  */
-private const val LYRICS_LEAD_SECONDS = 0.5
+private const val LYRICS_LEAD_SECONDS = 1.0
 
 /**
  * The player as a full screen, the way Spotify does it - explicitly a phone
