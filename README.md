@@ -12,6 +12,10 @@ Fortschritt und Vor/Zurück, statt dessen, was der Browser gerade gewährt.
 Im großen Player wird das **Cover zur Seite gewischt**, um zum nächsten oder
 vorherigen Song zu springen; nach unten gewischt schließt es den Player.
 
+Der Fortschrittsbalken lässt sich antippen **und ziehen**: festhalten, schieben,
+loslassen - gesprungen wird erst beim Loslassen. Das gilt im großen Player wie
+auf der Leiste am unteren Rand.
+
 ## Android Auto
 
 Im Auto steht Sonorus unter den Medien-Apps und lässt sich dort durchblättern:

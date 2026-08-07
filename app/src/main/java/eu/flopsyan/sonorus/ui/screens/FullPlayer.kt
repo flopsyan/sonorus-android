@@ -11,7 +11,6 @@ import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -56,7 +54,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -78,6 +75,7 @@ import eu.flopsyan.sonorus.ui.Fmt
 import eu.flopsyan.sonorus.ui.Routes
 import eu.flopsyan.sonorus.ui.components.Cover
 import eu.flopsyan.sonorus.ui.components.RackLabelText
+import eu.flopsyan.sonorus.ui.components.SeekRail
 import eu.flopsyan.sonorus.ui.components.Stars
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import eu.flopsyan.sonorus.ui.theme.num
@@ -338,46 +336,26 @@ fun FullPlayer(
 
                 // Seek rail. While it is held the position is only drawn, and
                 // the seek runs on release - writing the position on every move
-                // makes the player re-request the file and stutter.
+                // makes the player re-request the file and stutter. The knob is
+                // worth its space here and only here: the rail sits inside the
+                // padding, so it cannot be cut off by the edge of the screen.
                 val fraction = scrub
                     ?: if (state.durationMs > 0) {
                         (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
                     } else 0f
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(26.dp)
-                        .pointerInput(state.durationMs) {
-                            detectHorizontalDragGestures(
-                                onDragEnd = {
-                                    scrub?.let { f ->
-                                        if (state.durationMs > 0) {
-                                            vm.player.seekTo((state.durationMs * f).toLong())
-                                        }
-                                    }
-                                    scrub = null
-                                },
-                            ) { change, _ ->
-                                scrub = (change.position.x / size.width).coerceIn(0f, 1f)
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(colors.surface3)
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth(fraction)
-                                .background(colors.accent)
-                        )
-                    }
-                }
+                SeekRail(
+                    fraction = fraction,
+                    onScrub = { scrub = it },
+                    onSeek = { f ->
+                        if (state.durationMs > 0) {
+                            vm.player.seekTo((state.durationMs * f).toLong())
+                        }
+                    },
+                    height = 26.dp,
+                    thickness = 6.dp,
+                    rounded = true,
+                    knob = 11.dp,
+                )
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

@@ -381,6 +381,10 @@ class PlayerController(
 
     fun seekTo(ms: Long) {
         exoPlayer.seekTo(ms)
+        // The rail is let go and drawn from the state again in the same frame,
+        // so the new position has to be in it already - waiting for the next
+        // tick lets the playhead snap back for half a second first.
+        _state.value = _state.value.copy(positionMs = ms)
         // A seek is not listening; the counter carries on from the new spot.
         lastTick = -1.0
     }
