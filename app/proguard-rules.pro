@@ -11,11 +11,11 @@
 -dontnote kotlinx.serialization.**
 
 # The serializers the compiler plugin generates for @Serializable classes.
--keep,includedescriptorclasses class eu.flopsyan.sonorus.**$$serializer { *; }
--keepclassmembers class eu.flopsyan.sonorus.** {
+-keep,includedescriptorclasses class org.sonorus.**$$serializer { *; }
+-keepclassmembers class org.sonorus.** {
     *** Companion;
 }
--keepclasseswithmembers class eu.flopsyan.sonorus.** {
+-keepclasseswithmembers class org.sonorus.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
@@ -27,7 +27,7 @@
 # field R8 renames differently between two releases would make the index
 # unreadable - which is to say: an update would silently throw away every
 # download on the phone. So the rule covers everything marked @Serializable.
--keep @kotlinx.serialization.Serializable class eu.flopsyan.sonorus.** { *; }
+-keep @kotlinx.serialization.Serializable class org.sonorus.** { *; }
 
 -keepclassmembers class kotlinx.serialization.json.** {
     *** Companion;

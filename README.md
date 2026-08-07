@@ -1,118 +1,122 @@
-# Sonorus für Android
+# Sonorus for Android
 
-Nativer Kotlin-Client für [Sonorus](https://github.com/flopsyan/sonorus), gebaut
-gegen dessen bestehende REST-API. **Am Server muss dafür nichts geändert
-werden**: ein nativer Client sendet weder `Origin` noch `Sec-Fetch-Site`, und
-`rejectCrossSite` lässt genau solche Anfragen bewusst durch.
+Native Kotlin client for [Sonorus](https://github.com/flopsyan/sonorus), built
+against the REST API that server already has. **Nothing has to be changed on the
+server side**: a native client sends neither `Origin` nor `Sec-Fetch-Site`, and
+`rejectCrossSite` deliberately lets exactly those requests through.
 
-Was die App gegenüber der Web-App bringt: Wiedergabe läuft im Hintergrund
-weiter, und die Benachrichtigung zeichnet Android selbst - mit Titel, Cover,
-Fortschritt und Vor/Zurück, statt dessen, was der Browser gerade gewährt.
+What the app adds over the web app: playback keeps running in the background,
+and Android draws the notification itself - title, cover art, progress and
+next/previous - instead of whatever the browser happens to grant.
 
-Im großen Player wird das **Cover zur Seite gewischt**, um zum nächsten oder
-vorherigen Song zu springen; nach unten gewischt schließt es den Player.
+In the full player the **cover art is swiped sideways** to jump to the next or
+previous song; swiping it down closes the player.
 
-Der Fortschrittsbalken lässt sich antippen **und ziehen**: festhalten, schieben,
-loslassen - gesprungen wird erst beim Loslassen. Das gilt im großen Player wie
-auf der Leiste am unteren Rand.
+The progress bar can be tapped **and dragged**: hold, slide, release - the seek
+happens on release, not before. That goes for the full player as well as the bar
+along the bottom edge.
 
 ## Android Auto
 
-Im Auto steht Sonorus unter den Medien-Apps und lässt sich dort durchblättern:
-Zufallsmix, Zuletzt gehört, Playlists, Bewertungen, Interpreten, Alben, Genres
-und Alle Songs. Ein Tippen auf einen Song spielt **die Liste**, in der er steht,
-ab genau dieser Stelle - dasselbe, was ein Tippen am Handy tut. Die Sprachsuche
-("Spiele …") sucht über Titel, Interpret und Album zugleich.
+In the car Sonorus appears among the media apps and can be browsed there:
+shuffle mix, recently played, playlists, ratings, artists, albums, genres and
+all songs. Tapping a song plays **the list** it sits in, starting at exactly
+that point - the same thing tapping it on the phone does. Voice search ("play
+…") searches title, artist and album at once.
 
-Das Auto steuert denselben Player wie das Handy: eine Fahrt zählt ganz normal in
-die Statistik, und die Warteschlange ist danach am Handy dieselbe. Heruntergeladene
-Songs spielt es von der Platte, und ohne Netz zeigt es genau diese Downloads.
+The car drives the same player as the phone: a trip counts towards the
+statistics like any other listening, and the queue is the same one afterwards.
+Downloaded songs play from disk, and with no connection it shows exactly those
+downloads.
 
-## Downloads und Offline-Betrieb
+## Downloads and offline use
 
-Songs, Alben, Playlists, Genres und Bewertungslisten lassen sich auf das Gerät
-laden ("Herunterladen" im Kopf einer Sammlung oder im Menü eines Songs). Was
-geladen ist, spielt danach **immer** von der Platte - auch mit Verbindung, was
-unterwegs Datenvolumen spart.
+Songs, albums, playlists, genres and rating lists can be pulled onto the device
+("Download" in the head of a collection or in a song's menu). Whatever is
+downloaded then **always** plays from disk - connection or not, which saves
+mobile data on the road.
 
-**Ohne Netz startet die App direkt in ihre Downloads**, ohne Zwischenschritt:
-kein Login-Formular, kein Wartebalken, keine Anfrage, die erst in einen Timeout
-laufen müsste. Bibliothek, Interpreten, Alben, Genres, Playlists, Suche und
-Songtexte kommen dann aus dem, was auf dem Gerät liegt; ein Streifen unter der
-Titelleiste sagt, dass die kurze Bibliothek gemeint ist. Sobald wieder ein
-Server erreichbar ist, wechselt die App von selbst zurück.
+**With no connection the app starts straight into its downloads**, with no step
+in between: no login form, no progress bar, no request that would have to run
+into a timeout first. Library, artists, albums, genres, playlists, search and
+lyrics then come from what is on the device; a strip under the title bar says
+that the short library is the one being shown. As soon as a server can be
+reached again, the app switches back by itself.
 
-Was eine Verbindung braucht, ist offline abgeschaltet und sagt das auch:
-Bewerten, Playlists ändern, Statistik, Mitteilungen, Konten, Scan und Import.
+Anything that needs a connection is switched off while offline and says so:
+rating, changing playlists, statistics, notices, accounts, scan and import.
 
-Unter **Downloads** (Seitenleiste) steht, was auf dem Gerät liegt und wie viel
-Platz es braucht. Dort sitzen auch die beiden Schalter: *Nur über WLAN* und ein
-*Offline-Modus* von Hand, der auch bei bestehender Verbindung bei den Downloads
-bleibt.
+Under **Downloads** (in the sidebar) is what lies on the device and how much
+space it takes. That is also where the two switches live: *Wi-Fi only* and a
+manual *offline mode*, which stays on the downloads even when a connection
+exists.
 
-## APK bauen
+## Building the APK
 
 ```bash
-export JAVA_HOME=~/Android/jdk21
-export ANDROID_HOME=~/Android/Sdk
+export JAVA_HOME=/path/to/jdk21
+export ANDROID_HOME=/path/to/android-sdk
 ./gradlew assembleRelease
 ```
 
-Das fertige APK liegt unter `app/build/outputs/apk/release/app-release.apk`.
+The finished APK lands in `app/build/outputs/apk/release/app-release.apk`.
 
-Für einen **signierten** Release braucht es eine `keystore.properties` im
-Projektwurzelverzeichnis (nicht im Repo, siehe `.gitignore`):
+For a **signed** release you need a `keystore.properties` in the project root
+(not in the repository, see `.gitignore`):
 
 ```properties
-storeFile=/pfad/zum/sonorus-release.keystore
+storeFile=/path/to/sonorus-release.keystore
 storePassword=…
 keyAlias=sonorus
 keyPassword=…
 ```
 
-Fehlt die Datei, baut das Projekt trotzdem - nur eben unsigniert.
+Without that file the project still builds - just unsigned.
 
-**Der Signaturschlüssel ist dauerhaft.** Geht er verloren, lässt sich eine
-installierte App nicht mehr aktualisieren, sondern nur deinstallieren und neu
-installieren. Playlists, Bewertungen und der Verlauf liegen auf dem Server und
-überleben das; verloren geht nur die lokale Warteschlange.
+**The signing key is permanent.** Lose it and an installed app can no longer be
+updated, only uninstalled and installed afresh. Playlists, ratings and history
+live on the server and survive that; the only thing lost is the local queue.
 
-## Aufs Handy bringen
+## Getting it onto the phone
 
-Per USB, mit aktiviertem USB-Debugging:
+Over USB, with USB debugging enabled:
 
 ```bash
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-Ohne Kabel: die APK-Datei aufs Handy kopieren (Cloud, Mail, USB-Massenspeicher)
-und dort im Dateimanager öffnen. Android fragt dann einmalig nach der Erlaubnis,
-Apps aus dieser Quelle zu installieren.
+Without a cable: copy the APK to the phone (cloud, mail, USB mass storage) and
+open it there in the file manager. Android will ask once for permission to
+install apps from that source.
 
-Beim ersten Start werden Server-Adresse, Benutzername und Passwort abgefragt.
+The first start asks for the server address, username and password.
 
-## Die Server-Adresse muss HTTPS sein
+## The server address has to be HTTPS
 
-Der Release-Build erlaubt kein Klartext-HTTP. Das ist kein Schikane-Default,
-sondern passt zur Sache: das Session-Cookie trägt das `Secure`-Flag und wird
-über HTTP ohnehin nicht zurückgesendet. Über `https://sonorus.example.com`
-funktioniert es, über eine nackte LAN-IP nicht.
+The release build allows no cleartext HTTP. That is not a default put there to
+be awkward, it follows from the thing itself: the session cookie carries the
+`Secure` flag and is not sent back over HTTP anyway. An HTTPS address works, a
+bare LAN IP does not.
 
-Der Debug-Build (`assembleDebug`) erlaubt HTTP zu `10.0.2.2` und `localhost`,
-damit man ihn im Emulator gegen eine lokale Testinstanz fahren kann.
+The debug build (`assembleDebug`) allows HTTP to `10.0.2.2` and `localhost`, so
+it can be run in the emulator against a local test instance.
 
-## Versionen
+## Versions
 
-`compileSdk` bleibt bei **36** und AGP bei **8.13.2**, weil API 37 bislang nur
-im Preview-Kanal existiert. Die androidx-Bibliotheken sind deshalb auf die
-jeweils letzte Fassung gepinnt, die 36 akzeptiert - siehe die Notiz in
-`gradle/libs.versions.toml`. Wer eine davon hochzieht, muss compileSdk und AGP
-mitziehen.
+`compileSdk` stays at **36** and AGP at **8.13.2**, because API 37 so far exists
+only in the preview channel. The androidx libraries are therefore pinned to the
+last version each that accepts 36 - see the note in
+`gradle/libs.versions.toml`. Anyone raising one of them has to raise compileSdk
+and AGP along with it.
 
-## Was noch fehlt
+## What is still missing
 
-- Playlists lassen sich in der Seitenleiste nicht per Ziehen sortieren. Der
-  Endpunkt (`PUT /api/playlists/order`) ist im Client vorhanden, nur die Geste
-  fehlt.
-- Der Cover-Zuschnitt ist gebaut, aber noch nicht mit einem echten Foto auf
-  einem Gerät durchgespielt.
+- Playlists cannot be reordered by dragging in the sidebar. The endpoint
+  (`PUT /api/playlists/order`) is present in the client, only the gesture is
+  missing.
+- The cover art crop is built, but has not yet been run through with a real
+  photo on a device.
+
+## License
+
+Apache License 2.0 - see [LICENSE](LICENSE).

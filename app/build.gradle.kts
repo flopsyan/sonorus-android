@@ -15,15 +15,15 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "eu.flopsyan.sonorus"
+    namespace = "org.sonorus"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "eu.flopsyan.sonorus"
+        applicationId = "org.sonorus"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.7.2"
+        versionCode = 10
+        versionName = "0.7.3"
     }
 
     signingConfigs {
