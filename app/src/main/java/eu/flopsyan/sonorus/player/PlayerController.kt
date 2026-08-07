@@ -406,7 +406,7 @@ class PlayerController(
         // A later shuffle must not carry on the path of an earlier one.
         if (!on) history.clear()
         _state.value = state.copy(order = order, pos = pos, shuffle = on)
-        pushPlaylist(order.map { state.queue[it] }, pos, exoPlayer.currentPosition)
+        rearrangeAround(order.map { state.queue[it] }, pos)
     }
 
     private fun reshuffleFromStart() {
@@ -492,6 +492,31 @@ class PlayerController(
     private fun pushPlaylist(tracks: List<Track>, index: Int, positionMs: Long) {
         exoPlayer.setMediaItems(tracks.map(::mediaItem), index, positionMs)
         exoPlayer.prepare()
+    }
+
+    /**
+     * Lays a new play order over the running track without touching it.
+     *
+     * [pushPlaylist] would be the short way, but `setMediaItems` throws the
+     * whole playlist away and builds it again - including the item playing right
+     * now, which is then re-opened and buffered from scratch. That is a tenth of
+     * a second of silence in the middle of a song, and on a phone it is exactly
+     * the kind of gap you hear. Everything *around* the current item is replaced
+     * instead: ExoPlayer keeps the one it is playing and the audio never stops.
+     *
+     * [tracks] is the full new order and [index] the place the running track
+     * takes in it.
+     */
+    private fun rearrangeAround(tracks: List<Track>, index: Int) {
+        val at = exoPlayer.currentMediaItemIndex
+        val count = exoPlayer.mediaItemCount
+        // Nothing to keep - only reachable if the playlist was never pushed.
+        if (count == 0 || at >= count) return pushPlaylist(tracks, index, 0)
+        exoPlayer.removeMediaItems(at + 1, count)
+        exoPlayer.removeMediaItems(0, at)
+        // Only the running track is left, and it sits at 0.
+        if (index > 0) exoPlayer.addMediaItems(0, tracks.take(index).map(::mediaItem))
+        exoPlayer.addMediaItems(tracks.drop(index + 1).map(::mediaItem))
     }
 
     private inner class PlayerListener : Player.Listener {
