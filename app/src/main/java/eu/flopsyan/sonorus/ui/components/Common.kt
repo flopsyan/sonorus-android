@@ -1,5 +1,9 @@
 package eu.flopsyan.sonorus.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,17 +32,26 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import eu.flopsyan.sonorus.data.model.Track
+import eu.flopsyan.sonorus.ui.Motion
+import eu.flopsyan.sonorus.ui.confirmed
+import eu.flopsyan.sonorus.ui.pressable
 import eu.flopsyan.sonorus.ui.theme.RackLabel
 import eu.flopsyan.sonorus.ui.theme.num
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
@@ -57,6 +70,21 @@ fun RackLabelText(text: String, modifier: Modifier = Modifier) {
         modifier = modifier,
     )
 }
+
+/**
+ * How long a cover takes to appear once it is decoded.
+ *
+ * Coil skips the fade for anything it already had in memory, so this only ever
+ * costs the picture that really did just arrive - which is exactly the one that
+ * used to pop into a grid mid-scroll.
+ */
+private const val COVER_FADE = 220
+
+/** The artwork request, with the fade attached. Built here so both artwork
+ *  composables ask for the picture the same way. */
+@Composable
+private fun coverRequest(url: String): ImageRequest =
+    ImageRequest.Builder(LocalContext.current).data(url).crossfade(COVER_FADE).build()
 
 /**
  * Artwork. Falls back to a note on a tinted plate rather than to empty space,
@@ -85,7 +113,7 @@ fun Cover(
             )
         } else {
             AsyncImage(
-                model = url,
+                model = coverRequest(url),
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -128,7 +156,7 @@ fun CoverMosaic(
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 for (col in 0 until 2) {
                     AsyncImage(
-                        model = urls[row * 2 + col],
+                        model = coverRequest(urls[row * 2 + col]),
                         // One description for the whole tile: four of them read
                         // out as four pictures, and this is one piece of artwork.
                         contentDescription = if (row == 0 && col == 0) contentDescription else null,
@@ -164,6 +192,11 @@ fun albumCovers(tracks: List<Track>, limit: Int = 4): List<String> {
  * The rating widget. Clicking the star a track already has clears the rating,
  * which is the behaviour from the web app and the reason [onRate] gets the
  * value clicked rather than the resulting one.
+ *
+ * A star that fills springs up to size rather than simply turning amber. Rating
+ * is the one thing in the app done over and over in a row - a whole evening of
+ * it, going through the unrated - so it is worth the moment of feedback, and it
+ * is the only place the app confirms with a buzz.
  */
 @Composable
 fun Stars(
@@ -174,16 +207,41 @@ fun Stars(
     onRate: (Int) -> Unit = {},
 ) {
     val colors = SonorusTheme.colors
+    val haptics = LocalHapticFeedback.current
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(1.dp)) {
         for (star in 1..5) {
             val filled = star <= value
+            val tint by animateColorAsState(
+                if (filled) colors.accent else colors.textFaint,
+                Motion.quick(),
+                label = "star",
+            )
+            val scale by animateFloatAsState(
+                targetValue = if (filled) 1f else 0.86f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium,
+                ),
+                label = "starPop",
+            )
             Icon(
                 imageVector = if (filled) Icons.Filled.Star else Icons.Outlined.StarBorder,
                 contentDescription = "$star Sterne",
-                tint = if (filled) colors.accent else colors.textFaint,
+                tint = tint,
                 modifier = Modifier
                     .size(size.dp)
-                    .then(if (enabled) Modifier.clickable { onRate(star) } else Modifier),
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .then(
+                        if (enabled) {
+                            Modifier.clickable {
+                                haptics.confirmed()
+                                onRate(star)
+                            }
+                        } else Modifier
+                    ),
             )
         }
     }
@@ -199,31 +257,33 @@ fun Chip(
     onClick: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
+    // A switch that is thrown should be *seen* being thrown - all four of its
+    // colours travel rather than jumping.
+    val fill by animateColorAsState(
+        if (selected) colors.accentSoft else colors.surface2, Motion.quick(), label = "chipFill",
+    )
+    val edge by animateColorAsState(
+        if (selected) colors.accentLine else colors.line, Motion.quick(), label = "chipEdge",
+    )
+    val ink by animateColorAsState(
+        if (selected) colors.accent else colors.textDim, Motion.quick(), label = "chipInk",
+    )
+    val quiet by animateColorAsState(
+        if (selected) colors.accent else colors.textFaint, Motion.quick(), label = "chipCount",
+    )
     Row(
         modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(if (selected) colors.accentSoft else colors.surface2)
-            .border(
-                width = 1.dp,
-                color = if (selected) colors.accentLine else colors.line,
-                shape = RoundedCornerShape(999.dp),
-            )
-            .clickable(onClick = onClick)
+            .background(fill)
+            .border(width = 1.dp, color = edge, shape = RoundedCornerShape(999.dp))
+            .pressable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (selected) colors.accent else colors.textDim,
-        )
+        Text(label, style = MaterialTheme.typography.labelLarge, color = ink)
         if (count != null) {
-            Text(
-                count.toString(),
-                style = num(11.sp),
-                color = if (selected) colors.accent else colors.textFaint,
-            )
+            Text(count.toString(), style = num(11.sp), color = quiet)
         }
     }
 }
@@ -299,7 +359,7 @@ fun SonorusButton(
             .clip(RoundedCornerShape(8.dp))
             .background(background)
             .then(if (primary || danger) Modifier else Modifier.border(1.dp, colors.line, RoundedCornerShape(8.dp)))
-            .clickable(enabled = enabled, onClick = onClick)
+            .pressable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -377,7 +437,9 @@ fun MediaCard(
     Column(
         modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            // A card is the biggest thing in the app that is a single tap, so it
+            // is where the dip under the finger is worth the most.
+            .pressable(dip = 0.95f, onClick = onClick)
             .padding(8.dp),
     ) {
         CoverMosaic(

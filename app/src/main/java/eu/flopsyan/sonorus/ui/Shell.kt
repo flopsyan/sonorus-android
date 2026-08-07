@@ -1,5 +1,17 @@
 package eu.flopsyan.sonorus.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -72,6 +84,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -106,7 +119,7 @@ import kotlinx.coroutines.launch
  * larger, exactly the decision the web app made ("there is no second player"),
  * which is why nothing here can drift out of step with the bar.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @UnstableApi
 @Composable
 fun Shell(vm: AppViewModel, data: Bootstrap) {
@@ -120,6 +133,15 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val offline by vm.offline.collectAsState()
     var expanded by remember { mutableStateOf(false) }
     var listsOpen by remember { mutableStateOf(false) }
+    // What the bar keeps drawing while it folds away - see the bar itself.
+    var lastTrack by remember { mutableStateOf(playerState.current) }
+    playerState.current?.let { lastTrack = it }
+
+    // Clearing the queue with the full player open would leave it standing there
+    // with nothing in it, so it closes with the last song.
+    LaunchedEffect(playerState.current) {
+        if (playerState.current == null) expanded = false
+    }
 
     LaunchedEffect(toast) {
         toast?.let {
@@ -131,6 +153,11 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
 
+    // Everything the player touches lives in one of these, and that is the only
+    // reason the artwork can travel between the bar and the full screen: a
+    // shared element needs both ends in the same composition, which is exactly
+    // what the old `Dialog` could not offer.
+    SharedTransitionLayout(Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawer,
         drawerContent = {
@@ -181,22 +208,35 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
             bottomBar = {
                 Column {
                     val current = playerState.current
-                    if (current != null) {
-                        PlayerBar(
-                            track = current,
-                            playing = playerState.playing,
-                            positionMs = playerState.positionMs,
-                            durationMs = playerState.durationMs,
-                            coverUrl = vm.coverUrl(current.cover),
-                            onToggle = { vm.player.toggle() },
-                            onNext = { vm.player.next() },
-                            onPrevious = { vm.player.previous() },
-                            onExpand = { expanded = true },
-                            onSeek = { f ->
-                                val d = playerState.durationMs
-                                if (d > 0) vm.player.seekTo((d * f).toLong())
-                            },
-                        )
+                    // The bar arrives with the first song rather than the layout
+                    // jumping up by its height.
+                    AnimatedVisibility(
+                        visible = current != null,
+                        enter = expandVertically(Motion.travel()) + fadeIn(Motion.entering()),
+                        exit = shrinkVertically(Motion.travel()) + fadeOut(Motion.quick()),
+                    ) {
+                        // Kept after the song is gone for the length of the exit,
+                        // or the bar would empty out before it has finished
+                        // folding away.
+                        val shown = current ?: lastTrack
+                        if (shown != null) {
+                            PlayerBar(
+                                track = shown,
+                                playing = playerState.playing,
+                                positionMs = playerState.positionMs,
+                                durationMs = playerState.durationMs,
+                                coverUrl = vm.coverUrl(shown.cover),
+                                coverVisible = !expanded,
+                                onToggle = { vm.player.toggle() },
+                                onNext = { vm.player.next() },
+                                onPrevious = { vm.player.previous() },
+                                onExpand = { expanded = true },
+                                onSeek = { f ->
+                                    val d = playerState.durationMs
+                                    if (d > 0) vm.player.seekTo((d * f).toLong())
+                                },
+                            )
+                        }
                     }
                     BottomTabs(
                         route = route,
@@ -218,8 +258,16 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
             Column(Modifier.padding(padding)) {
                 // One line, always visible while it applies. A library that
                 // silently shows a tenth of itself is the kind of thing that
-                // reads as a bug rather than as a mode.
-                if (offline) OfflineBanner { nav.navigate(Routes.DOWNLOADS) { launchSingleTop = true } }
+                // reads as a bug rather than as a mode. It unrolls rather than
+                // appearing, because the page under it has to move down for it
+                // and a page that jumps is what reads as the bug.
+                AnimatedVisibility(
+                    visible = offline,
+                    enter = expandVertically(Motion.travel()) + fadeIn(Motion.entering()),
+                    exit = shrinkVertically(Motion.travel()) + fadeOut(Motion.quick()),
+                ) {
+                    OfflineBanner { nav.navigate(Routes.DOWNLOADS) { launchSingleTop = true } }
+                }
                 SonorusNavHost(vm, nav)
             }
         }
@@ -285,16 +333,28 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
         )
     }
 
-    if (expanded && playerState.current != null) {
+    // Over the shell rather than in a window of its own, so the artwork can
+    // travel between the two. The container only fades and lifts a little; the
+    // cover growing out of the bar is what carries the move, and a container
+    // sliding the whole way as well would fight it.
+    AnimatedVisibility(
+        visible = expanded && playerState.current != null,
+        enter = fadeIn(tween(Motion.Rise, easing = Motion.Decelerate)) +
+            slideInVertically(tween(Motion.Rise, easing = Motion.Emphasized)) { it / 8 },
+        exit = fadeOut(tween(Motion.Standard, easing = Motion.Emphasized)) +
+            slideOutVertically(tween(Motion.Standard, easing = Motion.Emphasized)) { it / 8 },
+    ) {
         FullPlayer(
             vm = vm,
             state = playerState,
+            visibilityScope = this,
             onClose = { expanded = false },
             onGo = { target ->
                 expanded = false
                 nav.navigate(target) { launchSingleTop = true }
             },
         )
+    }
     }
 }
 
@@ -387,11 +447,29 @@ private fun RowScope.Tab(
     onClick: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
-    val tint = if (selected) colors.accent else colors.textDim
+    val haptics = LocalHapticFeedback.current
+    // A lamp goes *on*, it does not appear. All three parts of the tab travel
+    // together, and the lamp widens as it lights so the eye follows the change
+    // to the tab that took over rather than having to find it.
+    val tint by animateColorAsState(
+        if (selected) colors.accent else colors.textDim, Motion.standard(), label = "tabIcon",
+    )
+    val ink by animateColorAsState(
+        if (selected) colors.text else colors.textFaint, Motion.standard(), label = "tabLabel",
+    )
+    val lamp by animateColorAsState(
+        if (selected) colors.accent else colors.surface, Motion.standard(), label = "tabLamp",
+    )
+    val lampWidth by animateDpAsState(
+        if (selected) 18.dp else 8.dp, Motion.travel(), label = "tabLampWidth",
+    )
     Column(
         Modifier
             .weight(1f)
-            .clickable(onClick = onClick)
+            .clickable {
+                if (!selected) haptics.stepped()
+                onClick()
+            }
             .padding(start = 2.dp, end = 2.dp, bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -400,10 +478,10 @@ private fun RowScope.Tab(
         Box(
             Modifier
                 .padding(top = 4.dp)
-                .width(18.dp)
+                .width(lampWidth)
                 .height(2.dp)
                 .clip(RoundedCornerShape(1.dp))
-                .background(if (selected) colors.accent else colors.surface)
+                .background(lamp)
         )
         Spacer(Modifier.height(6.dp))
         Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
@@ -411,7 +489,7 @@ private fun RowScope.Tab(
         Text(
             label,
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-            color = if (selected) colors.text else colors.textFaint,
+            color = ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,

@@ -1,7 +1,15 @@
 package eu.flopsyan.sonorus.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.media3.common.util.UnstableApi
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -31,12 +39,56 @@ import eu.flopsyan.sonorus.ui.screens.TracksScreen
 private fun idList(raw: String?): List<Int> =
     raw.orEmpty().split(",").mapNotNull { it.trim().toIntOrNull() }
 
+/**
+ * How far a page slides. A fraction of the width rather than all of it: a whole
+ * screen travelling past reads as slow no matter how short the animation is,
+ * while a short slide under a fade says "this came from over there" and is over
+ * before it can be in the way.
+ */
+private const val SLIDE = 6
+
+/**
+ * The tabs along the bottom are *places*, not steps, so moving between them must
+ * not look like going forward. They cross-fade with a hair of scale instead -
+ * the same gesture a deck makes when a card is exchanged rather than dealt.
+ */
+private val TABS = setOf(
+    Routes.HOME, Routes.TRACKS, Routes.ARTISTS, Routes.ALBUMS, Routes.GENRES,
+)
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.betweenTabs() =
+    targetState.destination.route in TABS && initialState.destination.route in TABS
+
 @UnstableApi
 @Composable
 fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
     val go: (String) -> Unit = { nav.navigate(it) { launchSingleTop = true } }
 
-    NavHost(navController = nav, startDestination = Routes.HOME) {
+    // Without these the default applies, and the default is a 700 ms cross-fade
+    // on *every* page change - which is most of what made the app feel heavy.
+    // Nothing here is slower than 240 ms.
+    NavHost(
+        navController = nav,
+        startDestination = Routes.HOME,
+        enterTransition = {
+            if (betweenTabs()) fadeIn(Motion.entering()) + scaleIn(Motion.entering(), initialScale = 0.98f)
+            else slideInHorizontally(Motion.standard()) { it / SLIDE } + fadeIn(Motion.entering())
+        },
+        exitTransition = {
+            if (betweenTabs()) fadeOut(Motion.quick()) + scaleOut(Motion.standard(), targetScale = 1.02f)
+            else slideOutHorizontally(Motion.standard()) { -it / SLIDE } + fadeOut(Motion.quick())
+        },
+        // Going back runs the same move the other way round, so the page that
+        // was left slides back in from the side it left towards.
+        popEnterTransition = {
+            if (betweenTabs()) fadeIn(Motion.entering()) + scaleIn(Motion.entering(), initialScale = 0.98f)
+            else slideInHorizontally(Motion.standard()) { -it / SLIDE } + fadeIn(Motion.entering())
+        },
+        popExitTransition = {
+            if (betweenTabs()) fadeOut(Motion.quick()) + scaleOut(Motion.standard(), targetScale = 1.02f)
+            else slideOutHorizontally(Motion.standard()) { it / SLIDE } + fadeOut(Motion.quick())
+        },
+    ) {
         composable(Routes.HOME) { HomeScreen(vm, go) }
         composable(Routes.TRACKS) { TracksScreen(vm, go) }
         composable(Routes.ARTISTS) { ArtistsScreen(vm, go) }

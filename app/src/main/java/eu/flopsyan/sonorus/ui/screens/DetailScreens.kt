@@ -36,6 +36,7 @@ import eu.flopsyan.sonorus.ui.Routes
 import eu.flopsyan.sonorus.ui.components.ConfirmDialog
 import eu.flopsyan.sonorus.ui.components.CoverMosaic
 import eu.flopsyan.sonorus.ui.components.albumCovers
+import eu.flopsyan.sonorus.ui.components.DetailSkeleton
 import eu.flopsyan.sonorus.ui.components.EmptyNote
 import eu.flopsyan.sonorus.ui.components.MediaCard
 import eu.flopsyan.sonorus.ui.components.RackLabelText
@@ -171,7 +172,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 
     var editing by remember { mutableStateOf(false) }
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
         val album = data.album
         val tracks = album.tracks
         if (editing) {
@@ -221,7 +222,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 
     var editing by remember { mutableStateOf(false) }
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { DetailSkeleton(round = true) }) { data ->
         val artist = data.artist
         val tracks = artist.tracks
         if (editing) {
@@ -313,7 +314,7 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("singles", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { DetailSkeleton(round = true) }) { data ->
         val singles = data.artist.singles
         TrackList(
             tracks = singles,
@@ -350,7 +351,7 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
     val load = rememberLoad("artist-stars", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { DetailSkeleton(round = true) }) { data ->
         val filtered = data.artist.tracks.filter { it.stars in values }
         val ratings = data.artist.tracks.map { it.stars }.distinct()
             .filter { it > 0 || 0 in values }
@@ -399,7 +400,7 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("playlist", id) { vm.lib.playlist(id) }
     val player by vm.player.state.collectAsState()
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
         val tracks = data.tracks
         TrackList(
             tracks = tracks,

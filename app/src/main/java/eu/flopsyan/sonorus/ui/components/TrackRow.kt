@@ -1,7 +1,13 @@
 package eu.flopsyan.sonorus.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,15 +25,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.flopsyan.sonorus.data.model.Track
 import eu.flopsyan.sonorus.ui.Fmt
+import eu.flopsyan.sonorus.ui.Motion
+import eu.flopsyan.sonorus.ui.pressable
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import eu.flopsyan.sonorus.ui.theme.num
 
@@ -66,12 +76,20 @@ fun TrackRow(
 ) {
     val colors = SonorusTheme.colors
     val dim = track.missing
+    // The row that is playing lights up rather than switching on: with the queue
+    // stepping from song to song by itself, the marker travelling down the list
+    // is what says *which* song without having to be read.
+    val plate by animateColorAsState(
+        if (isCurrent) colors.accentSoft else Color.Transparent,
+        Motion.standard(),
+        label = "current",
+    )
     Row(
         modifier
             .clip(RoundedCornerShape(6.dp))
-            .then(if (isCurrent) Modifier.background(colors.accentSoft) else Modifier)
-            .combinedClickable(
-                enabled = true,
+            .background(plate)
+            .pressable(
+                dip = 0.985f,
                 onClick = { if (!dim) onPlay() },
                 onLongClick = onMenu,
             )
@@ -82,19 +100,30 @@ fun TrackRow(
         // The number column, or the artwork where a list has no numbering.
         if (index != null) {
             Box(Modifier.width(26.dp), contentAlignment = Alignment.Center) {
-                if (isCurrent) {
-                    Icon(
-                        Icons.Filled.VolumeUp,
-                        contentDescription = "Läuft gerade",
-                        tint = colors.accent,
-                        modifier = Modifier.size(15.dp),
-                    )
-                } else {
-                    Text(
-                        index.toString(),
-                        style = num(12.sp),
-                        color = if (dim) colors.textFaint else colors.textDim,
-                    )
+                // The number gives way to the speaker rather than being replaced
+                // by it, so the change reads as the same row changing state.
+                AnimatedContent(
+                    targetState = isCurrent,
+                    transitionSpec = {
+                        (fadeIn(Motion.quick()) + scaleIn(Motion.quick(), initialScale = 0.6f))
+                            .togetherWith(fadeOut(Motion.quick()) + scaleOut(Motion.quick(), targetScale = 0.6f))
+                    },
+                    label = "nowPlaying",
+                ) { playing ->
+                    if (playing) {
+                        Icon(
+                            Icons.Filled.VolumeUp,
+                            contentDescription = "Läuft gerade",
+                            tint = colors.accent,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    } else {
+                        Text(
+                            index.toString(),
+                            style = num(12.sp),
+                            color = if (dim) colors.textFaint else colors.textDim,
+                        )
+                    }
                 }
             }
         } else {
@@ -102,14 +131,19 @@ fun TrackRow(
         }
 
         Column(Modifier.weight(1f)) {
-            Text(
-                track.title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = when {
+            val ink by animateColorAsState(
+                when {
                     dim -> colors.textFaint
                     isCurrent -> colors.accent
                     else -> colors.text
                 },
+                Motion.standard(),
+                label = "title",
+            )
+            Text(
+                track.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = ink,
                 textDecoration = if (dim) TextDecoration.LineThrough else null,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

@@ -1,11 +1,22 @@
 package eu.flopsyan.sonorus.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
@@ -61,24 +72,29 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.util.UnstableApi
 import eu.flopsyan.sonorus.data.model.Lyrics
 import eu.flopsyan.sonorus.player.PlayerState
 import eu.flopsyan.sonorus.ui.AppViewModel
 import eu.flopsyan.sonorus.ui.Fmt
+import eu.flopsyan.sonorus.ui.Motion
 import eu.flopsyan.sonorus.ui.Routes
+import eu.flopsyan.sonorus.ui.armed
 import eu.flopsyan.sonorus.ui.components.Cover
+import eu.flopsyan.sonorus.ui.components.PlayerCoverKey
 import eu.flopsyan.sonorus.ui.components.RackLabelText
 import eu.flopsyan.sonorus.ui.components.SeekRail
 import eu.flopsyan.sonorus.ui.components.Stars
+import eu.flopsyan.sonorus.ui.components.TransportGlyph
+import eu.flopsyan.sonorus.ui.components.rememberPlayhead
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
 import eu.flopsyan.sonorus.ui.theme.num
+import eu.flopsyan.sonorus.ui.toggled
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -108,20 +124,38 @@ private const val LYRICS_LEAD_SECONDS = 1.0
  * drives the same state, which is the decision that keeps the two from ever
  * drifting apart. Ways out: the chevron, a wipe down over the artwork, the back
  * button, and following a link in it.
+ *
+ * ## Why this is no longer a Dialog
+ *
+ * It used to be one, and a `Dialog` cannot take part in a shared element: it
+ * lives in its own window, outside the composition the bar is in, so the two
+ * artworks could only ever be two separate pictures - the full screen appeared
+ * over the bar, instantly, with nothing connecting them. As an overlay in the
+ * same `SharedTransitionLayout` the cover in the bar *is* the cover here, and
+ * opening the player grows it into place.
+ *
+ * What the dialog used to hand over for free and is therefore done by hand: the
+ * back button ([BackHandler]), and swallowing taps so nothing behind the player
+ * can be hit through it.
  */
+@OptIn(ExperimentalSharedTransitionApi::class)
 @UnstableApi
 @Composable
-fun FullPlayer(
+fun SharedTransitionScope.FullPlayer(
     vm: AppViewModel,
     state: PlayerState,
+    visibilityScope: AnimatedVisibilityScope,
     onClose: () -> Unit,
     onGo: (String) -> Unit,
 ) {
     val track = state.current ?: return
     val colors = SonorusTheme.colors
+    val haptics = LocalHapticFeedback.current
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
+
+    BackHandler(onBack = onClose)
 
     // The words come out of the file itself, and only this screen shows them -
     // so only this screen asks for them, and only while it is open.
@@ -135,17 +169,20 @@ fun FullPlayer(
     // is running, and animated back there when it ends.
     val swipe = remember { Animatable(0f) }
 
-    Dialog(
-        onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(colors.bg)
+            // Nothing behind the player may be hit through it. A dialog got this
+            // from its own window; an overlay has to claim the taps itself.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            )
+            .systemBarsPadding()
     ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(colors.bg)
-                .systemBarsPadding()
-        ) {
-            Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Column(Modifier.fillMaxSize().padding(20.dp)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -238,6 +275,7 @@ fun FullPlayer(
                             .pointerInput(Unit) {
                                 coverGestures(
                                     swipe = swipe,
+                                    onArmed = { haptics.armed() },
                                     onNext = { vm.player.next() },
                                     onPrevious = { vm.player.previous() },
                                     onClose = onClose,
@@ -248,6 +286,13 @@ fun FullPlayer(
                         Cover(
                             vm.coverUrl(track.cover),
                             Modifier
+                                // The same picture the bar carries, not a copy of
+                                // it: opening the player grows the 44 dp thumb
+                                // into this. See [PlayerCoverKey].
+                                .sharedElement(
+                                    sharedContentState = rememberSharedContentState(PlayerCoverKey),
+                                    animatedVisibilityScope = visibilityScope,
+                                )
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
                                 // The artwork follows the finger, so a wipe says
@@ -281,8 +326,10 @@ fun FullPlayer(
                         track.title,
                         style = MaterialTheme.typography.headlineSmall,
                         color = colors.text,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        maxLines = 1,
+                        // Set large enough that plenty of titles do not fit, and
+                        // this is the screen you are looking at to read the name.
+                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -339,10 +386,11 @@ fun FullPlayer(
                 // makes the player re-request the file and stutter. The knob is
                 // worth its space here and only here: the rail sits inside the
                 // padding, so it cannot be cut off by the edge of the screen.
-                val fraction = scrub
+                val reported = scrub
                     ?: if (state.durationMs > 0) {
                         (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
                     } else 0f
+                val fraction = rememberPlayhead(reported, held = scrub != null, trackKey = track.id)
                 SeekRail(
                     fraction = fraction,
                     onScrub = { scrub = it },
@@ -381,23 +429,26 @@ fun FullPlayer(
                     IconButton(onClick = {
                         vm.player.setShuffle(!state.shuffle)
                         vm.savePlayerPrefs()
+                        haptics.toggled(!state.shuffle)
                     }) {
-                        Icon(
-                            Icons.Filled.Shuffle,
-                            "Zufall",
-                            tint = if (state.shuffle) colors.accent else colors.textDim,
+                        val tint by animateColorAsState(
+                            if (state.shuffle) colors.accent else colors.textDim,
+                            Motion.quick(),
+                            label = "shuffle",
                         )
+                        Icon(Icons.Filled.Shuffle, "Zufall", tint = tint)
                     }
                     IconButton(onClick = { vm.player.previous() }) {
                         Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(34.dp))
                     }
-                    IconButton(onClick = { vm.player.toggle() }, modifier = Modifier.size(64.dp)) {
-                        Icon(
-                            if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            if (state.playing) "Pause" else "Abspielen",
-                            tint = colors.accent,
-                            modifier = Modifier.size(52.dp),
-                        )
+                    IconButton(
+                        onClick = {
+                            haptics.toggled(!state.playing)
+                            vm.player.toggle()
+                        },
+                        modifier = Modifier.size(64.dp),
+                    ) {
+                        TransportGlyph(state.playing, tint = colors.accent, size = 52.dp)
                     }
                     IconButton(onClick = { vm.player.next() }) {
                         Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(34.dp))
@@ -405,15 +456,32 @@ fun FullPlayer(
                     IconButton(onClick = {
                         vm.player.cycleRepeat()
                         vm.savePlayerPrefs()
+                        haptics.toggled(state.repeat == "off")
                     }) {
-                        Icon(
-                            if (state.repeat == "one") Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                            "Wiederholen",
-                            tint = if (state.repeat != "off") colors.accent else colors.textDim,
+                        // Off and all wear the same glyph, so only the tint says
+                        // which - which is why the tint travels rather than
+                        // switching. One is a different symbol and turns over.
+                        val tint by animateColorAsState(
+                            if (state.repeat != "off") colors.accent else colors.textDim,
+                            Motion.quick(),
+                            label = "repeat",
                         )
+                        AnimatedContent(
+                            targetState = state.repeat == "one",
+                            transitionSpec = {
+                                (fadeIn(Motion.quick()) + scaleIn(Motion.quick(), initialScale = 0.7f))
+                                    .togetherWith(fadeOut(Motion.quick()) + scaleOut(Motion.quick(), targetScale = 0.7f))
+                            },
+                            label = "repeatGlyph",
+                        ) { one ->
+                            Icon(
+                                if (one) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                                "Wiederholen",
+                                tint = tint,
+                            )
+                        }
                     }
                 }
-            }
         }
     }
 }
@@ -531,9 +599,15 @@ private fun LyricsView(
  * is what makes the gesture readable before it is let go: nothing happens until
  * a quarter of the width is behind it, and a wipe that stops short slides back
  * instead of skipping a song by accident.
+ *
+ * [onArmed] fires the once the wipe crosses that quarter, so the threshold can
+ * be *felt* rather than guessed at. It is the whole reason the gesture is
+ * trustworthy: without it there is no way to know a wipe went far enough except
+ * by letting go and finding out.
  */
 private suspend fun PointerInputScope.coverGestures(
     swipe: Animatable<Float, AnimationVector1D>,
+    onArmed: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onClose: () -> Unit,
@@ -553,6 +627,9 @@ private suspend fun PointerInputScope.coverGestures(
         var dy = 0f
         var horizontal: Boolean? = null
         var closed = false
+        // Only the crossing is announced, not every frame past it - and a wipe
+        // pulled back under the mark can be felt arming again.
+        var armed = false
 
         awaitPointerEventScope {
             drag(down.id) { change ->
@@ -565,6 +642,11 @@ private suspend fun PointerInputScope.coverGestures(
                 if (horizontal == true) {
                     change.consume()
                     launch { swipe.snapTo(swipe.value + moved.x) }
+                    val far = abs(dx) >= skipAfter
+                    if (far != armed) {
+                        armed = far
+                        if (far) onArmed()
+                    }
                 } else if (horizontal == false && dy > closeAfter && !closed) {
                     closed = true
                     change.consume()

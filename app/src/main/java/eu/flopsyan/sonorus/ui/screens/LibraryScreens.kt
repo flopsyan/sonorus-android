@@ -55,6 +55,10 @@ import eu.flopsyan.sonorus.ui.LoadBox
 import eu.flopsyan.sonorus.ui.Routes
 import eu.flopsyan.sonorus.ui.components.Chip
 import eu.flopsyan.sonorus.ui.components.albumCovers
+import eu.flopsyan.sonorus.ui.components.CardGridSkeleton
+import eu.flopsyan.sonorus.ui.components.DetailSkeleton
+import eu.flopsyan.sonorus.ui.components.HomeSkeleton
+import eu.flopsyan.sonorus.ui.components.TrackListSkeleton
 import eu.flopsyan.sonorus.ui.components.EmptyNote
 import eu.flopsyan.sonorus.ui.components.Loading
 import eu.flopsyan.sonorus.ui.components.MediaCard
@@ -108,7 +112,7 @@ fun trackActions(
 @Composable
 fun HomeScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val load = rememberLoad("home") { vm.lib.home() }
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { HomeSkeleton() }) { data ->
         val playing = vm.player.state
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
@@ -209,7 +213,7 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val load = rememberLoad("tracks", sort, dir) { vm.lib.tracks(sort = sort, dir = dir, limit = 5000) }
     val player by vm.player.state.collectAsState()
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { TrackListSkeleton() }) { data ->
         TrackList(
             tracks = data.tracks,
             currentTrackId = player.current?.id,
@@ -283,7 +287,7 @@ private fun SortRow(
 @Composable
 fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val load = rememberLoad("artists") { vm.lib.artists() }
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { CardGridSkeleton(round = true) }) { data ->
         if (data.artists.isEmpty()) return@LoadBox EmptyNote("Noch keine Interpreten.")
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
@@ -296,6 +300,7 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
                     coverUrl = vm.coverUrl(artist.cover),
                     round = true,
+                    modifier = Modifier.animateItem(),
                 ) { onGo(Routes.artist(artist.id)) }
             }
         }
@@ -318,7 +323,7 @@ fun AlbumsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     var dir by remember { mutableStateOf(vm.prefs.albumSort.dir) }
     val load = rememberLoad("albums", sort, dir) { vm.lib.albums(sort = sort, dir = dir) }
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { CardGridSkeleton() }) { data ->
         Column(Modifier.fillMaxSize()) {
             SortRow(ALBUM_SORTS, sort, dir, data.albums.size) { key, direction ->
                 sort = key
@@ -347,6 +352,9 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
                     Fmt.year(album.releaseDate, album.year).takeIf { it.isNotEmpty() },
                 ).joinToString(" · "),
                 coverUrl = vm.coverUrl(album.cover),
+                // Re-sorting the grid slides the cards to their new places
+                // instead of the whole page changing under the finger.
+                modifier = Modifier.animateItem(),
             ) { onGo(Routes.album(album.id)) }
         }
     }
@@ -358,7 +366,7 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
 @Composable
 fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val load = rememberLoad("genres") { vm.lib.genres() }
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { CardGridSkeleton() }) { data ->
         if (data.genres.isEmpty()) {
             return@LoadBox EmptyNote(
                 "Noch keine Genres. Sie kommen aus den Tags der Dateien - " +
@@ -377,6 +385,7 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     // The same artwork the genre's own page carries, so the grid
                     // and the page it leads to introduce it the same way.
                     coverUrls = genre.covers.mapNotNull { vm.coverUrl(it) },
+                    modifier = Modifier.animateItem(),
                 ) { onGo(Routes.genre(listOf(genre.id))) }
             }
         }
@@ -395,7 +404,7 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
     val all = rememberLoad("all-genres") { vm.lib.genres() }
     val player by vm.player.state.collectAsState()
 
-    LoadBox(selection) { data ->
+    LoadBox(selection, skeleton = { DetailSkeleton() }) { data ->
         TrackList(
             tracks = data.genre.tracks,
             currentTrackId = player.current?.id,
@@ -474,7 +483,7 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
     val player by vm.player.state.collectAsState()
     val counts = vm.bootstrap?.stars?.mapKeys { it.key.toIntOrNull() ?: -1 } ?: emptyMap()
 
-    LoadBox(load) { data ->
+    LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
         val title = values.sortedDescending().joinToString(", ") { starLabel(it) }
         TrackList(
             tracks = data.tracks,

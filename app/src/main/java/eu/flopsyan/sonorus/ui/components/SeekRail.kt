@@ -1,6 +1,9 @@
 package eu.flopsyan.sonorus.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,9 +27,50 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import eu.flopsyan.sonorus.ui.landed
 import eu.flopsyan.sonorus.ui.theme.SonorusTheme
+import kotlin.math.abs
+
+/**
+ * How often [PlayerController] writes the position, in milliseconds.
+ *
+ * Kept in step with `PlayerController.TICK_MS` by hand: the two are separate
+ * decisions that happen to want the same number, and the rail only needs to know
+ * how long it has to cover before the next one arrives.
+ */
+private const val TICK_MS = 500
+
+/** A step this big is not playback - a seek, or the next song starting. */
+private const val JUMP = 0.05f
+
+/**
+ * The playhead as something that moves rather than something that steps.
+ *
+ * The player reports its position twice a second, so the rail was redrawn twice
+ * a second and stood still in between. On a three minute song that is a bar
+ * ticking forward in visible jerks - small, but it is on screen the entire time
+ * anything is playing, which makes it the one piece of stillness the eye has the
+ * longest to notice.
+ *
+ * So the rail walks to each new reading over exactly the time until the next one
+ * and arrives just as it lands. A *jump* is not walked: a seek, or the next song
+ * starting from zero, snaps - sliding backwards through a whole song would be a
+ * lie about what happened. Neither is a rail being held, which belongs to the
+ * finger and must not lag behind it.
+ */
+@Composable
+fun rememberPlayhead(fraction: Float, held: Boolean, trackKey: Any?): Float {
+    val playhead = remember { Animatable(0f) }
+    LaunchedEffect(trackKey) { playhead.snapTo(0f) }
+    LaunchedEffect(fraction, held) {
+        if (held || abs(fraction - playhead.value) > JUMP) playhead.snapTo(fraction)
+        else playhead.animateTo(fraction, tween(TICK_MS, easing = LinearEasing))
+    }
+    return playhead.value
+}
 
 /**
  * The seek rail, in both the places the player draws one.
@@ -67,6 +112,7 @@ fun SeekRail(
     // callbacks it was born with.
     val scrubTo by rememberUpdatedState(onScrub)
     val seekTo by rememberUpdatedState(onSeek)
+    val haptics = LocalHapticFeedback.current
     var held by remember { mutableStateOf(false) }
     // The rail thickens under the finger the way the web one does. On the bar,
     // which has no knob, that is the only sign that the grab took at all.
@@ -94,7 +140,12 @@ fun SeekRail(
                     held = false
                     // A drag another handler took over never ended where the
                     // finger left it, so it is not a seek.
-                    if (ended) seekTo(at)
+                    if (ended) {
+                        // The one confirmation a seek gets: the song jumps
+                        // silently, so nothing else says the grab took.
+                        haptics.landed()
+                        seekTo(at)
+                    }
                     scrubTo(null)
                 }
             },

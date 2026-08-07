@@ -101,7 +101,10 @@ fun TrackList(
                 stars = actions.starsOf(track),
                 downloaded = actions.statusOf(track) == DownloadStatus.DONE,
                 coverUrl = coverUrl(track),
-                modifier = Modifier.padding(horizontal = 6.dp),
+                // A row taken out of a playlist, or a list re-sorted under the
+                // finger, moves to its new place instead of the list snapping
+                // into a different shape.
+                modifier = Modifier.animateItem().padding(horizontal = 6.dp),
                 onPlay = { actions.onPlay(index) },
                 onMenu = { menuFor = index to track },
             )
