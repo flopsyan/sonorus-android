@@ -340,6 +340,11 @@ class PlayerController(
      * history, because the queue re-deals its order when it wraps and the track
      * that played is anywhere but one position back. Without shuffle the play
      * order *is* the order on screen, so "before" is one step down it.
+     *
+     * The history is emptied whenever the order is re-dealt by hand, so right
+     * after shuffle was switched on there is nothing behind the running song and
+     * back can only start it over. That is deliberate: the songs before it were
+     * picked in an order that no longer exists.
      */
     fun previous() {
         val state = _state.value
@@ -403,8 +408,13 @@ class PlayerController(
             order = state.order.sorted()
             pos = order.indexOf(current)
         }
-        // A later shuffle must not carry on the path of an earlier one.
-        if (!on) history.clear()
+        // Either way the order has just been re-dealt, so the path walked before
+        // it leads nowhere any more: "back" would look up a track that now sits
+        // somewhere else entirely, jump there, and carry on with a completely
+        // different set of songs behind it. Switching shuffle therefore starts a
+        // fresh path - back restarts the running song until it has really moved
+        // on, and after ten songs it walks those ten.
+        history.clear()
         _state.value = state.copy(order = order, pos = pos, shuffle = on)
         rearrangeAround(order.map { state.queue[it] }, pos)
     }
