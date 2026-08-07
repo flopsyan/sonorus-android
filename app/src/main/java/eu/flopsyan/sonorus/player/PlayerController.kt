@@ -11,6 +11,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import eu.flopsyan.sonorus.data.Library
+import eu.flopsyan.sonorus.data.Shuffle
 import eu.flopsyan.sonorus.data.SonorusApi
 import eu.flopsyan.sonorus.data.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -60,6 +61,10 @@ data class PlayerState(
  * real upcoming order - a requirement carried over from the web app. ExoPlayer
  * is therefore always handed a plain, already-ordered playlist with its own
  * shuffle switched off.
+ *
+ * What rewrites it is [Shuffle], not `shuffled()`: a plain permutation is
+ * correct and still puts the same interpret next to itself often enough that the
+ * shuffle sounds stuck on one artist.
  *
  * Repeat is ExoPlayer's, because the two models agree there.
  */
@@ -239,8 +244,13 @@ class PlayerController(
         history.clear()
         val shuffle = _state.value.shuffle
         val order = if (shuffle) {
-            // Keep the track that was clicked, shuffle everything else behind it.
-            val rest = list.indices.filter { it != start }.shuffled()
+            // Keep the track that was clicked, spread everything else behind it -
+            // and not with its own name first, which is the one repeat the spread
+            // cannot see for itself. See [Shuffle].
+            val rest = Shuffle.spread(
+                items = list.indices.filter { it != start },
+                avoid = Shuffle.artistOf(list[start]),
+            ) { Shuffle.artistOf(list[it]) }
             listOf(start) + rest
         } else {
             list.indices.toList()
@@ -402,7 +412,10 @@ class PlayerController(
         val order: List<Int>
         val pos: Int
         if (on) {
-            val rest = state.order.filter { it != current }.shuffled()
+            val rest = Shuffle.spread(
+                items = state.order.filter { it != current },
+                avoid = Shuffle.artistOf(state.queue[current]),
+            ) { Shuffle.artistOf(state.queue[it]) }
             order = listOf(current) + rest
             pos = 0
         } else {
@@ -425,7 +438,9 @@ class PlayerController(
 
     private fun reshuffleFromStart() {
         val state = _state.value
-        val order = state.order.shuffled()
+        // A new round must not open with the interpret the last one ended on.
+        val last = state.order.getOrNull(state.pos)?.let { Shuffle.artistOf(state.queue[it]) }
+        val order = Shuffle.spread(state.order, avoid = last) { Shuffle.artistOf(state.queue[it]) }
         _state.value = state.copy(order = order, pos = 0)
         pushPlaylist(order.map { state.queue[it] }, 0, 0)
         exoPlayer.playWhenReady = true

@@ -1,5 +1,6 @@
 package eu.flopsyan.sonorus.data.download
 
+import eu.flopsyan.sonorus.data.Shuffle
 import eu.flopsyan.sonorus.data.model.Album
 import eu.flopsyan.sonorus.data.model.Artist
 import eu.flopsyan.sonorus.data.model.ArtistResponse
@@ -409,9 +410,14 @@ object Offline {
         )
     }
 
-    fun shuffle(s: OfflineSnapshot, limit: Int = 60, unrated: Boolean = false): ShuffleResponse {
+    /**
+     * The draw stays per song, as on the server; only the order is spread, so
+     * the same interpret stops following itself. See [Shuffle].
+     */
+    fun shuffle(s: OfflineSnapshot, limit: Int = 300, unrated: Boolean = false): ShuffleResponse {
         val pool = s.tracks.map { it.track }.filter { !unrated || it.stars == 0 }
-        return ShuffleResponse(pool.shuffled().take(limit))
+        val drawn = pool.shuffled().take(limit)
+        return ShuffleResponse(Shuffle.spread(drawn) { Shuffle.artistOf(it) })
     }
 
     /**

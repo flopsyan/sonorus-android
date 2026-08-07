@@ -140,7 +140,7 @@ class Library(
     suspend fun search(q: String): SearchResponse =
         if (offline.value) Offline.search(store.snapshot, q) else api.search(q)
 
-    suspend fun shuffle(limit: Int = 60, unrated: Boolean = false): ShuffleResponse =
+    suspend fun shuffle(limit: Int = 300, unrated: Boolean = false): ShuffleResponse =
         if (offline.value) Offline.shuffle(store.snapshot, limit, unrated) else api.shuffle(limit, unrated)
 
     suspend fun lyrics(id: Int): LyricsResponse =

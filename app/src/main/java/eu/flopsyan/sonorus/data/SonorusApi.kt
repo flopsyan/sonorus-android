@@ -255,8 +255,15 @@ class SonorusApi(private val session: Session) {
 
     suspend fun home(): HomeResponse = get("/api/home")
 
-    /** `unrated` narrows the random run to what has no star yet. */
-    suspend fun shuffle(limit: Int = 60, unrated: Boolean = false): ShuffleResponse =
+    /**
+     * `unrated` narrows the random run to what has no star yet.
+     *
+     * 300 is the web app's number, and it used to be 60 here. Sixty is under
+     * four hours of one run and then the queue wraps and deals the *same* sixty
+     * again - which is most of why the random run on the phone kept turning up
+     * the same names while the browser did not.
+     */
+    suspend fun shuffle(limit: Int = 300, unrated: Boolean = false): ShuffleResponse =
         get(
             "/api/shuffle",
             mapOf("limit" to limit.toString(), "unrated" to if (unrated) "1" else null),

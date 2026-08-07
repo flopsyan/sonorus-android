@@ -342,7 +342,7 @@ class AppViewModel : ViewModel() {
      */
     fun shufflePlay(unrated: Boolean = false) {
         viewModelScope.launch {
-            runCatching { lib.shuffle(60, unrated) }
+            runCatching { lib.shuffle(unrated = unrated) }
                 .onSuccess {
                     if (it.tracks.isEmpty()) {
                         say(if (unrated) "Alles ist bewertet." else "Hier gibt es nichts zum Abspielen.")
