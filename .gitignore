@@ -15,3 +15,6 @@ local.properties
 
 # The release signing secrets. Never committed.
 keystore.properties
+
+# Local Claude Code context: points at a private vault, not for the public repo
+CLAUDE.md
