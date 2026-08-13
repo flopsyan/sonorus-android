@@ -200,10 +200,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     ).joinToString(" · "),
                     coverUrls = listOfNotNull(vm.coverUrl(album.cover)),
                     onPlay = { vm.player.playTracks(tracks, 0, "Album: ${album.title}") },
-                    onShuffle = {
-                        vm.player.setShuffle(true)
-                        vm.player.playTracks(tracks, 0, "Album: ${album.title}")
-                    },
+                    onShuffle = { vm.player.shuffleTracks(tracks, "Album: ${album.title}") },
                     onEdit = { editing = true },
                     download = { CollectionDownload(vm, tracks) },
                 )
@@ -250,10 +247,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         coverUrls = listOfNotNull(vm.coverUrl(artist.cover)),
                         round = true,
                         onPlay = { vm.player.playTracks(tracks, 0, artist.name) },
-                        onShuffle = {
-                            vm.player.setShuffle(true)
-                            vm.player.playTracks(tracks, 0, artist.name)
-                        },
+                        onShuffle = { vm.player.shuffleTracks(tracks, artist.name) },
                         onEdit = { editing = true },
                         download = { CollectionDownload(vm, tracks) },
                     )
@@ -328,10 +322,7 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     subtitle = "${data.artist.name} · ${Fmt.plural(singles.size, "Song", "Songs")}",
                     coverUrls = albumCovers(singles).mapNotNull { vm.coverUrl(it) },
                     onPlay = { vm.player.playTracks(singles, 0, "Singles") },
-                    onShuffle = {
-                        vm.player.setShuffle(true)
-                        vm.player.playTracks(singles, 0, "Singles")
-                    },
+                    onShuffle = { vm.player.shuffleTracks(singles, "Singles") },
                     download = { CollectionDownload(vm, singles) },
                 )
             },
@@ -375,10 +366,7 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
                         ).joinToString(" · "),
                         coverUrls = albumCovers(filtered).mapNotNull { vm.coverUrl(it) },
                         onPlay = { vm.player.playTracks(filtered, 0, label) },
-                        onShuffle = {
-                            vm.player.setShuffle(true)
-                            vm.player.playTracks(filtered, 0, label)
-                        },
+                        onShuffle = { vm.player.shuffleTracks(filtered, label) },
                         download = { CollectionDownload(vm, filtered) },
                     )
                     PickerRow(
@@ -430,10 +418,7 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     ).joinToString(" · "),
                     coverUrls = albumCovers(tracks).mapNotNull { vm.coverUrl(it) },
                     onPlay = { vm.player.playTracks(tracks, 0, data.playlist.name) },
-                    onShuffle = {
-                        vm.player.setShuffle(true)
-                        vm.player.playTracks(tracks, 0, data.playlist.name)
-                    },
+                    onShuffle = { vm.player.shuffleTracks(tracks, data.playlist.name) },
                     // The one collection whose order has to be stored with it.
                     download = { CollectionDownload(vm, tracks, data.playlist) },
                 )

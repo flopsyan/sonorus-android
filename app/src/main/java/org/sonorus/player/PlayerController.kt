@@ -226,6 +226,26 @@ class PlayerController(
     }
 
     /**
+     * A collection put on from its "Zufällig" button.
+     *
+     * Nothing was tapped here, so no song has earned the front of the queue -
+     * and that is the whole point: [adoptQueue] keeps the index it is given in
+     * front while shuffling, so a fixed zero opened every random run of a genre
+     * or an artist with the same song, the first row of the list. Only the rest
+     * was random. The opener is drawn like every other position instead.
+     *
+     * Drawn from what can actually be played rather than from [tracks]: a
+     * missing file is dropped from the queue, and drawing one would fall back to
+     * the front of the list - exactly the song this is here to avoid.
+     */
+    fun shuffleTracks(tracks: List<Track>, source: String = "") {
+        if (!_state.value.shuffle) setShuffle(true)
+        val list = playable(tracks)
+        if (list.isEmpty()) return
+        playTracks(list, list.indices.random(), source)
+    }
+
+    /**
      * The same queue, but for a caller that hands the songs to ExoPlayer itself:
      * Android Auto, where the session sets the playlist the moment a row is
      * tapped. Only the app's own view of the queue is written here - pushing the

@@ -422,10 +422,7 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.coverUrl(it) },
                         onPlay = { vm.player.playTracks(data.genre.tracks, 0, data.genre.name) },
-                        onShuffle = {
-                            vm.player.setShuffle(true)
-                            vm.player.playTracks(data.genre.tracks, 0, data.genre.name)
-                        },
+                        onShuffle = { vm.player.shuffleTracks(data.genre.tracks, data.genre.name) },
                         download = { CollectionDownload(vm, data.genre.tracks) },
                     )
                     all.value?.genres?.let { genres ->
@@ -503,10 +500,7 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.tracks).mapNotNull { vm.coverUrl(it) },
                         onPlay = { vm.player.playTracks(data.tracks, 0, title) },
-                        onShuffle = {
-                            vm.player.setShuffle(true)
-                            vm.player.playTracks(data.tracks, 0, title)
-                        },
+                        onShuffle = { vm.player.shuffleTracks(data.tracks, title) },
                         download = { CollectionDownload(vm, data.tracks) },
                     )
                     PickerRow(
