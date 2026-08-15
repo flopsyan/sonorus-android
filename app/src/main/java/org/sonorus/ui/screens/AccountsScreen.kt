@@ -50,16 +50,17 @@ import org.sonorus.ui.components.SonorusDialog
 import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.theme.SonorusTheme
 import kotlinx.coroutines.launch
+import org.sonorus.ui.components.EmptyNote
 import org.sonorus.ui.components.ServerOnlyNote
 import org.sonorus.ui.LocalOffline
 
 /**
  * The account list.
  *
- * Deliberately visible to everyone - `GET /api/users` is not admin-gated, so
- * every logged-in user sees who has an account. Only creating and deleting are
- * admin-only, and the gate that matters is the server's; hiding the buttons
- * here is just courtesy.
+ * Admin only since 2026-08-15, on both sides: `GET /api/users` answers 403 for
+ * everyone else, so who has an account is nothing a normal user is shown. The
+ * settings screen hides the row as well - this guard is what makes a
+ * hand-typed route land somewhere sensible instead of in a load error.
  *
  * Note the flag is set at creation time only: no endpoint promotes an existing
  * account, so there is nothing here to toggle either.
@@ -71,6 +72,7 @@ fun AccountsScreen(vm: AppViewModel) {
     val colors = SonorusTheme.colors
     val scope = rememberCoroutineScope()
     val isAdmin = vm.bootstrap?.user?.isAdmin == true
+    if (!isAdmin) return EmptyNote("Konten legt ein Administrator an.")
     val me = vm.bootstrap?.user?.id
     var users by remember { mutableStateOf<List<User>?>(null) }
     var creating by remember { mutableStateOf(false) }

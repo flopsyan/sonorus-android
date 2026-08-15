@@ -264,7 +264,11 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             Readout("Angemeldet als", vm.bootstrap?.user?.displayName.orEmpty())
             Readout("Server", vm.api.serverUrl)
             if (!offline) {
-                LinkRow("Konten", "Wer auf diese Instanz zugreift") { onGo(Routes.ACCOUNTS) }
+                // Admin only, front and back: `GET /api/users` says no to
+                // everyone else, so offering the row would lead into an error.
+                if (vm.bootstrap?.user?.isAdmin == true) {
+                    LinkRow("Konten", "Wer auf diese Instanz zugreift") { onGo(Routes.ACCOUNTS) }
+                }
                 LinkRow("Profil", "Name, Avatar und Passwort") { onGo(Routes.PROFILE) }
             }
             // Logging out throws the session away, and with it the way back into
