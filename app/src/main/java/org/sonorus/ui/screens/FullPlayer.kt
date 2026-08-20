@@ -277,7 +277,11 @@ fun SharedTransitionScope.FullPlayer(
                                     swipe = swipe,
                                     onArmed = { haptics.armed() },
                                     onNext = { vm.player.next() },
-                                    onPrevious = { vm.player.previous() },
+                                    // A wipe always leaves for the song before,
+                                    // however far into this one it is - see
+                                    // PlayerController.previous. The button in
+                                    // the transport below keeps the old rule.
+                                    onPrevious = { vm.player.previous(restartFirst = false) },
                                     onClose = onClose,
                                 )
                             },

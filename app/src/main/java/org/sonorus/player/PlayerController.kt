@@ -375,15 +375,21 @@ class PlayerController(
      * after shuffle was switched on there is nothing behind the running song and
      * back can only start it over. That is deliberate: the songs before it were
      * picked in an order that no longer exists.
+     *
+     * [restartFirst] is the classic "first press restarts the song" rule, and
+     * only the transport button keeps it. A wipe right over the artwork sets it
+     * false and always leaves for the song before - a wipe is a page turn, and a
+     * page turn that sometimes only scrolls the page back to the top reads as
+     * the gesture having been missed. Spotify draws the same line.
      */
-    fun previous() {
+    fun previous(restartFirst: Boolean = true) {
         val state = _state.value
         if (state.order.isEmpty()) return
 
-        // The classic rule: more than three seconds in, the first press starts
-        // the track over. The second press is then inside those three seconds
-        // and goes back for real.
-        if (exoPlayer.currentPosition > RESTART_AFTER_MS) {
+        // More than three seconds in, the first press starts the track over. The
+        // second press is then inside those three seconds and goes back for
+        // real.
+        if (restartFirst && exoPlayer.currentPosition > RESTART_AFTER_MS) {
             resetListening()
             exoPlayer.seekTo(0)
             return
