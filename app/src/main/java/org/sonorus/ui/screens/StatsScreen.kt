@@ -102,7 +102,13 @@ fun StatsScreen(vm: AppViewModel) {
             }
         }
 
+        // One root child, and that is not a detail: [LoadBox] puts what it is
+        // given into an `AnimatedContent`, whose slot is a `Box` - so a lambda
+        // that hands it ten siblings draws all ten in the same place. Every
+        // other screen passes a single list and never notices. This page had
+        // the whole statistic stacked on one spot because of it.
         LoadBox(load) { data ->
+          Column(Modifier.fillMaxWidth()) {
             val p = data.listening.period
             val current = period ?: p.key
 
@@ -200,6 +206,7 @@ fun StatsScreen(vm: AppViewModel) {
                 Readout2("Spielzeit", Fmt.durationRack(data.library.duration))
                 Readout2("Größe", Fmt.bytes(data.library.size))
             }
+          }
         }
     }
 }

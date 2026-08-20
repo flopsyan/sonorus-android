@@ -77,6 +77,12 @@ private enum class Phase { WAITING, READY, FAILED }
  * what is coming should pass one: an outline in the size of the rows fills in,
  * where a spinner can only vanish. Screens with nothing predictable to draw
  * leave it out and get the spinner.
+ *
+ * **[content] must draw exactly one root composable.** The slot of an
+ * `AnimatedContent` is a `Box`, so a lambda handing over several siblings draws
+ * them all in the same place rather than under each other. Every screen here
+ * passes one list and never meets this; the statistics page did not, and the
+ * whole page was stacked on one spot until 2026-08-21. Wrap in a `Column`.
  */
 @Composable
 fun <T> LoadBox(
