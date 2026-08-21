@@ -77,6 +77,13 @@ fun TrackList(
     currentTrackId: Int?,
     actions: TrackActions,
     modifier: Modifier = Modifier,
+    /**
+     * Whether the queue that is running was started from *this* list. Handed
+     * over ready-made rather than as a key to compare, because the screen
+     * already holds the player state that the comparison needs and this
+     * component deliberately knows nothing about the player.
+     */
+    currentFromHere: Boolean = true,
     numbered: Boolean = true,
     showAlbum: Boolean = false,
     showYear: Boolean = false,
@@ -96,6 +103,7 @@ fun TrackList(
                 track = track,
                 index = if (numbered) index + 1 else null,
                 isCurrent = track.id == currentTrackId,
+                elsewhere = !currentFromHere,
                 showAlbum = showAlbum,
                 showYear = showYear,
                 stars = actions.starsOf(track),

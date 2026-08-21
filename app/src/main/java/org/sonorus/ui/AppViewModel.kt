@@ -354,7 +354,14 @@ class AppViewModel : ViewModel() {
                     if (it.tracks.isEmpty()) {
                         say(if (unrated) "Alles ist bewertet." else "Hier gibt es nichts zum Abspielen.")
                     } else {
-                        player.playTracks(it.tracks, 0, if (unrated) "Unbewertete" else "Zufall")
+                        player.playTracks(
+                            it.tracks,
+                            0,
+                            if (unrated) "Unbewertete" else "Zufall",
+                            // A mix dealt by the server is no list on screen, so
+                            // it belongs to the page the button sits on.
+                            Routes.HOME,
+                        )
                     }
                 }
                 .onFailure { say(message(it), true) }

@@ -79,6 +79,8 @@ fun trackActions(
     vm: AppViewModel,
     tracks: List<Track>,
     source: String,
+    /** The route this list *is*, so a row can tell where the queue came from. */
+    sourceKey: String,
     onGo: (String) -> Unit,
     onRemove: ((Track) -> Unit)? = null,
 ): TrackActions {
@@ -86,7 +88,7 @@ fun trackActions(
     // reasoning the ratings map follows.
     val downloads by vm.downloads.state.collectAsState()
     return TrackActions(
-        onPlay = { index -> vm.player.playTracks(tracks, index, source) },
+        onPlay = { index -> vm.player.playTracks(tracks, index, source, sourceKey) },
         onPlayNext = { vm.player.playNext(listOf(it)) },
         onEnqueue = { vm.player.enqueue(listOf(it)) },
         // The current rating is the one the view model knows, not the one the row
@@ -184,7 +186,10 @@ private fun Shelf(label: String, tracks: List<Track>, vm: AppViewModel, onGo: (S
                     coverUrl = vm.coverUrl(track.cover),
                     modifier = Modifier.width(150.dp),
                 ) {
-                    vm.player.playTracks(tracks, tracks.indexOf(track), label)
+                    // A shelf on the home page is no list you can look at, so
+                    // the queue belongs to the page itself - which no track list
+                    // carries, and every row marks itself as playing elsewhere.
+                    vm.player.playTracks(tracks, tracks.indexOf(track), label, Routes.HOME)
                 }
             }
         }
@@ -217,7 +222,11 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
         TrackList(
             tracks = data.tracks,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, data.tracks, "Alle Songs", onGo),
+            // Deliberately the plain route: sorting the list rewrites nothing
+            // about *which* list it is, the same call the web app makes by
+            // taking the path without its query.
+            currentFromHere = player.sourceKey == Routes.TRACKS,
+            actions = trackActions(vm, data.tracks, "Alle Songs", Routes.TRACKS, onGo),
             showAlbum = true,
             header = {
                 SortRow(
@@ -403,12 +412,14 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
     val selection = rememberLoad("genre", ids.joinToString(",")) { vm.lib.genre(ids) }
     val all = rememberLoad("all-genres") { vm.lib.genres() }
     val player by vm.player.state.collectAsState()
+    val key = Routes.genre(ids)
 
     LoadBox(selection, skeleton = { DetailSkeleton() }) { data ->
         TrackList(
             tracks = data.genre.tracks,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, data.genre.tracks, data.genre.name, onGo),
+            currentFromHere = player.sourceKey == key,
+            actions = trackActions(vm, data.genre.tracks, data.genre.name, key, onGo),
             showAlbum = true,
             header = {
                 Column {
@@ -421,8 +432,8 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                             Fmt.durationLong(data.genre.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playTracks(data.genre.tracks, 0, data.genre.name) },
-                        onShuffle = { vm.player.shuffleTracks(data.genre.tracks, data.genre.name) },
+                        onPlay = { vm.player.playTracks(data.genre.tracks, 0, data.genre.name, key) },
+                        onShuffle = { vm.player.shuffleTracks(data.genre.tracks, data.genre.name, key) },
                         download = { CollectionDownload(vm, data.genre.tracks) },
                     )
                     all.value?.genres?.let { genres ->
@@ -478,6 +489,7 @@ fun PickerRow(
 fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
     val load = rememberLoad("stars", values.joinToString(",")) { vm.lib.stars(values) }
     val player by vm.player.state.collectAsState()
+    val key = Routes.stars(values)
     val counts = vm.bootstrap?.stars?.mapKeys { it.key.toIntOrNull() ?: -1 } ?: emptyMap()
 
     LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
@@ -485,7 +497,8 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
         TrackList(
             tracks = data.tracks,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, data.tracks, title, onGo),
+            currentFromHere = player.sourceKey == key,
+            actions = trackActions(vm, data.tracks, title, key, onGo),
             showAlbum = true,
             header = {
                 Column {
@@ -499,8 +512,8 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
                             Fmt.durationLong(data.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.tracks).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playTracks(data.tracks, 0, title) },
-                        onShuffle = { vm.player.shuffleTracks(data.tracks, title) },
+                        onPlay = { vm.player.playTracks(data.tracks, 0, title, key) },
+                        onShuffle = { vm.player.shuffleTracks(data.tracks, title, key) },
                         download = { CollectionDownload(vm, data.tracks) },
                     )
                     PickerRow(
@@ -560,7 +573,11 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     TrackList(
                         tracks = data.tracks,
                         currentTrackId = player.current?.id,
-                        actions = trackActions(vm, data.tracks, "Suche", onGo),
+                        // One key for every search, so two different words
+                        // share it. That marks one song a shade too strongly
+                        // and breaks nothing - the same trade the web app makes.
+                        currentFromHere = player.sourceKey == Routes.SEARCH,
+                        actions = trackActions(vm, data.tracks, "Suche", Routes.SEARCH, onGo),
                         showAlbum = true,
                         header = {
                             Column {

@@ -169,6 +169,7 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist
 fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("album", id) { vm.lib.album(id) }
     val player by vm.player.state.collectAsState()
+    val key = Routes.album(id)
 
     var editing by remember { mutableStateOf(false) }
 
@@ -186,7 +187,8 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
         TrackList(
             tracks = tracks,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, tracks, "Album: ${album.title}", onGo),
+            currentFromHere = player.sourceKey == key,
+            actions = trackActions(vm, tracks, "Album: ${album.title}", key, onGo),
             header = {
                 DetailHead(
                     title = album.title,
@@ -199,8 +201,8 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.durationLong(album.duration),
                     ).joinToString(" · "),
                     coverUrls = listOfNotNull(vm.coverUrl(album.cover)),
-                    onPlay = { vm.player.playTracks(tracks, 0, "Album: ${album.title}") },
-                    onShuffle = { vm.player.shuffleTracks(tracks, "Album: ${album.title}") },
+                    onPlay = { vm.player.playTracks(tracks, 0, "Album: ${album.title}", key) },
+                    onShuffle = { vm.player.shuffleTracks(tracks, "Album: ${album.title}", key) },
                     onEdit = { editing = true },
                     download = { CollectionDownload(vm, tracks) },
                 )
@@ -216,6 +218,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("artist", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
+    val key = Routes.artist(id)
 
     var editing by remember { mutableStateOf(false) }
 
@@ -234,7 +237,8 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
         TrackList(
             tracks = tracks,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, tracks, artist.name, onGo),
+            currentFromHere = player.sourceKey == key,
+            actions = trackActions(vm, tracks, artist.name, key, onGo),
             showAlbum = true,
             header = {
                 Column {
@@ -246,8 +250,8 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         ).joinToString(" · "),
                         coverUrls = listOfNotNull(vm.coverUrl(artist.cover)),
                         round = true,
-                        onPlay = { vm.player.playTracks(tracks, 0, artist.name) },
-                        onShuffle = { vm.player.shuffleTracks(tracks, artist.name) },
+                        onPlay = { vm.player.playTracks(tracks, 0, artist.name, key) },
+                        onShuffle = { vm.player.shuffleTracks(tracks, artist.name, key) },
                         onEdit = { editing = true },
                         download = { CollectionDownload(vm, tracks) },
                     )
@@ -307,13 +311,15 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("singles", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
+    val key = Routes.artistSingles(id)
 
     LoadBox(load, skeleton = { DetailSkeleton(round = true) }) { data ->
         val singles = data.artist.singles
         TrackList(
             tracks = singles,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, singles, "${data.artist.name}: Singles", onGo),
+            currentFromHere = player.sourceKey == key,
+            actions = trackActions(vm, singles, "${data.artist.name}: Singles", key, onGo),
             // The singles list swaps the always-empty album column for a year.
             showYear = true,
             header = {
@@ -321,8 +327,8 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     title = "Singles",
                     subtitle = "${data.artist.name} · ${Fmt.plural(singles.size, "Song", "Songs")}",
                     coverUrls = albumCovers(singles).mapNotNull { vm.coverUrl(it) },
-                    onPlay = { vm.player.playTracks(singles, 0, "Singles") },
-                    onShuffle = { vm.player.shuffleTracks(singles, "Singles") },
+                    onPlay = { vm.player.playTracks(singles, 0, "Singles", key) },
+                    onShuffle = { vm.player.shuffleTracks(singles, "Singles", key) },
                     download = { CollectionDownload(vm, singles) },
                 )
             },
@@ -341,6 +347,7 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (String) -> Unit) {
     val load = rememberLoad("artist-stars", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
+    val key = Routes.artistStars(id, values)
 
     LoadBox(load, skeleton = { DetailSkeleton(round = true) }) { data ->
         val filtered = data.artist.tracks.filter { it.stars in values }
@@ -352,7 +359,8 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
         TrackList(
             tracks = filtered,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, filtered, data.artist.name, onGo),
+            currentFromHere = player.sourceKey == key,
+            actions = trackActions(vm, filtered, data.artist.name, key, onGo),
             showAlbum = true,
             header = {
                 val label = values.sortedDescending().joinToString(", ") { starLabel(it) }
@@ -365,8 +373,8 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
                             Fmt.durationLong(filtered.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(filtered).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playTracks(filtered, 0, label) },
-                        onShuffle = { vm.player.shuffleTracks(filtered, label) },
+                        onPlay = { vm.player.playTracks(filtered, 0, label, key) },
+                        onShuffle = { vm.player.shuffleTracks(filtered, label, key) },
                         download = { CollectionDownload(vm, filtered) },
                     )
                     PickerRow(
@@ -387,16 +395,19 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
 fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("playlist", id) { vm.lib.playlist(id) }
     val player by vm.player.state.collectAsState()
+    val key = Routes.playlist(id)
 
     LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
         val tracks = data.tracks
         TrackList(
             tracks = tracks,
             currentTrackId = player.current?.id,
+            currentFromHere = player.sourceKey == key,
             actions = trackActions(
                 vm = vm,
                 tracks = tracks,
                 source = data.playlist.name,
+                sourceKey = key,
                 onGo = onGo,
                 onRemove = { track ->
                     track.itemId?.let { item ->
@@ -417,8 +428,8 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.durationLong(tracks.sumOf { it.duration }),
                     ).joinToString(" · "),
                     coverUrls = albumCovers(tracks).mapNotNull { vm.coverUrl(it) },
-                    onPlay = { vm.player.playTracks(tracks, 0, data.playlist.name) },
-                    onShuffle = { vm.player.shuffleTracks(tracks, data.playlist.name) },
+                    onPlay = { vm.player.playTracks(tracks, 0, data.playlist.name, key) },
+                    onShuffle = { vm.player.shuffleTracks(tracks, data.playlist.name, key) },
                     // The one collection whose order has to be stored with it.
                     download = { CollectionDownload(vm, tracks, data.playlist) },
                 )

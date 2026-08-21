@@ -28,6 +28,7 @@ import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.download.Offline
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
+import org.sonorus.ui.Routes
 import org.sonorus.ui.components.Chip
 import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.Progress
@@ -68,7 +69,8 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
         TrackList(
             tracks = tracks,
             currentTrackId = player.current?.id,
-            actions = trackActions(vm, tracks, "Downloads", onGo),
+            currentFromHere = player.sourceKey == Routes.DOWNLOADS,
+            actions = trackActions(vm, tracks, "Downloads", Routes.DOWNLOADS, onGo),
             showAlbum = true,
             numbered = false,
             coverUrl = { vm.coverUrl(it.cover) },

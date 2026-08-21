@@ -27,6 +27,13 @@ data class SonorusColors(
     val accent: Color,
     val accentHi: Color,
     val accentSoft: Color,
+    /**
+     * The lamp turned down, for the song that is playing *somewhere else*: it
+     * is the same song seen from further away, and a second hue would say it
+     * was a different thing. [accentDim] carries a title, [accentGhost] a row.
+     */
+    val accentDim: Color,
+    val accentGhost: Color,
     val accentLine: Color,
     val accentInk: Color,
     val danger: Color,
@@ -49,6 +56,8 @@ val SonorusDarkColors = SonorusColors(
     accent = Color(0xFFF5A524),
     accentHi = Color(0xFFFFBE57),
     accentSoft = Color(0x24F5A524),
+    accentDim = Color(0x85F5A524),
+    accentGhost = Color(0x0DF5A524),
     accentLine = Color(0x59F5A524),
     accentInk = Color(0xFF24170A),
     danger = Color(0xFFF0705F),
@@ -72,6 +81,8 @@ val SonorusLightColors = SonorusColors(
     accent = Color(0xFFA86400),
     accentHi = Color(0xFF8A5100),
     accentSoft = Color(0x1FA86400),
+    accentDim = Color(0x8CA86400),
+    accentGhost = Color(0x0FA86400),
     accentLine = Color(0x4DA86400),
     accentInk = Color(0xFFFFFFFF),
     danger = Color(0xFFC0392B),

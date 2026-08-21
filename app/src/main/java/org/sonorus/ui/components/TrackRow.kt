@@ -63,6 +63,17 @@ fun TrackRow(
     /** The running number, or null to show artwork instead. */
     index: Int? = null,
     isCurrent: Boolean = false,
+    /**
+     * The song is the one playing, but the queue was started somewhere else -
+     * from this album's page while you are looking at "Alle Songs", say.
+     *
+     * A song sits in an album, on its interpret's page, in three playlists and
+     * in the search at once, and marking every one of them the same says less
+     * than marking none. The list it is really playing from keeps the full
+     * lamp; the others get the same lamp turned down - "yes, that one, but it
+     * is running somewhere else".
+     */
+    elsewhere: Boolean = false,
     showAlbum: Boolean = false,
     showYear: Boolean = false,
     /** The rating to draw. Passed in, because a row given a star has to redraw
@@ -80,7 +91,11 @@ fun TrackRow(
     // stepping from song to song by itself, the marker travelling down the list
     // is what says *which* song without having to be read.
     val plate by animateColorAsState(
-        if (isCurrent) colors.accentSoft else Color.Transparent,
+        when {
+            isCurrent && elsewhere -> colors.accentGhost
+            isCurrent -> colors.accentSoft
+            else -> Color.Transparent
+        },
         Motion.standard(),
         label = "current",
     )
@@ -113,8 +128,8 @@ fun TrackRow(
                     if (playing) {
                         Icon(
                             Icons.Filled.VolumeUp,
-                            contentDescription = "Läuft gerade",
-                            tint = colors.accent,
+                            contentDescription = if (elsewhere) "Läuft woanders" else "Läuft gerade",
+                            tint = if (elsewhere) colors.accentDim else colors.accent,
                             modifier = Modifier.size(15.dp),
                         )
                     } else {
@@ -134,6 +149,7 @@ fun TrackRow(
             val ink by animateColorAsState(
                 when {
                     dim -> colors.textFaint
+                    isCurrent && elsewhere -> colors.accentDim
                     isCurrent -> colors.accent
                     else -> colors.text
                 },

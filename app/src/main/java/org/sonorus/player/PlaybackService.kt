@@ -178,7 +178,11 @@ class PlaybackService : MediaLibraryService() {
                 val queued = runCatching {
                     val list = tree.tracksOf(parent)
                     val at = list.indexOfFirst { it.id == trackId }.coerceAtLeast(0)
-                    app.player.adoptQueue(list, at, tree.label(parent))
+                    // The browse ids *are* the app's routes (`albums/7`), so
+                    // the node a song was tapped under is already the key the
+                    // screens compare against - put an album on in the car and
+                    // its page on the phone marks it as playing from there.
+                    app.player.adoptQueue(list, at, tree.label(parent), parent)
                 }.getOrNull()
                 future.set(
                     if (queued == null || queued.tracks.isEmpty()) unchanged

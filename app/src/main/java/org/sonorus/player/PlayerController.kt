@@ -48,6 +48,17 @@ data class PlayerState(
     val durationMs: Long = 0,
     /** Where the queue came from, e.g. "Album: Kid A". */
     val source: String = "",
+    /**
+     * The *route* the queue was started from - `albums/3`, `stars/5,4`,
+     * `downloads`. The label above says it in words for a human; this one is
+     * for comparing, so that a list can tell whether the song it is drawing is
+     * playing from *it* or from somewhere else entirely.
+     *
+     * Empty for a queue nothing named a list for: one built by hand out of
+     * single tracks belongs to no page, so every row marks itself as playing
+     * from elsewhere. That is correct rather than a gap.
+     */
+    val sourceKey: String = "",
 ) {
     val current: Track? get() = order.getOrNull(pos)?.let { queue.getOrNull(it) }
     val hasNext: Boolean get() = repeat != "off" || pos < order.size - 1
@@ -249,7 +260,7 @@ class PlayerController(
         // is easy to forget in the eleventh.
         scope.launch {
             _state
-                .map { QueueKey(it.queue.map(Track::id), it.order, it.pos, it.source) }
+                .map { QueueKey(it.queue.map(Track::id), it.order, it.pos, it.source, it.sourceKey) }
                 .distinctUntilChanged()
                 .collect { saveQueue() }
         }
@@ -270,6 +281,7 @@ class PlayerController(
                 order = state.order,
                 pos = state.pos,
                 source = state.source,
+                sourceKey = state.sourceKey,
                 positionMs = savedPositionMs,
             ),
         )
@@ -312,6 +324,7 @@ class PlayerController(
                 order = order,
                 pos = pos,
                 source = stored.source,
+                sourceKey = stored.sourceKey,
                 positionMs = stored.positionMs,
             )
             savedPositionMs = stored.positionMs
@@ -338,8 +351,8 @@ class PlayerController(
      * list, or clicking row 5 of a list with a missing row 2 would start the
      * wrong song.
      */
-    fun playTracks(tracks: List<Track>, startIndex: Int = 0, source: String = "") {
-        val queued = adoptQueue(tracks, startIndex, source)
+    fun playTracks(tracks: List<Track>, startIndex: Int = 0, source: String = "", sourceKey: String = "") {
+        val queued = adoptQueue(tracks, startIndex, source, sourceKey)
         if (queued.tracks.isEmpty()) return
         pushPlaylist(queued.tracks, queued.startIndex, 0)
         exoPlayer.playWhenReady = true
@@ -358,11 +371,11 @@ class PlayerController(
      * missing file is dropped from the queue, and drawing one would fall back to
      * the front of the list - exactly the song this is here to avoid.
      */
-    fun shuffleTracks(tracks: List<Track>, source: String = "") {
+    fun shuffleTracks(tracks: List<Track>, source: String = "", sourceKey: String = "") {
         if (!_state.value.shuffle) setShuffle(true)
         val list = playable(tracks)
         if (list.isEmpty()) return
-        playTracks(list, list.indices.random(), source)
+        playTracks(list, list.indices.random(), source, sourceKey)
     }
 
     /**
@@ -375,7 +388,12 @@ class PlayerController(
      * rewritten order in this app, not a mode of ExoPlayer's, and the car has to
      * play the same order the phone would.
      */
-    fun adoptQueue(tracks: List<Track>, startIndex: Int = 0, source: String = ""): Queued {
+    fun adoptQueue(
+        tracks: List<Track>,
+        startIndex: Int = 0,
+        source: String = "",
+        sourceKey: String = "",
+    ): Queued {
         val wanted = tracks.getOrNull(startIndex)
         val list = playable(tracks)
         if (list.isEmpty()) return Queued(emptyList(), 0)
@@ -397,7 +415,9 @@ class PlayerController(
         }
         val pos = if (shuffle) 0 else start
 
-        _state.value = _state.value.copy(queue = list, order = order, pos = pos, source = source)
+        _state.value = _state.value.copy(
+            queue = list, order = order, pos = pos, source = source, sourceKey = sourceKey,
+        )
         resetListening()
         startTicker()
         return Queued(order.map { list[it] }, pos)
@@ -415,7 +435,10 @@ class PlayerController(
         if (state.pos < 0) {
             exoPlayer.prepare()
             exoPlayer.playWhenReady = true
-            _state.value = _state.value.copy(pos = 0)
+            // Nothing named a list here: the queue was built by hand out of
+            // single tracks, so it belongs to no page and every row marks
+            // itself as playing from somewhere else. Which is what happened.
+            _state.value = _state.value.copy(pos = 0, sourceKey = "")
             startTicker()
         }
     }
@@ -442,7 +465,7 @@ class PlayerController(
         exoPlayer.clearMediaItems()
         _state.value = _state.value.copy(
             queue = emptyList(), order = emptyList(), pos = -1,
-            playing = false, source = "", positionMs = 0, durationMs = 0,
+            playing = false, source = "", sourceKey = "", positionMs = 0, durationMs = 0,
         )
         ticker?.cancel()
         ticker = null
@@ -763,6 +786,7 @@ private data class SavedQueue(
     val order: List<Int> = emptyList(),
     val pos: Int = -1,
     val source: String = "",
+    val sourceKey: String = "",
     val positionMs: Long = 0,
 )
 
@@ -775,4 +799,5 @@ private data class QueueKey(
     val order: List<Int>,
     val pos: Int,
     val source: String,
+    val sourceKey: String,
 )
