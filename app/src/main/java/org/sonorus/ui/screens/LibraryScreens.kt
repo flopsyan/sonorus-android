@@ -323,6 +323,10 @@ private val ALBUM_SORTS = listOf(
     "artist" to "Interpret",
     "year" to "Jahr",
     "tracks" to "Songs",
+    // The stars on the record itself, not on its songs. A record nobody has
+    // rated sorts to the end of both directions - it is not the worst one, it
+    // was never judged.
+    "stars" to "Bewertung",
 )
 
 @UnstableApi
@@ -361,6 +365,10 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
                     Fmt.year(album.releaseDate, album.year).takeIf { it.isNotEmpty() },
                 ).joinToString(" · "),
                 coverUrl = vm.coverUrl(album.cover),
+                // From the view model and not from the row: a record rated on
+                // this phone has to redraw here too, and nothing refetches the
+                // grid. Same reason as the stars on a track row.
+                stars = vm.albumStarsOf(album),
                 // Re-sorting the grid slides the cards to their new places
                 // instead of the whole page changing under the finger.
                 modifier = Modifier.animateItem(),

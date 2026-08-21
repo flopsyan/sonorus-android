@@ -263,6 +263,9 @@ object Offline {
                 compareBy<Album> { it.releaseDate.take(4).toIntOrNull() ?: it.year ?: 0 }.then(byTitle)
             )
             "tracks" -> albums.sortedWith(compareBy<Album> { it.trackCount }.then(byTitle))
+            // "stars" falls through on purpose: a snapshot is built out of the
+            // songs on this phone and carries no album ratings, so there is
+            // nothing to sort by. Title order beats an order that pretends.
             else -> albums.sortedWith(byTitle)
         }
         return AlbumsResponse(if (dir == "desc") sorted.reversed() else sorted)

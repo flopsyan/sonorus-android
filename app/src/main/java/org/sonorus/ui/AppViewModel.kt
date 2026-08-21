@@ -9,6 +9,7 @@ import org.sonorus.data.ApiException
 import org.sonorus.data.Library
 import org.sonorus.data.SonorusApi
 import org.sonorus.data.download.Downloads
+import org.sonorus.data.model.Album
 import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Playlist
@@ -334,6 +335,37 @@ class AppViewModel : ViewModel() {
                     ratings[trackId] = it.stars
                     onDone(it.stars)
                     refreshQuietly()
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    /**
+     * The same for whole records, and a map of its own: an album and a track can
+     * carry the same id, so one map would have them overwrite each other.
+     *
+     * It exists for the reason [ratings] does - a screen fetches once and the
+     * star given here would otherwise still be drawn the old way - and it is
+     * read by the Alben grid as well as by the album's own page.
+     */
+    private val albumRatings = mutableStateMapOf<Int, Int>()
+
+    /** The rating to draw for [album]: what this phone last set, else the row's. */
+    fun albumStarsOf(album: Album): Int = albumRatings[album.id] ?: album.stars
+
+    /**
+     * Rates a whole record. Clicking the star it already has clears it, the same
+     * as a song - and no star playlist reads this, so unlike [rate] there is
+     * nothing to refresh afterwards.
+     */
+    fun rateAlbum(albumId: Int, stars: Int, current: Int, onDone: (Int) -> Unit = {}) {
+        if (needsServer()) return
+        val next = if (current == stars) 0 else stars
+        viewModelScope.launch {
+            runCatching { api.rateAlbum(albumId, next) }
+                .onSuccess {
+                    albumRatings[albumId] = it.stars
+                    onDone(it.stars)
                 }
                 .onFailure { say(message(it), true) }
         }

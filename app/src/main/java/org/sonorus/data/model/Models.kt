@@ -72,6 +72,20 @@ data class Album(
     val trackCount: Int = 0,
     val duration: Double = 0.0,
     /**
+     * The stars this account gave the record itself, 0 for one nobody has rated.
+     *
+     * Completely independent of the songs in [tracks] and never derived from
+     * them: a five-star record may hold a song that never got a star, and both
+     * statements are true at once. Unlike a track rating it feeds no star
+     * playlist - it is there to show in the Alben grid and to sort it by.
+     *
+     * Only the list and detail endpoints send it, so it stays 0 on an album that
+     * arrived through the home screen or an artist page - neither draws stars.
+     * The offline snapshot builds its albums out of downloaded songs and knows
+     * no ratings at all, so it says 0 for every record.
+     */
+    val stars: Int = 0,
+    /**
      * The genres of the album, which is a fact about the album and not about
      * whatever songs are in it right now - the server hands them down to every
      * one of them, the ones the folder gains later included. Only the detail

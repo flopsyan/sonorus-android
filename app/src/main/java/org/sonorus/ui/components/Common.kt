@@ -431,6 +431,13 @@ fun MediaCard(
     modifier: Modifier = Modifier,
     coverUrls: List<String> = emptyList(),
     round: Boolean = false,
+    /**
+     * Stars under the subtitle, for a card that stands for something rated - a
+     * record. 0 draws nothing at all, the way a track row leaves the cell empty
+     * rather than showing five outlines. They are never set from here: the card
+     * is one tap that opens the thing, and its own page is where it is rated.
+     */
+    stars: Int = 0,
     onClick: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -466,6 +473,15 @@ fun MediaCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = if (round) TextAlign.Center else null,
+                modifier = if (round) Modifier.fillMaxWidth() else Modifier,
+            )
+        }
+        if (stars > 0) {
+            Spacer(Modifier.height(3.dp))
+            Stars(
+                stars,
+                size = 12,
+                enabled = false,
                 modifier = if (round) Modifier.fillMaxWidth() else Modifier,
             )
         }

@@ -290,6 +290,14 @@ class SonorusApi(private val session: Session) {
     suspend fun rate(trackId: Int, stars: Int): RatingResponse =
         put("/api/tracks/$trackId/rating", buildJsonObject { put("stars", stars) })
 
+    /**
+     * The stars on a whole record, which no song of it knows about. The same
+     * shape as [rate], minus the counts - those describe the star playlists, and
+     * an album rating feeds none.
+     */
+    suspend fun rateAlbum(albumId: Int, stars: Int): RatingResponse =
+        put("/api/albums/$albumId/rating", buildJsonObject { put("stars", stars) })
+
     suspend fun startPlay(trackId: Int, seconds: Double): PlayResponse =
         post("/api/plays", buildJsonObject {
             put("trackId", trackId)

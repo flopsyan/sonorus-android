@@ -46,6 +46,10 @@ reached again, the app switches back by itself.
 Anything that needs a connection is switched off while offline and says so:
 rating, changing playlists, statistics, notices, accounts, scan and import.
 
+The offline library is built out of the songs on the device, so it carries no
+**album ratings**: an offline album shows no stars and sorting the grid by
+rating falls back to the title. The stars are back as soon as a server is.
+
 Under **Downloads** (in the sidebar) is what lies on the device and how much
 space it takes. That is also where the two switches live: *Wi-Fi only* and a
 manual *offline mode*, which stays on the downloads even when a connection

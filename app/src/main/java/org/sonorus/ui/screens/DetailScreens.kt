@@ -42,6 +42,7 @@ import org.sonorus.ui.components.MediaCard
 import org.sonorus.ui.components.RackLabelText
 import org.sonorus.ui.components.Section
 import org.sonorus.ui.components.SonorusButton
+import org.sonorus.ui.components.Stars
 import org.sonorus.ui.components.TrackList
 import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.starLabel
@@ -67,6 +68,13 @@ fun DetailHead(
     onEdit: (() -> Unit)? = null,
     /** The download control, which every collection has and only its head draws. */
     download: (@Composable () -> Unit)? = null,
+    /**
+     * The stars of the collection itself, for the one kind that has any: a
+     * record. Given its own row under the buttons rather than a place among
+     * them - "Bearbeiten" next to it changes the shared library, while a rating
+     * belongs to the account alone, and the two must not read as one set.
+     */
+    rating: (@Composable () -> Unit)? = null,
 ) {
     val colors = SonorusTheme.colors
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -110,6 +118,16 @@ fun DetailHead(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 download?.invoke()
                 onEdit?.let { SonorusButton("Bearbeiten", onClick = it) }
+            }
+        }
+        rating?.let {
+            Spacer(Modifier.height(14.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                RackLabelText("Album bewerten")
+                it()
             }
         }
     }
@@ -205,6 +223,13 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     onShuffle = { vm.player.shuffleTracks(tracks, "Album: ${album.title}", key) },
                     onEdit = { editing = true },
                     download = { CollectionDownload(vm, tracks) },
+                    // The one place a record is rated, and deliberately apart
+                    // from the stars in the list below it: those belong to the
+                    // songs and neither one follows the other.
+                    rating = {
+                        val stars = vm.albumStarsOf(album)
+                        Stars(stars, size = 20) { vm.rateAlbum(album.id, it, stars) }
+                    },
                 )
             },
         )
