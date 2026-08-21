@@ -19,6 +19,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -56,6 +58,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,7 +74,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -92,6 +98,7 @@ import org.sonorus.ui.Fmt
 import org.sonorus.ui.Motion
 import org.sonorus.ui.Routes
 import org.sonorus.ui.armed
+import org.sonorus.ui.pressable
 import org.sonorus.ui.components.Cover
 import org.sonorus.ui.components.PlayerCoverKey
 import org.sonorus.ui.components.RackLabelText
@@ -183,7 +190,17 @@ fun SharedTransitionScope.FullPlayer(
     Box(
         Modifier
             .fillMaxSize()
-            .background(colors.bg)
+            // The chassis lifted towards the top rather than one flat black.
+            // Same two tokens the rest of the app is built from - a player that
+            // tinted itself from the artwork would be a second colour, and this
+            // design has exactly one lamp.
+            .background(
+                Brush.verticalGradient(
+                    0f to colors.surface,
+                    0.5f to colors.bg,
+                    1f to colors.bg,
+                )
+            )
             // Nothing behind the player may be hit through it. A dialog got this
             // from its own window; an overlay has to claim the taps itself.
             .clickable(
@@ -193,7 +210,7 @@ fun SharedTransitionScope.FullPlayer(
             )
             .systemBarsPadding()
     ) {
-        Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -310,7 +327,7 @@ fun SharedTransitionScope.FullPlayer(
                         }
                     }
                 } else {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(20.dp))
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -330,6 +347,17 @@ fun SharedTransitionScope.FullPlayer(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
+                        // Paused pulls the record back a little, the way a deck
+                        // lifts the arm off it. It is the one place the whole
+                        // screen says "stopped" without a word for it, and it is
+                        // drawn rather than laid out - the shared element the
+                        // cover takes part in measures the real bounds, and
+                        // those must not move under it.
+                        val lift by animateFloatAsState(
+                            if (state.playing) 1f else 0.93f,
+                            Motion.travel(),
+                            label = "coverLift",
+                        )
                         Cover(
                             vm.coverUrl(track.cover),
                             Modifier
@@ -344,12 +372,13 @@ fun SharedTransitionScope.FullPlayer(
                                 .aspectRatio(1f)
                                 // The artwork follows the finger, so a wipe says
                                 // what it is about to do before it is let go.
-                                .offset { IntOffset(swipe.value.toInt(), 0) },
-                            RoundedCornerShape(14.dp),
+                                .offset { IntOffset(swipe.value.toInt(), 0) }
+                                .graphicsLayer { scaleX = lift; scaleY = lift },
+                            RoundedCornerShape(20.dp),
                             track.title,
                         )
                     }
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(24.dp))
                     // The one line of the lyric a phone has room for without
                     // leaving the player, in the gap between the artwork and the
                     // title. Only a timed lyric has a line to point at, and a
@@ -369,52 +398,45 @@ fun SharedTransitionScope.FullPlayer(
                         )
                         Spacer(Modifier.height(14.dp))
                     }
-                    Text(
-                        track.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = colors.text,
-                        maxLines = 1,
-                        // Set large enough that plenty of titles do not fit, and
-                        // this is the screen you are looking at to read the name.
-                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        listOfNotNull(
-                            track.artist.takeIf { it.isNotEmpty() },
-                            track.album.takeIf { it.isNotEmpty() },
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textDim,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        // A song on a "Various" compilation names an interpret
-                        // that has no page of its own, so there the line is not
-                        // a target at all instead of a tap that does nothing.
-                        modifier = track.artistId?.let { artistId ->
-                            Modifier.clickable { onGo(Routes.artist(artistId)) }
-                        } ?: Modifier,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    // The full screen shows the stars again - the bar has no
-                    // room for them, so this is one of the ways to hand out a
-                    // rating on a phone. Next to them the one other thing worth
-                    // doing with a song you are hearing: put it on a list.
-                    // Deliberately nothing beyond that - the row's own menu
-                    // carries the rest.
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        // The queue holds the track as it was when it was added,
-                        // so its own stars go stale the moment one is given here.
-                        val stars = vm.starsOf(track)
-                        Stars(stars, size = 30) { value ->
-                            vm.rate(track.id, value, stars)
+                    // The name of the song is what this screen is opened to
+                    // read, so it is set at the top of the scale rather than
+                    // the same size as a list row - and the one other thing
+                    // worth doing with a song you are hearing sits beside it
+                    // instead of below, which is what kept the block stacked.
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                track.title,
+                                style = MaterialTheme.typography.displaySmall,
+                                color = colors.text,
+                                maxLines = 1,
+                                // Set large enough that plenty of titles do not
+                                // fit, and this is the screen you are looking at
+                                // to read the name.
+                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                listOfNotNull(
+                                    track.artist.takeIf { it.isNotEmpty() },
+                                    track.album.takeIf { it.isNotEmpty() },
+                                ).joinToString(" · "),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = colors.textDim,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                // A song on a "Various" compilation names an
+                                // interpret that has no page of its own, so
+                                // there the line is not a target at all instead
+                                // of a tap that does nothing.
+                                modifier = track.artistId?.let { artistId ->
+                                    Modifier.clickable { onGo(Routes.artist(artistId)) }
+                                } ?: Modifier,
+                            )
                         }
                         IconButton(
                             onClick = { vm.askForPlaylist(track, allowCreate = false) },
-                            modifier = Modifier.size(40.dp),
+                            modifier = Modifier.size(44.dp),
                         ) {
                             Icon(
                                 Icons.Filled.Add,
@@ -424,9 +446,21 @@ fun SharedTransitionScope.FullPlayer(
                             )
                         }
                     }
+                    Spacer(Modifier.height(6.dp))
+                    // The full screen shows the stars again - the bar has no
+                    // room for them, so this is one of the ways to hand out a
+                    // rating on a phone. Deliberately nothing beyond that: the
+                    // row's own menu carries the rest.
+                    //
+                    // The queue holds the track as it was when it was added, so
+                    // its own stars go stale the moment one is given here.
+                    val stars = vm.starsOf(track)
+                    Stars(stars, size = 24) { value ->
+                        vm.rate(track.id, value, stars)
+                    }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(20.dp))
 
                 // Seek rail. While it is held the position is only drawn, and
                 // the seek runs on release - writing the position on every move
@@ -446,10 +480,10 @@ fun SharedTransitionScope.FullPlayer(
                             vm.player.seekTo((state.durationMs * f).toLong())
                         }
                     },
-                    height = 26.dp,
-                    thickness = 6.dp,
+                    height = 24.dp,
+                    thickness = 4.dp,
                     rounded = true,
-                    knob = 11.dp,
+                    knob = 10.dp,
                 )
                 Row(
                     Modifier.fillMaxWidth(),
@@ -467,11 +501,17 @@ fun SharedTransitionScope.FullPlayer(
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
+                // Five controls that used to carry the same weight, and one of
+                // them is the reason the screen is open. Play/pause is now the
+                // only filled surface anywhere in the player, so the thumb
+                // finds it without looking; the two skips stay glyphs, and the
+                // two modes - which are settings rather than actions - sit
+                // quieter still at the edges.
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     IconButton(onClick = {
                         vm.player.setShuffle(!state.shuffle)
@@ -483,22 +523,26 @@ fun SharedTransitionScope.FullPlayer(
                             Motion.quick(),
                             label = "shuffle",
                         )
-                        Icon(Icons.Filled.Shuffle, "Zufall", tint = tint)
+                        Icon(Icons.Filled.Shuffle, "Zufall", tint = tint, modifier = Modifier.size(22.dp))
                     }
-                    IconButton(onClick = { vm.player.previous() }) {
-                        Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(34.dp))
+                    IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(52.dp)) {
+                        Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(36.dp))
                     }
-                    IconButton(
-                        onClick = {
-                            haptics.toggled(!state.playing)
-                            vm.player.toggle()
-                        },
-                        modifier = Modifier.size(64.dp),
+                    Box(
+                        Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(colors.accent)
+                            .pressable(dip = 0.94f) {
+                                haptics.toggled(!state.playing)
+                                vm.player.toggle()
+                            },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        TransportGlyph(state.playing, tint = colors.accent, size = 52.dp)
+                        TransportGlyph(state.playing, tint = colors.accentInk, size = 34.dp)
                     }
-                    IconButton(onClick = { vm.player.next() }) {
-                        Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(34.dp))
+                    IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(52.dp)) {
+                        Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(36.dp))
                     }
                     IconButton(onClick = {
                         vm.player.cycleRepeat()
@@ -525,10 +569,12 @@ fun SharedTransitionScope.FullPlayer(
                                 if (one) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
                                 "Wiederholen",
                                 tint = tint,
+                                modifier = Modifier.size(22.dp),
                             )
                         }
                     }
                 }
+                Spacer(Modifier.height(10.dp))
         }
     }
 }
@@ -654,6 +700,9 @@ private fun formatOffset(seconds: Double): String {
  * Zero is the karaoke lead-in of [LYRICS_LEAD_SECONDS] and nothing more, which
  * is why the control reads `0,0 s` where the text is already a second early.
  */
+// The track is drawn by hand, and `SliderDefaults.Track` with its own drawing
+// is still experimental. The same opt-in the track menu's bottom sheet needs.
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LyricOffsetCard(
     offset: Double,
@@ -699,20 +748,29 @@ private fun LyricOffsetCard(
         }
         // One notch per tenth over the whole range, so the slider lands on the
         // same values the two buttons produce and never between them.
+        val rail = SliderDefaults.colors(
+            thumbColor = colors.accent,
+            activeTrackColor = colors.accent,
+            inactiveTrackColor = colors.line,
+        )
         Slider(
             value = offset.toFloat(),
             onValueChange = { onChange(it.toDouble()) },
             valueRange = -OFFSET_MAX.toFloat()..OFFSET_MAX.toFloat(),
             steps = (OFFSET_MAX * 2 / OFFSET_STEP).roundToInt() - 1,
-            colors = SliderDefaults.colors(
-                thumbColor = colors.accent,
-                activeTrackColor = colors.accent,
-                inactiveTrackColor = colors.line,
-                // The notches are 101 hairlines across a phone's width, which
-                // reads as a dotted rule rather than as a scale.
-                activeTickColor = Color.Transparent,
-                inactiveTickColor = Color.Transparent,
-            ),
+            colors = rail,
+            track = { rangeState ->
+                SliderDefaults.Track(
+                    sliderState = rangeState,
+                    colors = rail,
+                    // Neither of the two things Material draws on a stepped
+                    // track belongs here: 101 notches read as a dotted rule
+                    // rather than as a scale, and a dot at one end of a range
+                    // that has two ends reads as a stray mark.
+                    drawStopIndicator = null,
+                    drawTick = { _, _ -> },
+                )
+            },
         )
         // The two ends named where they are, with the way back to nothing
         // between them.
