@@ -27,8 +27,20 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_OFFLINE, false)
         set(value) = prefs.edit().putBoolean(KEY_OFFLINE, value).apply()
 
+    /**
+     * The queue this phone was last playing, as JSON - see
+     * `PlayerController.saveQueue`. It belongs here for the same reason as the
+     * two above: what is in the queue of *this* device is a fact about the
+     * device, the way the web app keeps it in that browser's `localStorage`
+     * rather than on the account. Null when there is nothing to come back to.
+     */
+    var playerQueue: String?
+        get() = prefs.getString(KEY_QUEUE, null)
+        set(value) = prefs.edit().putString(KEY_QUEUE, value).apply()
+
     private companion object {
         const val KEY_WIFI_ONLY = "wifiOnly"
         const val KEY_OFFLINE = "offlineMode"
+        const val KEY_QUEUE = "playerQueue"
     }
 }

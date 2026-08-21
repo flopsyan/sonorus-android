@@ -54,6 +54,17 @@ class MainActivity : ComponentActivity() {
 
         setContent { SonorusRoot() }
     }
+
+    /**
+     * Leaving the app is the other moment the queue is worth writing down. While
+     * something plays the ticker does it every few seconds, but a player that
+     * was paused and then left would otherwise keep a position that is up to
+     * that much too old.
+     */
+    override fun onStop() {
+        super.onStop()
+        SonorusApp.instance.player.saveQueue()
+    }
 }
 
 @UnstableApi

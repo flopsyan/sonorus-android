@@ -11,6 +11,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import org.sonorus.data.Library
+import org.sonorus.data.Settings
 import org.sonorus.data.Shuffle
 import org.sonorus.data.SonorusApi
 import org.sonorus.data.model.Track
@@ -22,8 +23,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.core.net.toUri
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** What the UI draws. */
@@ -73,6 +79,7 @@ class PlayerController(
     context: Context,
     private val api: SonorusApi,
     private val library: Library,
+    private val settings: Settings,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
 ) {
 
@@ -150,6 +157,15 @@ class PlayerController(
             return
         }
 
+        // The playhead as it moves, so closing the app and opening it again
+        // comes back to the second the song was left at rather than to its
+        // start. Every few seconds is enough: being wrong costs a handful of
+        // seconds of music, where writing on every tick would touch storage
+        // twice a second for the rest of the song. The comparison is absolute
+        // on purpose - a jump *backwards* has to be written down too, or the
+        // app reopens further along than it was left.
+        if (abs(positionSec - savedPositionMs / 1000.0) >= SAVE_POSITION_EVERY) saveQueue()
+
         // Only a step that looks like ordinary playback counts. A larger one is
         // a seek, and seeking past 30 seconds must not count as having heard it.
         if (lastTick >= 0) {
@@ -203,6 +219,110 @@ class PlayerController(
         listened = 0.0
         lastTick = -1.0
         reported = 0
+    }
+
+    // --- Persistence ----------------------------------------------------------
+    // Coming back to what was playing is what the web app has had all along
+    // (`public/js/player.js`), and the app had none of it: every start opened on
+    // an empty player. The queue is a fact about this phone, so it lives in
+    // SharedPreferences next to the two download switches and not on the
+    // account - the same line the web app draws by keeping it in localStorage.
+
+    private val store = Json { ignoreUnknownKeys = true }
+
+    /**
+     * False until [restoreQueue] has had its turn.
+     *
+     * Nothing may be written before then, or the empty player every start opens
+     * with would overwrite the queue it is about to be given - and a start that
+     * never gets past the login screen would throw it away for good.
+     */
+    private var persisting = false
+
+    /** Where the playhead stood when it was last written down. */
+    private var savedPositionMs = 0L
+
+    init {
+        // Every queue change ends up in the state, so one collector catches all
+        // of them - rather than a save() sprinkled through the ten methods that
+        // move the queue, which is the shape the web app has and the one that
+        // is easy to forget in the eleventh.
+        scope.launch {
+            _state
+                .map { QueueKey(it.queue.map(Track::id), it.order, it.pos, it.source) }
+                .distinctUntilChanged()
+                .collect { saveQueue() }
+        }
+    }
+
+    /**
+     * Writes the queue down. Public because leaving the app is a moment worth
+     * catching too, and only the activity knows about that one.
+     */
+    fun saveQueue() {
+        if (!persisting) return
+        val state = _state.value
+        savedPositionMs = exoPlayer.currentPosition.coerceAtLeast(0)
+        settings.playerQueue = if (state.queue.isEmpty()) null else store.encodeToString(
+            SavedQueue.serializer(),
+            SavedQueue(
+                ids = state.queue.map { it.id },
+                order = state.order,
+                pos = state.pos,
+                source = state.source,
+                positionMs = savedPositionMs,
+            ),
+        )
+    }
+
+    /**
+     * Puts the last queue back, **cued and not playing**. Spotify sets the song
+     * up and waits for the button; a phone that starts singing because it was
+     * unlocked is a different thing entirely.
+     *
+     * Runs once per app start, after the account is known, and is a no-op from
+     * the second call on. Offline the songs come out of the download snapshot,
+     * which is exactly the case the queue is worth keeping for.
+     *
+     * The stored `order` is a list of positions into the *old* queue, so a
+     * single song that has disappeared from the library since shifts every
+     * position behind it onto a different one. It is therefore only usable when
+     * every id came back - otherwise the queue is rebuilt in plain order, which
+     * loses the shuffle but never plays the wrong song. Same rule as the web.
+     */
+    suspend fun restoreQueue() {
+        if (persisting) return
+        val stored = runCatching {
+            settings.playerQueue?.let { store.decodeFromString(SavedQueue.serializer(), it) }
+        }.getOrNull()
+        try {
+            if (stored == null || stored.ids.isEmpty()) return
+            val tracks = runCatching { library.tracksByIds(stored.ids).tracks }.getOrNull().orEmpty()
+            if (tracks.isEmpty()) return
+
+            val complete = tracks.size == stored.ids.size
+            val order = stored.order.takeIf {
+                complete && it.size == tracks.size &&
+                    it.all { i -> i in tracks.indices } && it.distinct().size == it.size
+            } ?: tracks.indices.toList()
+            val pos = stored.pos.coerceIn(0, order.size - 1)
+
+            _state.value = _state.value.copy(
+                queue = tracks,
+                order = order,
+                pos = pos,
+                source = stored.source,
+                positionMs = stored.positionMs,
+            )
+            savedPositionMs = stored.positionMs
+            // Deliberately no `playWhenReady`: this cues the song up, it does
+            // not start it.
+            pushPlaylist(order.map { tracks[it] }, pos, stored.positionMs)
+        } finally {
+            // Even a restore that found nothing has had its turn, or nothing
+            // played afterwards would ever be written down either.
+            persisting = true
+        }
     }
 
     // --- Queue ----------------------------------------------------------------
@@ -348,6 +468,9 @@ class PlayerController(
     fun pause() {
         exoPlayer.playWhenReady = false
         reportListening()
+        // Nothing moves after this, so the last position would otherwise stay
+        // up to SAVE_POSITION_EVERY seconds stale for as long as it is paused.
+        saveQueue()
     }
 
     fun toggle() = if (exoPlayer.isPlaying) pause() else play()
@@ -608,6 +731,7 @@ class PlayerController(
 
     fun release() {
         reportListening()
+        saveQueue()
         ticker?.cancel()
         exoPlayer.release()
     }
@@ -620,5 +744,35 @@ class PlayerController(
         const val TICK_MS = 500L
         /** A step this large is a seek, not playback. */
         const val MAX_STEP = 2.0
+        /** Seconds of playback between two writes of the playhead. */
+        const val SAVE_POSITION_EVERY = 5.0
     }
 }
+
+/**
+ * The queue as it is put away between two runs of the app.
+ *
+ * Track *ids* rather than tracks: a song can be renamed, re-rated or removed
+ * from the library while the app is closed, and coming back with a stale copy
+ * of it would be worse than asking for it again. The whole thing is one JSON
+ * string in [Settings.playerQueue].
+ */
+@Serializable
+private data class SavedQueue(
+    val ids: List<Int> = emptyList(),
+    val order: List<Int> = emptyList(),
+    val pos: Int = -1,
+    val source: String = "",
+    val positionMs: Long = 0,
+)
+
+/**
+ * What has to change before the queue is worth writing down again. The playhead
+ * is deliberately not in it: it moves twice a second and has its own rule.
+ */
+private data class QueueKey(
+    val ids: List<Int>,
+    val order: List<Int>,
+    val pos: Int,
+    val source: String,
+)

@@ -180,6 +180,11 @@ class AppViewModel : ViewModel() {
         player.setMuted(p.muted)
         player.setShuffle(p.shuffle)
         player.setRepeat(p.repeat)
+        // And the queue itself, which does not: it is a fact about this phone.
+        // After the modes on purpose - shuffle has to be the one it was left on
+        // before an order is laid over it. Once per start; the second call is a
+        // no-op, and every path into here can be walked more than once.
+        viewModelScope.launch { player.restoreQueue() }
     }
 
     /** Reloads the sidebar numbers without flipping the screen to a spinner. */

@@ -195,6 +195,17 @@ object Offline {
     fun track(s: OfflineSnapshot, id: Int): TrackResponse? =
         s.tracks.firstOrNull { it.track.id == id }?.let { TrackResponse(it.track) }
 
+    /**
+     * The songs behind [ids], **in the order they were asked for** and without
+     * the ones that are not here - exactly what the server's `/tracks/by-ids`
+     * answers, because the caller restoring a queue reads the answer positionally.
+     */
+    fun tracksByIds(s: OfflineSnapshot, ids: List<Int>): TracksResponse {
+        val byId = s.tracks.associate { it.track.id to it.track }
+        val hits = ids.mapNotNull { byId[it] }
+        return TracksResponse(total = hits.size, tracks = hits)
+    }
+
     fun lyrics(s: OfflineSnapshot, id: Int): LyricsResponse =
         LyricsResponse(s.tracks.firstOrNull { it.track.id == id }?.lyrics ?: Lyrics())
 

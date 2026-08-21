@@ -62,7 +62,7 @@ class SonorusApp : Application() {
         store = DownloadStore(File(filesDir, "offline"))
         library = Library(api, store, connectivity, settings, scope)
         downloads = Downloads(this, api, store, connectivity, settings)
-        player = PlayerController(this, api, library)
+        player = PlayerController(this, api, library, settings)
     }
 
     companion object {

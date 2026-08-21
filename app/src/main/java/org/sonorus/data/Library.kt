@@ -146,6 +146,10 @@ class Library(
     suspend fun lyrics(id: Int): LyricsResponse =
         if (offline.value) Offline.lyrics(store.snapshot, id) else api.lyrics(id)
 
+    /** Named songs in the order they were asked for - how a queue is rebuilt. */
+    suspend fun tracksByIds(ids: List<Int>): TracksResponse =
+        if (offline.value) Offline.tracksByIds(store.snapshot, ids) else api.tracksByIds(ids)
+
     // --- Artwork --------------------------------------------------------------
 
     /**
