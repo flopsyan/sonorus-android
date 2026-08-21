@@ -87,12 +87,21 @@ data class Album(
  *
  * [lines] is empty unless the file also said *when* each line is sung - that is
  * what tells a lyric that can follow the song from one that can only be read.
+ *
+ * [offset] is this song's own correction, in seconds and positive for later.
+ * Files disagree about where a line belongs - some stamp the first sung letter,
+ * some the bar before it, some are a second out for the whole song - so no
+ * single lead can be right for all of them. It is stored on the server against
+ * the *track* and not against the listener: a lyric that runs late runs late
+ * for everybody, and the library is shared. Riding along in [Lyrics] also means
+ * it lands in the offline snapshot with the words, for free.
  */
 @Serializable
 data class Lyrics(
     val text: String = "",
     val lines: List<LyricsLine> = emptyList(),
     val synced: Boolean = false,
+    val offset: Double = 0.0,
 ) {
     /** The line being sung at [seconds], or -1 before the first one. */
     fun lineAt(seconds: Double): Int {

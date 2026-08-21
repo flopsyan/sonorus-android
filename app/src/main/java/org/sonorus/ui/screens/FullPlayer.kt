@@ -14,6 +14,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -43,18 +44,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,6 +71,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -97,7 +104,9 @@ import org.sonorus.ui.theme.num
 import org.sonorus.ui.toggled
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * How far ahead of the voice a lyric line is shown, in seconds.
@@ -153,6 +162,7 @@ fun SharedTransitionScope.FullPlayer(
     val haptics = LocalHapticFeedback.current
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
+    var showOffset by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
 
     BackHandler(onBack = onClose)
@@ -162,9 +172,10 @@ fun SharedTransitionScope.FullPlayer(
     val lyrics by vm.lyrics.collectAsState()
     LaunchedEffect(track.id) { vm.loadLyrics(track) }
     // Which line is being sung - a touch early on purpose, see
-    // [LYRICS_LEAD_SECONDS]. -1 before the first one, and always -1 for a lyric
+    // [LYRICS_LEAD_SECONDS] - and moved by whatever this song's own file needed,
+    // see [Lyrics.offset]. -1 before the first one, and always -1 for a lyric
     // the file gave no timestamps for: there is nothing to point at then.
-    val activeLine = lyrics.lineAt(state.positionMs / 1000.0 + LYRICS_LEAD_SECONDS)
+    val activeLine = lyrics.lineAt(state.positionMs / 1000.0 + LYRICS_LEAD_SECONDS - lyrics.offset)
     // How far the artwork is dragged sideways at the moment. Zero unless a wipe
     // is running, and animated back there when it ends.
     val swipe = remember { Animatable(0f) }
@@ -194,10 +205,23 @@ fun SharedTransitionScope.FullPlayer(
                     RackLabelText(state.source.ifEmpty { "Wiedergabe" }, Modifier.weight(1f))
                     // Only offered for a song that has a text - a button opening
                     // an empty page is noise.
+                    // Only a text that carries seconds has anything to shift,
+                    // and only while it is on screen is there anything to watch
+                    // the shift against - so the control is offered exactly
+                    // there and nowhere else.
+                    if (showLyrics && lyrics.lines.isNotEmpty()) {
+                        IconButton(onClick = { showOffset = !showOffset }) {
+                            Icon(
+                                Icons.Filled.Tune,
+                                "Versatz",
+                                tint = if (showOffset) colors.accent else colors.text,
+                            )
+                        }
+                    }
                     if (track.hasLyrics) {
                         IconButton(onClick = {
                             showLyrics = !showLyrics
-                            if (showLyrics) showQueue = false
+                            if (showLyrics) showQueue = false else showOffset = false
                         }) {
                             Icon(
                                 Icons.Filled.Lyrics,
@@ -208,7 +232,10 @@ fun SharedTransitionScope.FullPlayer(
                     }
                     IconButton(onClick = {
                         showQueue = !showQueue
-                        if (showQueue) showLyrics = false
+                        if (showQueue) {
+                            showLyrics = false
+                            showOffset = false
+                        }
                     }) {
                         Icon(
                             Icons.AutoMirrored.Filled.QueueMusic,
@@ -253,19 +280,35 @@ fun SharedTransitionScope.FullPlayer(
                         }
                     }
                 } else if (showLyrics) {
-                    LyricsView(
-                        lyrics,
-                        activeLine,
-                        // Landing the same head start before the line keeps the
-                        // tapped line the lit one once the jump is through -
-                        // seeking to the timestamp itself would hand the light
-                        // straight to the next line on a densely sung song.
-                        onSeek = { seconds ->
-                            val at = (seconds - LYRICS_LEAD_SECONDS).coerceAtLeast(0.0)
-                            vm.player.seekTo((at * 1000).toLong())
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        LyricsView(
+                            lyrics,
+                            activeLine,
+                            // The arithmetic over the line read backwards, so a
+                            // tapped line is the lit one once the jump is
+                            // through. Landing on the timestamp itself would
+                            // hand the light straight to the next line on a
+                            // densely sung song.
+                            onSeek = { seconds ->
+                                val at = (seconds - LYRICS_LEAD_SECONDS + lyrics.offset)
+                                    .coerceAtLeast(0.0)
+                                vm.player.seekTo((at * 1000).toLong())
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        // Over the running text and deliberately not a dialog:
+                        // nothing behind it stops, so the lines keep moving
+                        // while the number does - which is the only way to tell
+                        // whether the number is right yet.
+                        if (showOffset && lyrics.lines.isNotEmpty()) {
+                            LyricOffsetCard(
+                                offset = lyrics.offset,
+                                onChange = { vm.setLyricsOffset(track.id, it) },
+                                onClose = { showOffset = false },
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            )
+                        }
+                    }
                 } else {
                     Spacer(Modifier.height(12.dp))
                     Box(
@@ -587,6 +630,106 @@ private fun LyricsView(
         // and the text stops following right where a song usually says the thing
         // you looked it up for.
         item { Spacer(Modifier.height(220.dp)) }
+    }
+}
+
+/** The smallest step the control offers, and the range the server accepts. */
+private const val OFFSET_STEP = 0.1
+private const val OFFSET_MAX = 5.0
+
+/** `+1,2 s`, `-0,4 s`, `0,0 s` - never a bare `1,2` that could be anything. */
+private fun formatOffset(seconds: Double): String {
+    val sign = if (seconds > 0) "+" else if (seconds < 0) "-" else ""
+    return "$sign%.1f s".format(Locale.GERMANY, abs(seconds))
+}
+
+/**
+ * Moving one song's text against the song.
+ *
+ * **An overlay over the running text, deliberately not a dialog.** It takes
+ * nothing away and dims nothing: the lines keep moving behind it while the
+ * number changes, and watching them against the music is the only way to find
+ * the right number at all. A dialog would stop exactly the thing being judged.
+ *
+ * Zero is the karaoke lead-in of [LYRICS_LEAD_SECONDS] and nothing more, which
+ * is why the control reads `0,0 s` where the text is already a second early.
+ */
+@Composable
+private fun LyricOffsetCard(
+    offset: Double,
+    onChange: (Double) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = SonorusTheme.colors
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp)
+            .background(colors.surface2, RoundedCornerShape(14.dp))
+            .border(1.dp, colors.line, RoundedCornerShape(14.dp))
+            .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            RackLabelText("Versatz", Modifier.weight(1f))
+            IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Filled.Close, "Schließen", tint = colors.textDim, modifier = Modifier.size(16.dp))
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { onChange(offset - OFFSET_STEP) }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.Remove, "Eine Zehntelsekunde früher", tint = colors.text)
+            }
+            // Monospace, so the number does not jump sideways as it is dragged
+            // through a digit - the eye is on the text, not on this.
+            Text(
+                formatOffset(offset),
+                style = num(19.sp, FontWeight.SemiBold),
+                color = colors.accent,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { onChange(offset + OFFSET_STEP) }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Filled.Add, "Eine Zehntelsekunde später", tint = colors.text)
+            }
+        }
+        // One notch per tenth over the whole range, so the slider lands on the
+        // same values the two buttons produce and never between them.
+        Slider(
+            value = offset.toFloat(),
+            onValueChange = { onChange(it.toDouble()) },
+            valueRange = -OFFSET_MAX.toFloat()..OFFSET_MAX.toFloat(),
+            steps = (OFFSET_MAX * 2 / OFFSET_STEP).roundToInt() - 1,
+            colors = SliderDefaults.colors(
+                thumbColor = colors.accent,
+                activeTrackColor = colors.accent,
+                inactiveTrackColor = colors.line,
+                // The notches are 101 hairlines across a phone's width, which
+                // reads as a dotted rule rather than as a scale.
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent,
+            ),
+        )
+        // The two ends named where they are, with the way back to nothing
+        // between them.
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("früher", style = MaterialTheme.typography.bodySmall, color = colors.textFaint)
+            Text(
+                "Zurücksetzen",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textDim,
+                modifier = Modifier.clickable { onChange(0.0) },
+            )
+            Text("später", style = MaterialTheme.typography.bodySmall, color = colors.textFaint)
+        }
     }
 }
 

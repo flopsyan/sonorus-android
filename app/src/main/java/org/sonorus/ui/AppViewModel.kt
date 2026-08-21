@@ -18,6 +18,8 @@ import org.sonorus.data.model.Track
 import org.sonorus.data.model.TreeResponse
 import org.sonorus.player.PlayerController
 import org.sonorus.ui.theme.ThemeMode
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -396,6 +398,33 @@ class AppViewModel : ViewModel() {
                 // A track change while the answer was on its way must not land
                 // on the song that is playing now.
                 .onSuccess { if (lyricsFor == id) _lyrics.value = it.lyrics }
+        }
+    }
+
+    /** The write of [setLyricsOffset], so a slider does not send one per pixel. */
+    private var offsetWrite: Job? = null
+
+    /**
+     * Moves the text of [trackId] against the music, in seconds and positive
+     * for later. Clamped to +/-5 and rounded to a tenth here as well as on the
+     * server, so the control cannot come to rest between two notches.
+     *
+     * The lyric held in [lyrics] is corrected at once and the request follows
+     * half a second later: the whole point of the control is to be dragged
+     * while the song runs, and the line under the light has to move with the
+     * finger. The correction is a fact about the file, so it cannot be written
+     * from a plane - the value is left alone offline rather than changed
+     * locally and lost.
+     */
+    fun setLyricsOffset(trackId: Int, seconds: Double) {
+        if (needsServer()) return
+        val value = Math.round(seconds.coerceIn(-5.0, 5.0) * 10) / 10.0
+        if (lyricsFor == trackId) _lyrics.value = _lyrics.value.copy(offset = value)
+        offsetWrite?.cancel()
+        offsetWrite = viewModelScope.launch {
+            delay(500)
+            runCatching { api.setLyricsOffset(trackId, value) }
+                .onFailure { say("Versatz nicht gespeichert.", true) }
         }
     }
 

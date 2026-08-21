@@ -236,6 +236,20 @@ class SonorusApi(private val session: Session) {
      */
     suspend fun lyrics(id: Int): LyricsResponse = get("/api/tracks/$id/lyrics")
 
+    /**
+     * Moves this song's text against the music, in seconds and positive for
+     * later. Its own endpoint rather than part of the track PATCH, because it
+     * is written from a control that moves while the song plays.
+     *
+     * The server clamps to +/-5 and rounds to a tenth and answers with what it
+     * really stored. That answer is deliberately not read back: the control
+     * clamps and rounds to the same numbers, and a late reply landing on a
+     * value the finger has already moved past would drag the slider backwards.
+     */
+    suspend fun setLyricsOffset(id: Int, offset: Double) {
+        put<JsonElement>("/api/tracks/$id/lyrics-offset", buildJsonObject { put("offset", offset) })
+    }
+
     suspend fun artists(q: String = ""): ArtistsResponse = get("/api/artists", mapOf("q" to q))
 
     suspend fun artist(id: Int): ArtistResponse = get("/api/artists/$id")
