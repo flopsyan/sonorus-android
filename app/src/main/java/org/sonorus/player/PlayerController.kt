@@ -2,6 +2,8 @@ package org.sonorus.player
 
 import android.content.Context
 import android.net.Uri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -42,8 +44,6 @@ data class PlayerState(
     val shuffle: Boolean = false,
     /** `off`, `all` or `one`. */
     val repeat: String = "off",
-    val volume: Float = 1f,
-    val muted: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     /** Where the queue came from, e.g. "Album: Kid A". */
@@ -84,6 +84,17 @@ data class PlayerState(
  * shuffle sounds stuck on one artist.
  *
  * Repeat is ExoPlayer's, because the two models agree there.
+ *
+ * **There is deliberately no volume here.** The account carries a `volume` from
+ * the web app, where an in-page slider is the only one there is, and applying it
+ * on a phone was a bug with no way out: it multiplies whatever the hardware keys
+ * already set, and the app shows no slider to undo it with. A slider left low in
+ * the browser - perfectly reasonable on a desktop that makes the loudness up in
+ * its own mixer - then played every song on the phone at that fraction with the
+ * volume already against the stop, in the car as much as over Bluetooth. On
+ * Android the loudness belongs to the system, so the player runs at unity and
+ * the pref is left to the client it belongs to; [org.sonorus.ui.AppViewModel]
+ * writes it back untouched.
  */
 @UnstableApi
 class PlayerController(
@@ -117,6 +128,22 @@ class PlayerController(
             DefaultMediaSourceFactory(
                 DefaultDataSource.Factory(context, OkHttpDataSource.Factory(api.client))
             )
+        )
+        // Without this the player is built with `CONTENT_TYPE_UNKNOWN` and asks
+        // for no audio focus at all, and both cost loudness. A phone and a car
+        // put a stream on their music path - and through whatever loudness and
+        // EQ processing sits on it - by what the stream says it is, so a song
+        // that says nothing plays dry and audibly under every other app while
+        // the device is already at maximum. Focus is the other half: it is what
+        // makes a call, a navigation prompt or another player interrupt this one
+        // instead of talking over it, and what makes this one duck rather than
+        // fight.
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+            /* handleAudioFocus = */ true,
         )
         .setHandleAudioBecomingNoisy(true)
         .build()
@@ -634,17 +661,6 @@ class PlayerController(
             "one" -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
-    }
-
-    fun setVolume(value: Float) {
-        val v = value.coerceIn(0f, 1f)
-        _state.value = _state.value.copy(volume = v, muted = false)
-        exoPlayer.volume = v
-    }
-
-    fun setMuted(muted: Boolean) {
-        _state.value = _state.value.copy(muted = muted)
-        exoPlayer.volume = if (muted) 0f else _state.value.volume
     }
 
     // --- Internals ------------------------------------------------------------

@@ -175,10 +175,12 @@ class AppViewModel : ViewModel() {
 
     private fun applyBootstrap(data: Bootstrap) {
         _phase.value = AppPhase.Ready(data)
-        // Player settings live on the account so they follow to another device.
+        // Player settings live on the account so they follow to another device -
+        // all but the volume, which is not applied here at all. It is the web
+        // app's slider, and on a phone the loudness is the system's: multiplying
+        // the two only made every song quiet with no control in the app to undo
+        // it. See [org.sonorus.player.PlayerController].
         val p = data.prefs.player
-        player.setVolume(p.volume)
-        player.setMuted(p.muted)
         player.setShuffle(p.shuffle)
         player.setRepeat(p.repeat)
         // And the queue itself, which does not: it is a fact about this phone.
@@ -267,8 +269,11 @@ class AppViewModel : ViewModel() {
         val s = player.state.value
         val value = json.encodeToJsonElement(
             org.sonorus.data.model.PlayerPrefs(
-                volume = s.volume,
-                muted = s.muted,
+                // Carried over rather than read off the player: this client has
+                // no volume of its own, and writing one back would reach across
+                // and move the web app's slider.
+                volume = prefs.player.volume,
+                muted = prefs.player.muted,
                 shuffle = s.shuffle,
                 repeat = s.repeat,
             )
