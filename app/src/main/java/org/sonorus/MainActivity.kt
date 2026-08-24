@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
@@ -28,6 +29,8 @@ import org.sonorus.ui.LocalOffline
 import org.sonorus.ui.Shell
 import org.sonorus.ui.components.Loading
 import org.sonorus.ui.screens.LoginScreen
+import org.sonorus.ui.screens.MapsMode
+import org.sonorus.ui.screens.isCompactWindow
 import org.sonorus.ui.theme.SonorusTheme
 
 @UnstableApi
@@ -75,6 +78,12 @@ private fun SonorusRoot() {
     val theme by vm.theme.collectAsState()
     val offline by vm.offline.collectAsState()
 
+    // Kept across the swap below, so squeezing the window and pulling it open
+    // again lands back on the page that was open. `rememberNavController` saves
+    // its back stack, but only while something holds that state for it - and the
+    // shell leaves the composition entirely when the strip takes over.
+    val branches = rememberSaveableStateHolder()
+
     // Which source answers is a fact about the whole tree, not about one screen.
     CompositionLocalProvider(LocalOffline provides offline) {
         SonorusTheme(mode = theme) {
@@ -88,7 +97,16 @@ private fun SonorusRoot() {
                         busy = false,
                         onLogin = { server, user, pass -> vm.login(server, user, pass) { } },
                     )
-                    is AppPhase.Ready -> Shell(vm, current.bootstrap)
+                    // A window too short for the shell gets the transport and
+                    // nothing else - see [MapsMode]. Deliberately only from
+                    // Ready: there is nothing to play before that, and a server
+                    // address cannot be typed into a strip.
+                    is AppPhase.Ready ->
+                        if (isCompactWindow()) {
+                            branches.SaveableStateProvider("compact") { MapsMode(vm) }
+                        } else {
+                            branches.SaveableStateProvider("shell") { Shell(vm, current.bootstrap) }
+                        }
                 }
             }
         }

@@ -34,6 +34,18 @@ statistics like any other listening, and the queue is the same one afterwards.
 Downloaded songs play from disk, and with no connection it shows exactly those
 downloads.
 
+## Split screen: the strip
+
+Squeezed into a short window - split screen with the divider dragged most of the
+way over - the app drops the library and shows the transport instead: artwork,
+name, the seek rail and previous / play / next. It is meant for navigation on the
+other half of the screen, where a top bar, a page and six tabs would only be
+furniture cut in half.
+
+It switches on its own, below **320 dp of window height and only in multi-window**,
+so a phone held sideways still gets the whole app. Dragging the divider back
+restores the shell on the page it was on.
+
 ## Downloads and offline use
 
 Songs, albums, playlists, genres and rating lists can be pulled onto the device
