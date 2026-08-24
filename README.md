@@ -37,10 +37,18 @@ downloads.
 ## Split screen: the strip
 
 Squeezed into a short window - split screen with the divider dragged most of the
-way over - the app drops the library and shows the transport instead: artwork,
-name, the seek rail and previous / play / next. It is meant for navigation on the
-other half of the screen, where a top bar, a page and six tabs would only be
-furniture cut in half.
+way over - the app drops the library and shows the transport instead. It is meant
+for navigation on the other half of the screen, where a top bar, a page and six
+tabs would only be furniture cut in half.
+
+There are two sizes of it, and the app picks whichever fits:
+
+- **the strip**, from 175 dp of height: artwork, name, interpret and album, a
+  seek rail you can drag, and previous / play / next;
+- **the panel**, under that: one line - artwork, name, interpret and the three
+  controls - with the progress as a hairline across the top. Nothing on it is
+  draggable, because a scrub target three pixels tall between two buttons is a
+  mis-tap at the wheel.
 
 It switches on its own, below **320 dp of window height and only in multi-window**,
 so a phone held sideways still gets the whole app. Dragging the divider back
