@@ -10,7 +10,12 @@ and Android draws the notification itself - title, cover art, progress and
 next/previous - instead of whatever the browser happens to grant.
 
 In the full player the **cover art is swiped sideways** to jump to the next or
-previous song; swiping it down closes the player.
+previous song; swiping it down closes the player. Its head says which list is
+playing ("Wiedergabe aus Album" and the name below it), and the three dots
+beside it open the song: add it to a playlist, put it in the queue, or go to its
+album or its interpret. Artist and album under the title are two separate links,
+each going where it says. A title too long to fit is cut off, and **tapping it
+runs it through once** so it can be read.
 
 The progress bar can be tapped **and dragged**: hold, slide, release - the seek
 happens on release, not before. That goes for the full player as well as the bar
@@ -32,7 +37,8 @@ downloads.
 ## Downloads and offline use
 
 Songs, albums, playlists, genres and rating lists can be pulled onto the device
-("Download" in the head of a collection or in a song's menu). Whatever is
+("Download" in the head of a collection, in a song's menu, or - for whatever is
+playing right now - straight from the full player, beside the "+"). Whatever is
 downloaded then **always** plays from disk - connection or not, which saves
 mobile data on the road.
 

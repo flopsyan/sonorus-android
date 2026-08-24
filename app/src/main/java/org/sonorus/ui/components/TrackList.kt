@@ -251,8 +251,12 @@ fun TrackMenu(track: Track, index: Int, actions: TrackActions, onDismiss: () -> 
     }
 }
 
+/**
+ * One row of a bottom-sheet menu. Shared with the player's own sheet in
+ * `FullPlayer.kt`, so the two never drift apart in height, padding or tint.
+ */
 @Composable
-private fun MenuItem(icon: ImageVector, label: String, danger: Boolean = false, onClick: () -> Unit) {
+fun MenuItem(icon: ImageVector, label: String, danger: Boolean = false, onClick: () -> Unit) {
     val colors = SonorusTheme.colors
     Row(
         Modifier

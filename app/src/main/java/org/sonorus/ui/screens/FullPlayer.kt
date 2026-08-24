@@ -44,12 +44,19 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Downloading
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Repeat
@@ -62,13 +69,16 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -85,13 +95,16 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
+import org.sonorus.data.download.DownloadStatus
 import org.sonorus.data.model.Lyrics
+import org.sonorus.data.model.Track
 import org.sonorus.player.PlayerState
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
@@ -100,16 +113,19 @@ import org.sonorus.ui.Routes
 import org.sonorus.ui.armed
 import org.sonorus.ui.pressable
 import org.sonorus.ui.components.Cover
+import org.sonorus.ui.components.MenuItem
 import org.sonorus.ui.components.PlayerCoverKey
 import org.sonorus.ui.components.RackLabelText
 import org.sonorus.ui.components.SeekRail
 import org.sonorus.ui.components.Stars
 import org.sonorus.ui.components.TransportGlyph
 import org.sonorus.ui.components.rememberPlayhead
+import org.sonorus.ui.theme.RackLabel
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.theme.num
 import org.sonorus.ui.toggled
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -131,6 +147,66 @@ import kotlin.math.roundToInt
  * current is still being sung. Turned up from half a second on 2026-08-06.
  */
 private const val LYRICS_LEAD_SECONDS = 1.0
+
+/**
+ * The name of the song, and the line under it.
+ *
+ * Both are the player's own styles rather than shared tokens, for the same
+ * reason the lyric lines below are: this screen is read at a glance and at arm's
+ * length, and no list row wants these sizes. The title came down from
+ * `displaySmall` (27 sp) and the line under it went up from `bodyLarge` (15 sp)
+ * on 2026-08-24 - the old pair put almost all the weight on the title, and the
+ * album it names is a link now, so it has to be readable as one.
+ */
+private val PlayerTitle = TextStyle(
+    fontSize = 24.sp,
+    fontWeight = FontWeight.Bold,
+    letterSpacing = (-0.02).em,
+)
+private val PlayerSubtitle = TextStyle(fontSize = 17.sp, lineHeight = 23.sp)
+
+/**
+ * What a tapped title costs to read once, end to end.
+ *
+ * `basicMarquee` neither reports that it has finished nor says how far it has to
+ * travel, so the way back to an ellipsis has to be timed by hand. The distance
+ * is estimated from the number of characters that do not fit - [MARQUEE_CHAR_DP]
+ * is an average glyph at [PlayerTitle]'s size, not a measurement - so the timing
+ * is approximate on purpose. Being wrong costs nothing either way: too early and
+ * the run is cut short, too late and the name simply stands there a moment
+ * longer before its "..." comes back.
+ */
+private const val MARQUEE_CHAR_DP = 12f
+private const val MARQUEE_VELOCITY_DP = 45f
+private const val MARQUEE_LEAD_MS = 500L
+
+/**
+ * The two lines over the artwork: what kind of list is playing, and which one.
+ *
+ * The kind is read off [PlayerState.sourceKey] - the *route* the queue came from
+ * (`albums/7`, `playlists/2`) - because that is the only part of the player state
+ * that is structured. [PlayerState.source] is a label written for a human and its
+ * shape differs per screen ("Album: Kid A", but a bare "Crywank"), so it supplies
+ * the name and the prefix is taken back off.
+ *
+ * A list whose name *is* its kind - Downloads, Alle Songs, Suche - answers with a
+ * null kind and is drawn on one line: "Wiedergabe aus Downloads / Downloads"
+ * would say it twice.
+ */
+private fun playbackSource(state: PlayerState): Pair<String?, String> {
+    val name = state.source.ifEmpty { "Wiedergabe" }
+    val key = state.sourceKey
+    return when {
+        key.startsWith("albums/") -> "Album" to name.removePrefix("Album: ")
+        key.endsWith("/singles") -> "Singles" to name.removeSuffix(": Singles").removeSuffix("Singles")
+            .ifBlank { name }
+        key.contains("/stars/") || key.startsWith("stars/") -> "Bewertung" to name
+        key.startsWith("artists/") -> "Interpret" to name
+        key.startsWith("playlists/") -> "Playlist" to name
+        key.startsWith("genres/") -> "Genre" to name
+        else -> null to name
+    }
+}
 
 /**
  * The player as a full screen, the way Spotify does it - explicitly a phone
@@ -170,7 +246,12 @@ fun SharedTransitionScope.FullPlayer(
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showOffset by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
+    // What this phone has of the song. Read here rather than passed in, so the
+    // button below redraws the moment the download finishes.
+    val downloads by vm.downloads.state.collectAsState()
+    val downloadStatus = downloads.statusOf(track.id)
 
     BackHandler(onBack = onClose)
 
@@ -211,6 +292,11 @@ fun SharedTransitionScope.FullPlayer(
             .systemBarsPadding()
     ) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
+                // Chevron, the two lines saying what is playing, and the menu -
+                // and nothing else. What used to sit here (lyrics, queue) moved
+                // below the transport: this row is what the eye lands on when
+                // the player opens, and a whisper of a label with three buttons
+                // beside it was the reason the top of the screen read as empty.
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -218,47 +304,31 @@ fun SharedTransitionScope.FullPlayer(
                     IconButton(onClick = onClose) {
                         Icon(Icons.Filled.ExpandMore, "Schließen", tint = colors.text)
                     }
-                    Spacer(Modifier.size(8.dp))
-                    RackLabelText(state.source.ifEmpty { "Wiedergabe" }, Modifier.weight(1f))
-                    // Only offered for a song that has a text - a button opening
-                    // an empty page is noise.
-                    // Only a text that carries seconds has anything to shift,
-                    // and only while it is on screen is there anything to watch
-                    // the shift against - so the control is offered exactly
-                    // there and nowhere else.
-                    if (showLyrics && lyrics.lines.isNotEmpty()) {
-                        IconButton(onClick = { showOffset = !showOffset }) {
-                            Icon(
-                                Icons.Filled.Tune,
-                                "Versatz",
-                                tint = if (showOffset) colors.accent else colors.text,
+                    val (kind, sourceName) = playbackSource(state)
+                    Column(
+                        Modifier.weight(1f).padding(horizontal = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (kind != null) {
+                            Text(
+                                "Wiedergabe aus $kind",
+                                style = RackLabel,
+                                color = colors.textFaint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                    }
-                    if (track.hasLyrics) {
-                        IconButton(onClick = {
-                            showLyrics = !showLyrics
-                            if (showLyrics) showQueue = false else showOffset = false
-                        }) {
-                            Icon(
-                                Icons.Filled.Lyrics,
-                                "Songtext",
-                                tint = if (showLyrics) colors.accent else colors.text,
-                            )
-                        }
-                    }
-                    IconButton(onClick = {
-                        showQueue = !showQueue
-                        if (showQueue) {
-                            showLyrics = false
-                            showOffset = false
-                        }
-                    }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.QueueMusic,
-                            "Warteschlange",
-                            tint = if (showQueue) colors.accent else colors.text,
+                        Text(
+                            sourceName,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.text,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Filled.MoreVert, "Mehr", tint = colors.text)
                     }
                 }
 
@@ -327,7 +397,7 @@ fun SharedTransitionScope.FullPlayer(
                         }
                     }
                 } else {
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(8.dp))
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -378,7 +448,7 @@ fun SharedTransitionScope.FullPlayer(
                             track.title,
                         )
                     }
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(18.dp))
                     // The one line of the lyric a phone has room for without
                     // leaving the player, in the gap between the artwork and the
                     // title. Only a timed lyric has a line to point at, and a
@@ -405,34 +475,103 @@ fun SharedTransitionScope.FullPlayer(
                     // instead of below, which is what kept the block stacked.
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
+                            // A title too long to fit is cut with an ellipsis
+                            // and stays that way until it is tapped, and then it
+                            // runs through once so it can be read. It used to
+                            // scroll for ever, unasked, which made the busiest
+                            // line on the screen the one nobody had asked to
+                            // move.
+                            var tooLong by remember(track.id) { mutableStateOf(false) }
+                            var running by remember(track.id) { mutableStateOf(false) }
+                            var fieldDp by remember(track.id) { mutableFloatStateOf(0f) }
+                            val density = LocalDensity.current
+                            LaunchedEffect(running) {
+                                if (!running) return@LaunchedEffect
+                                val over = (track.title.length * MARQUEE_CHAR_DP - fieldDp)
+                                    .coerceAtLeast(0f)
+                                delay(MARQUEE_LEAD_MS + (over / MARQUEE_VELOCITY_DP * 1000).toLong())
+                                running = false
+                            }
                             Text(
                                 track.title,
-                                style = MaterialTheme.typography.displaySmall,
+                                style = PlayerTitle,
                                 color = colors.text,
                                 maxLines = 1,
-                                // Set large enough that plenty of titles do not
-                                // fit, and this is the screen you are looking at
-                                // to read the name.
-                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                                overflow = TextOverflow.Ellipsis,
+                                // Measured off the ellipsized draw, which is the
+                                // only one whose width *is* the field: inside a
+                                // marquee the text is measured unbounded.
+                                onTextLayout = { result ->
+                                    if (!running) {
+                                        tooLong = result.hasVisualOverflow
+                                        fieldDp = with(density) { result.size.width.toDp().value }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .then(
+                                        if (tooLong) Modifier.clickable { running = true }
+                                        else Modifier
+                                    )
+                                    .then(
+                                        if (running) Modifier.basicMarquee(
+                                            iterations = 1,
+                                            initialDelayMillis = MARQUEE_LEAD_MS.toInt(),
+                                            velocity = MARQUEE_VELOCITY_DP.dp,
+                                        ) else Modifier
+                                    ),
                             )
                             Spacer(Modifier.height(3.dp))
-                            Text(
-                                listOfNotNull(
-                                    track.artist.takeIf { it.isNotEmpty() },
-                                    track.album.takeIf { it.isNotEmpty() },
-                                ).joinToString(" · "),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = colors.textDim,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                // A song on a "Various" compilation names an
-                                // interpret that has no page of its own, so
-                                // there the line is not a target at all instead
-                                // of a tap that does nothing.
-                                modifier = track.artistId?.let { artistId ->
-                                    Modifier.clickable { onGo(Routes.artist(artistId)) }
-                                } ?: Modifier,
-                            )
+                            // Two links, not one line: the album used to be part
+                            // of the interpret's target and therefore led to the
+                            // interpret, which is the one place in the app where
+                            // a name did not go where it says.
+                            //
+                            // A song on a "Various" compilation names an
+                            // interpret that has no page of its own, and a
+                            // single has no album - either half is a plain
+                            // caption then rather than a tap that does nothing.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (track.artist.isNotEmpty()) {
+                                    Text(
+                                        track.artist,
+                                        style = PlayerSubtitle,
+                                        color = colors.textDim,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .weight(1f, fill = false)
+                                            .then(
+                                                track.artistId?.let { id ->
+                                                    Modifier.clickable { onGo(Routes.artist(id)) }
+                                                } ?: Modifier
+                                            ),
+                                    )
+                                }
+                                if (track.artist.isNotEmpty() && track.album.isNotEmpty()) {
+                                    Text(
+                                        " · ",
+                                        style = PlayerSubtitle,
+                                        color = colors.textDim,
+                                        maxLines = 1,
+                                    )
+                                }
+                                if (track.album.isNotEmpty()) {
+                                    Text(
+                                        track.album,
+                                        style = PlayerSubtitle,
+                                        color = colors.textDim,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .weight(1f, fill = false)
+                                            .then(
+                                                track.albumId?.let { id ->
+                                                    Modifier.clickable { onGo(Routes.album(id)) }
+                                                } ?: Modifier
+                                            ),
+                                    )
+                                }
+                            }
                         }
                         IconButton(
                             onClick = { vm.askForPlaylist(track, allowCreate = false) },
@@ -445,8 +584,50 @@ fun SharedTransitionScope.FullPlayer(
                                 modifier = Modifier.size(26.dp),
                             )
                         }
+                        // Putting a song on the phone is the other thing worth
+                        // doing to what is playing, and until now the only way
+                        // to it was to find the song again in a list. The glyph
+                        // says what tapping does *now*, exactly as the row menu
+                        // does - a missing file has nothing to fetch.
+                        if (!track.missing) {
+                            IconButton(
+                                onClick = {
+                                    when (downloadStatus) {
+                                        DownloadStatus.DONE -> vm.removeDownloads(listOf(track))
+                                        DownloadStatus.RUNNING,
+                                        DownloadStatus.QUEUED -> vm.downloads.cancel(track.id)
+                                        else -> vm.download(listOf(track))
+                                    }
+                                },
+                                modifier = Modifier.size(44.dp),
+                            ) {
+                                Icon(
+                                    when (downloadStatus) {
+                                        DownloadStatus.DONE -> Icons.Filled.DownloadDone
+                                        DownloadStatus.RUNNING,
+                                        DownloadStatus.QUEUED -> Icons.Filled.Downloading
+                                        else -> Icons.Filled.Download
+                                    },
+                                    when (downloadStatus) {
+                                        DownloadStatus.DONE -> "Download entfernen"
+                                        DownloadStatus.RUNNING,
+                                        DownloadStatus.QUEUED -> "Download abbrechen"
+                                        DownloadStatus.FAILED -> "Download erneut versuchen"
+                                        else -> "Herunterladen"
+                                    },
+                                    tint = when (downloadStatus) {
+                                        DownloadStatus.DONE,
+                                        DownloadStatus.RUNNING,
+                                        DownloadStatus.QUEUED -> colors.accent
+                                        DownloadStatus.FAILED -> colors.danger
+                                        else -> colors.textDim
+                                    },
+                                    modifier = Modifier.size(26.dp),
+                                )
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(16.dp))
                     // The full screen shows the stars again - the bar has no
                     // room for them, so this is one of the ways to hand out a
                     // rating on a phone. Deliberately nothing beyond that: the
@@ -455,7 +636,7 @@ fun SharedTransitionScope.FullPlayer(
                     // The queue holds the track as it was when it was added, so
                     // its own stars go stale the moment one is given here.
                     val stars = vm.starsOf(track)
-                    Stars(stars, size = 24) { value ->
+                    Stars(stars, size = 30) { value ->
                         vm.rate(track.id, value, stars)
                     }
                 }
@@ -508,25 +689,36 @@ fun SharedTransitionScope.FullPlayer(
                 // finds it without looking; the two skips stay glyphs, and the
                 // two modes - which are settings rather than actions - sit
                 // quieter still at the edges.
+                //
+                // The four around the circle grew on 2026-08-24. The sizes are
+                // measured, not guessed: on the same phone Spotify draws its
+                // shuffle 22.5 dp wide and its skips 21.3 dp, against 14.5 dp
+                // and 17.9 dp here - the glyphs sit inside their boxes with more
+                // padding than the declared size suggests. Play/pause is left
+                // alone, because at 72 dp it is already larger than Spotify's
+                // 64 dp and was never the complaint.
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    IconButton(onClick = {
-                        vm.player.setShuffle(!state.shuffle)
-                        vm.savePlayerPrefs()
-                        haptics.toggled(!state.shuffle)
-                    }) {
+                    IconButton(
+                        onClick = {
+                            vm.player.setShuffle(!state.shuffle)
+                            vm.savePlayerPrefs()
+                            haptics.toggled(!state.shuffle)
+                        },
+                        modifier = Modifier.size(52.dp),
+                    ) {
                         val tint by animateColorAsState(
                             if (state.shuffle) colors.accent else colors.textDim,
                             Motion.quick(),
                             label = "shuffle",
                         )
-                        Icon(Icons.Filled.Shuffle, "Zufall", tint = tint, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Filled.Shuffle, "Zufall", tint = tint, modifier = Modifier.size(32.dp))
                     }
-                    IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(52.dp)) {
-                        Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(36.dp))
+                    IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(60.dp)) {
+                        Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(46.dp))
                     }
                     Box(
                         Modifier
@@ -541,14 +733,17 @@ fun SharedTransitionScope.FullPlayer(
                     ) {
                         TransportGlyph(state.playing, tint = colors.accentInk, size = 34.dp)
                     }
-                    IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(52.dp)) {
-                        Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(36.dp))
+                    IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(60.dp)) {
+                        Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(46.dp))
                     }
-                    IconButton(onClick = {
-                        vm.player.cycleRepeat()
-                        vm.savePlayerPrefs()
-                        haptics.toggled(state.repeat == "off")
-                    }) {
+                    IconButton(
+                        onClick = {
+                            vm.player.cycleRepeat()
+                            vm.savePlayerPrefs()
+                            haptics.toggled(state.repeat == "off")
+                        },
+                        modifier = Modifier.size(52.dp),
+                    ) {
                         // Off and all wear the same glyph, so only the tint says
                         // which - which is why the tint travels rather than
                         // switching. One is a different symbol and turns over.
@@ -569,12 +764,163 @@ fun SharedTransitionScope.FullPlayer(
                                 if (one) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
                                 "Wiederholen",
                                 tint = tint,
-                                modifier = Modifier.size(22.dp),
+                                modifier = Modifier.size(32.dp),
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(10.dp))
+
+                // The two panels the player can swap its middle for, under the
+                // transport rather than up in the header. They were the reason
+                // the top of the screen carried three buttons and no weight,
+                // and they belong to what is playing rather than to where it
+                // came from. The offset control comes with the words, so it
+                // stands next to them and only while they are up.
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (track.hasLyrics) {
+                        IconButton(onClick = {
+                            showLyrics = !showLyrics
+                            if (showLyrics) showQueue = false else showOffset = false
+                        }) {
+                            Icon(
+                                Icons.Filled.Lyrics,
+                                "Songtext",
+                                tint = if (showLyrics) colors.accent else colors.textDim,
+                            )
+                        }
+                    }
+                    // Only a text that carries seconds has anything to shift,
+                    // and only while it is on screen is there anything to watch
+                    // the shift against - so the control is offered exactly
+                    // there and nowhere else.
+                    if (showLyrics && lyrics.lines.isNotEmpty()) {
+                        IconButton(onClick = { showOffset = !showOffset }) {
+                            Icon(
+                                Icons.Filled.Tune,
+                                "Versatz",
+                                tint = if (showOffset) colors.accent else colors.textDim,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = {
+                        showQueue = !showQueue
+                        if (showQueue) {
+                            showLyrics = false
+                            showOffset = false
+                        }
+                    }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.QueueMusic,
+                            "Warteschlange",
+                            tint = if (showQueue) colors.accent else colors.textDim,
+                        )
+                    }
+                }
+        }
+    }
+
+    if (showMenu) {
+        PlayerMenu(
+            track = track,
+            coverUrl = vm.coverUrl(track.cover),
+            onDismiss = { showMenu = false },
+            onAddToPlaylist = { vm.askForPlaylist(track, allowCreate = false) },
+            onEnqueue = { vm.player.enqueue(listOf(track)) },
+            onGo = onGo,
+        )
+    }
+}
+
+/**
+ * What the three dots in the header open: the song it is about, and the handful
+ * of things worth doing to it that are not already a button on the screen.
+ *
+ * Deliberately shorter than the row menu in a list. Rating has the stars right
+ * there in the player, playing is what is already happening, and downloading is
+ * its own button beside the title - so what is left is the two lists a song can
+ * be put into and the two pages it belongs to.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlayerMenu(
+    track: Track,
+    coverUrl: String?,
+    onDismiss: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onEnqueue: () -> Unit,
+    onGo: (String) -> Unit,
+) {
+    val colors = SonorusTheme.colors
+    val sheet = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheet,
+        containerColor = colors.surface,
+    ) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Cover(coverUrl, Modifier.size(52.dp), RoundedCornerShape(8.dp), track.title)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // Artist and album on lines of their own, not joined with a
+                    // dot: the sheet has the room, and the album is the half a
+                    // list row usually has to drop.
+                    if (track.artist.isNotEmpty()) {
+                        Text(
+                            track.artist,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textDim,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (track.album.isNotEmpty()) {
+                        Text(
+                            track.album,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textFaint,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            MenuItem(Icons.AutoMirrored.Filled.PlaylistAdd, "Zu Playlist hinzufügen") {
+                onDismiss(); onAddToPlaylist()
+            }
+            if (!track.missing) {
+                MenuItem(Icons.AutoMirrored.Filled.QueueMusic, "In die Warteschlange") {
+                    onDismiss(); onEnqueue()
+                }
+            }
+            track.albumId?.let { id ->
+                MenuItem(Icons.Filled.Album, "Album anzeigen") {
+                    onDismiss(); onGo(Routes.album(id))
+                }
+            }
+            track.artistId?.let { id ->
+                MenuItem(Icons.Filled.Person, "Interpret anzeigen") {
+                    onDismiss(); onGo(Routes.artist(id))
+                }
+            }
         }
     }
 }
