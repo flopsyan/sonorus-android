@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Downloading
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -103,6 +104,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.download.DownloadStatus
+import org.sonorus.data.Quality
 import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Track
 import org.sonorus.player.PlayerState
@@ -112,6 +114,7 @@ import org.sonorus.ui.Motion
 import org.sonorus.ui.Routes
 import org.sonorus.ui.armed
 import org.sonorus.ui.pressable
+import org.sonorus.ui.components.Chip
 import org.sonorus.ui.components.Cover
 import org.sonorus.ui.components.MenuItem
 import org.sonorus.ui.components.PlayerCoverKey
@@ -247,6 +250,7 @@ fun SharedTransitionScope.FullPlayer(
     var showLyrics by remember { mutableStateOf(false) }
     var showOffset by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var showQuality by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
     // What this phone has of the song. Read here rather than passed in, so the
     // button below redraws the moment the download finishes.
@@ -776,6 +780,17 @@ fun SharedTransitionScope.FullPlayer(
                 // and they belong to what is playing rather than to where it
                 // came from. The offset control comes with the words, so it
                 // stands next to them and only while they are up.
+                Box(Modifier.fillMaxWidth()) {
+                // The format really coming out of the speaker, centred under the
+                // transport - the one place on this screen with nothing else in
+                // the middle. It says what is *playing*, not what is set: a 128k
+                // MP3 asked for as Opus is handed over untouched, and a badge
+                // that claimed otherwise would be a lie you could measure.
+                QualityChip(
+                    label = vm.formatOf(track),
+                    modifier = Modifier.align(Alignment.Center),
+                    onClick = { vm.toggleStreamQuality() },
+                )
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -820,6 +835,7 @@ fun SharedTransitionScope.FullPlayer(
                         )
                     }
                 }
+                }
         }
     }
 
@@ -830,8 +846,110 @@ fun SharedTransitionScope.FullPlayer(
             onDismiss = { showMenu = false },
             onAddToPlaylist = { vm.askForPlaylist(track, allowCreate = false) },
             onEnqueue = { vm.player.enqueue(listOf(track)) },
+            onQuality = { showQuality = true },
             onGo = onGo,
         )
+    }
+
+    if (showQuality) {
+        QualitySheet(vm, onDismiss = { showQuality = false })
+    }
+}
+
+/**
+ * The format under the transport, as a chip you can press.
+ *
+ * Quiet on purpose - it is a readout first and a control second, so it looks
+ * like the rack label it sits among rather than like a button competing with
+ * play. One tap switches, because there are exactly two answers and a menu for
+ * two answers is a menu too many; the whole point is being able to drop to the
+ * small copy mid-song when the signal gets thin, without leaving the player.
+ */
+@Composable
+private fun QualityChip(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val colors = SonorusTheme.colors
+    Text(
+        label.uppercase(),
+        style = RackLabel,
+        color = colors.textFaint,
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .border(1.dp, colors.line, RoundedCornerShape(999.dp))
+            .pressable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+    )
+}
+
+/**
+ * "Qualität ändern": both defaults in one sheet.
+ *
+ * Streaming and downloading are separate rows because they are separate
+ * questions - a stream spends data every time the song plays, a download spends
+ * it once and then costs storage. Wanting the small copy on the road and the
+ * original on the shelf is an ordinary answer, and one switch could not give it.
+ *
+ * The line under the downloads is there because it is the thing worth promising:
+ * changing this **never touches what is already on the phone**.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@UnstableApi
+@Composable
+private fun QualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
+    val colors = SonorusTheme.colors
+    val sheet = rememberModalBottomSheetState()
+    val stream by vm.streamQuality.collectAsState()
+    val download by vm.downloadQuality.collectAsState()
+    val ready by vm.qualityReady.collectAsState()
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = colors.surface) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
+            RackLabelText("Qualität")
+            Spacer(Modifier.height(14.dp))
+            if (!ready) {
+                Text(
+                    "Dieser Server kann nur das Original ausliefern - dort ist kein " +
+                        "ffmpeg installiert. Es gibt also nichts umzustellen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textDim,
+                )
+                return@Column
+            }
+
+            QualityRow(
+                label = "Streamen",
+                hint = "Gilt sofort, auch für den Song, der gerade läuft.",
+                selected = stream,
+                onPick = { vm.setStreamQuality(it) },
+            )
+            Spacer(Modifier.height(18.dp))
+            QualityRow(
+                label = "Herunterladen",
+                hint = "Gilt für neue Downloads. Was schon auf dem Gerät liegt, bleibt, wie es ist.",
+                selected = download,
+                onPick = { vm.setDownloadQuality(it) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun QualityRow(
+    label: String,
+    hint: String,
+    selected: Quality,
+    onPick: (Quality) -> Unit,
+) {
+    val colors = SonorusTheme.colors
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.text)
+        Spacer(Modifier.height(2.dp))
+        Text(hint, style = MaterialTheme.typography.bodySmall, color = colors.textFaint)
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (quality in Quality.entries) {
+                Chip(quality.label, selected == quality) { onPick(quality) }
+            }
+        }
     }
 }
 
@@ -852,6 +970,7 @@ private fun PlayerMenu(
     onDismiss: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onEnqueue: () -> Unit,
+    onQuality: () -> Unit,
     onGo: (String) -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -905,6 +1024,12 @@ private fun PlayerMenu(
             Spacer(Modifier.height(8.dp))
             MenuItem(Icons.AutoMirrored.Filled.PlaylistAdd, "Zu Playlist hinzufügen") {
                 onDismiss(); onAddToPlaylist()
+            }
+            // The chip under the transport is the quick way and only switches
+            // the stream. This is the one that sets both defaults, which is what
+            // belongs in a menu rather than under a thumb.
+            MenuItem(Icons.Filled.GraphicEq, "Qualität ändern") {
+                onDismiss(); onQuality()
             }
             if (!track.missing) {
                 MenuItem(Icons.AutoMirrored.Filled.QueueMusic, "In die Warteschlange") {

@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
+import org.sonorus.data.Quality
 import org.sonorus.data.model.ScanState
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
@@ -120,6 +121,18 @@ private fun LinkRow(label: String, hint: String, badge: Int? = null, onClick: ()
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.textFaint)
     }
+}
+
+/**
+ * The scan's phase, in words. The server names them for a log; this is the line
+ * a person reads while waiting, and "transcoding" is by far the longest of them.
+ */
+private fun scanPhase(phase: String): String = when (phase) {
+    "walking" -> "Ordner wird gelesen"
+    "reading" -> "Dateien werden ausgelesen"
+    "pruning" -> "Aufräumen"
+    "transcoding" -> "Kleinere Qualität wird erzeugt"
+    else -> "Scan läuft"
 }
 
 // --- Settings ---------------------------------------------------------------
@@ -213,7 +226,7 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 )
             } else if (state != null && state.running) {
                 Text(
-                    "${state.phase}: ${Fmt.number(state.done)} von ${Fmt.number(state.total)}",
+                    "${scanPhase(state.phase)}: ${Fmt.number(state.done)} von ${Fmt.number(state.total)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textDim,
                 )
@@ -250,6 +263,50 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 "Zeilen, die kein Song sein konnten",
                 badge = vm.bootstrap?.issues,
             ) { onGo(Routes.NOTICES) }
+        }
+
+        Panel("Qualität") {
+            val streamQuality by vm.streamQuality.collectAsState()
+            val downloadQuality by vm.downloadQuality.collectAsState()
+            val qualityReady by vm.qualityReady.collectAsState()
+
+            if (!qualityReady) {
+                Text(
+                    "Dieser Server liefert nur das Original aus - dort ist kein ffmpeg " +
+                        "installiert. Es gibt also nichts umzustellen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textFaint,
+                )
+            } else {
+                Text(
+                    "Gilt nur für dieses Gerät, nicht fürs Konto. Streamen und " +
+                        "Herunterladen getrennt: unterwegs die kleine Kopie hören und " +
+                        "trotzdem das Original aufs Gerät legen ist eine ganz normale Antwort.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textDim,
+                )
+                Text("Streamen", style = MaterialTheme.typography.bodyLarge, color = colors.text)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (quality in Quality.entries) {
+                        Chip(quality.label, streamQuality == quality) { vm.setStreamQuality(quality) }
+                    }
+                }
+                Text("Herunterladen", style = MaterialTheme.typography.bodyLarge, color = colors.text)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (quality in Quality.entries) {
+                        Chip(quality.label, downloadQuality == quality) { vm.setDownloadQuality(quality) }
+                    }
+                }
+                // The promise worth writing down: this decides what the *next*
+                // download asks for and nothing else. A song fetched as FLAC
+                // stays a FLAC, and switching here never deletes anything.
+                Text(
+                    "Was schon heruntergeladen ist, bleibt unverändert - die Einstellung " +
+                        "gilt für neue Downloads.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textFaint,
+                )
+            }
         }
 
         Panel("Darstellung") {

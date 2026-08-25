@@ -37,6 +37,15 @@ data class DownloadedTrack(
     /** File name inside the audio directory - never a path. */
     val file: String,
     val bytes: Long = 0,
+    /**
+     * The quality this copy was actually fetched at, as the server named it in
+     * `X-Sonorus-Quality`. Not what was *asked* for: a 128k MP3 asked for as
+     * Opus comes back as the original, and the player has to say so.
+     *
+     * Defaults to the original for an entry written before this existed, which
+     * is right - everything downloaded until now was the file itself.
+     */
+    val quality: String = "original",
     /** When it finished, as the server writes dates: `YYYY-MM-DD HH:MM:SS`. */
     val at: String = "",
     /**
@@ -83,6 +92,18 @@ data class OfflineSnapshot(
     val playlists: List<OfflineCollection> = emptyList(),
     /** The server's genre list as it was, so an offline genre keeps its real id. */
     val genres: List<Genre> = emptyList(),
+    /**
+     * The last look at the account.
+     *
+     * **Kept in a file of its own** (`account.json`), not in this index, and
+     * that is a correctness rule rather than tidiness. Everything else here is a
+     * fact about the downloads and is rightly thrown away when they are; this
+     * one is the proof that somebody is logged in, and losing it means a cold
+     * start without a network cannot tell "logged in, nothing downloaded" from
+     * "never logged in" - and shows the login screen for a server that is not
+     * there. It therefore survives "Alle Downloads entfernen", a corrupt index
+     * and a [VERSION] bump alike. See [DownloadStore].
+     */
     val account: Bootstrap? = null,
 ) {
     companion object {

@@ -76,6 +76,15 @@ fun TrackRow(
     elsewhere: Boolean = false,
     showAlbum: Boolean = false,
     showYear: Boolean = false,
+    /**
+     * Whether the line under the title says who this is by.
+     *
+     * False on an album, where it would repeat the name printed once at the top
+     * of the page for every one of its twelve rows. A compilation is the
+     * exception the flag exists for: there the tracks really are by different
+     * people, and the album's own artist says nothing about any of them.
+     */
+    showArtist: Boolean = true,
     /** The rating to draw. Passed in, because a row given a star has to redraw
      *  without its whole list being fetched again. */
     stars: Int = track.stars,
@@ -166,8 +175,10 @@ fun TrackRow(
             )
             val second = when {
                 dim -> track.path.orEmpty()
-                showAlbum && track.album.isNotEmpty() -> "${track.artist} · ${track.album}"
-                else -> track.artist
+                showAlbum && track.album.isNotEmpty() ->
+                    if (showArtist) "${track.artist} · ${track.album}" else track.album
+                showArtist -> track.artist
+                else -> ""
             }
             if (second.isNotEmpty()) {
                 Text(

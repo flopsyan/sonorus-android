@@ -9,7 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -29,6 +29,7 @@ import org.sonorus.ui.LocalOffline
 import org.sonorus.ui.Shell
 import org.sonorus.ui.components.Loading
 import org.sonorus.ui.screens.LoginScreen
+import org.sonorus.ui.screens.OfflineScreen
 import org.sonorus.ui.screens.MapsMode
 import org.sonorus.ui.screens.isCompactWindow
 import org.sonorus.ui.theme.SonorusTheme
@@ -87,7 +88,11 @@ private fun SonorusRoot() {
     // Which source answers is a fact about the whole tree, not about one screen.
     CompositionLocalProvider(LocalOffline provides offline) {
         SonorusTheme(mode = theme) {
-            Box(Modifier.fillMaxSize().background(SonorusTheme.colors.bg)) {
+            // The height the app really has, measured rather than read off the
+            // Configuration - see [isCompactWindow]. It is taken here at the
+            // root, because this is the one box that is the whole window.
+            BoxWithConstraints(Modifier.fillMaxSize().background(SonorusTheme.colors.bg)) {
+                val compact = isCompactWindow(maxHeight)
                 when (val current = phase) {
                     is AppPhase.Starting -> Loading()
                     is AppPhase.NeedsLogin -> LoginScreen(
@@ -97,12 +102,21 @@ private fun SonorusRoot() {
                         busy = false,
                         onLogin = { server, user, pass -> vm.login(server, user, pass) { } },
                     )
+                    // Logged in, no server, nothing downloaded. Deliberately not
+                    // the login form: nothing is wrong with the login, and asking
+                    // for a password that was never rejected reads as having been
+                    // thrown out. See [AppPhase.OfflineEmpty].
+                    is AppPhase.OfflineEmpty -> OfflineScreen(
+                        message = current.message,
+                        onRetry = { vm.retryConnection() },
+                        onSignOut = { vm.logout() },
+                    )
                     // A window too short for the shell gets the transport and
                     // nothing else - see [MapsMode]. Deliberately only from
                     // Ready: there is nothing to play before that, and a server
                     // address cannot be typed into a strip.
                     is AppPhase.Ready ->
-                        if (isCompactWindow()) {
+                        if (compact) {
                             branches.SaveableStateProvider("compact") { MapsMode(vm) }
                         } else {
                             branches.SaveableStateProvider("shell") { Shell(vm, current.bootstrap) }

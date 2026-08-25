@@ -7,9 +7,10 @@ import androidx.media3.common.util.UnstableApi
 import org.sonorus.SonorusApp
 import org.sonorus.data.ApiException
 import org.sonorus.data.Library
+import org.sonorus.data.Quality
 import org.sonorus.data.SonorusApi
+import org.sonorus.data.formatLabel
 import org.sonorus.data.download.Downloads
-import org.sonorus.data.model.Album
 import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Playlist
@@ -34,6 +35,18 @@ import kotlinx.serialization.json.encodeToJsonElement
 sealed interface AppPhase {
     data object Starting : AppPhase
     data class NeedsLogin(val message: String = "") : AppPhase
+
+    /**
+     * Logged in, no server, and nothing downloaded to fall back on.
+     *
+     * Its own phase rather than [NeedsLogin], because it is not a login problem
+     * and the login form cannot fix it. Showing that form here is the single
+     * worst thing this app can do - it reads as "you have been logged out" on a
+     * phone that is merely out of coverage, and it was the one failure Florian
+     * called out as "darf niemals passieren".
+     */
+    data class OfflineEmpty(val message: String = "") : AppPhase
+
     data class Ready(val bootstrap: Bootstrap) : AppPhase
 }
 
@@ -79,15 +92,20 @@ class AppViewModel : ViewModel() {
         // A finished play changes the star playlists and the home page, so the
         // shell reloads what it shows in the sidebar.
         player.onPlayCounted = { refreshQuietly() }
-        // A phone that finds a network again picks the server back up by itself.
-        // `drop(1)` skips the value the flow already holds - the start above has
+        // A phone that finds its server again picks up by itself.
+        //
+        // Watched on `offline` and not on the radio, which is the fix for the
+        // banner that used to stay up until the app was restarted: the radio
+        // never changed in that case, the *server* had come back, and nothing
+        // was listening for that. `Library` now clears its own unreachable flag
+        // - from a request that worked or from its own probe - and this is what
+        // turns that into a screen that redraws.
+        //
+        // `drop(1)` skips the value the flow already holds; the start below has
         // just acted on it.
         viewModelScope.launch {
-            lib.online.drop(1).collect { online ->
-                if (online && !lib.manualOffline.value) {
-                    lib.markReachable()
-                    start()
-                }
+            lib.offline.drop(1).collect { offline ->
+                if (!offline) start() else refreshQuietly()
             }
         }
     }
@@ -98,9 +116,20 @@ class AppViewModel : ViewModel() {
      * The order matters and is the point of the whole feature: **a phone with no
      * network never makes a request.** It reads the downloads and is on the
      * library, rather than sitting in a connect timeout and then offering a
-     * login form for a server that is not there. A server that is merely
-     * unreachable is the same case; only a genuine auth failure sends the user
-     * back to the form, because that is the only one a login can fix.
+     * login form for a server that is not there.
+     *
+     * The rule this now follows without exception: **while a session is stored,
+     * the login screen is never shown.** It used to be shown for a genuine auth
+     * failure, and that was too clever by half - a captive portal answering 401
+     * to `/login` is indistinguishable from Sonorus doing it, and both ended
+     * with the user thrown out on a ferry. A password that really has changed is
+     * a rare, recoverable thing with an obvious cure (Abmelden under
+     * Einstellungen); being locked out of your own downloads at sea is neither.
+     *
+     * So there are exactly three outcomes: the library from the server, the
+     * library from the downloads, or - only when there is nothing downloaded at
+     * all - [AppPhase.OfflineEmpty], which says what is wrong and offers to try
+     * again rather than asking for a password nobody got wrong.
      */
     fun start() {
         viewModelScope.launch {
@@ -109,13 +138,7 @@ class AppViewModel : ViewModel() {
                 return@launch
             }
             if (lib.offline.value) {
-                if (lib.hasSnapshot) {
-                    applyBootstrap(lib.bootstrap())
-                } else {
-                    _phase.value = AppPhase.NeedsLogin(
-                        "Keine Verbindung - und es ist noch nichts heruntergeladen."
-                    )
-                }
+                fallBackToDownloads(reason = if (lib.manualOffline.value) "" else NO_SERVER)
                 return@launch
             }
             // Only a cold start shows the spinner. Coming back from offline the
@@ -123,26 +146,46 @@ class AppViewModel : ViewModel() {
             // would throw the navigation away and blink the player bar.
             if (_phase.value !is AppPhase.Ready) _phase.value = AppPhase.Starting
             runCatching { lib.bootstrap() }
-                .onSuccess {
-                    lib.markReachable()
-                    applyBootstrap(it)
-                }
+                .onSuccess { applyBootstrap(it) }
                 .onFailure { error ->
-                    val code = (error as? ApiException)?.code
-                    val auth = code == "auth_required" || code == "bad_login"
-                    if (!auth && lib.hasSnapshot) {
-                        // `markUnreachable` is what makes the next line read the
-                        // downloads instead of the server, and it has to have
-                        // taken effect before it runs - see [Library.offline].
-                        lib.markUnreachable()
-                        runCatching { applyBootstrap(lib.bootstrap()) }
-                            .onSuccess { say("Server nicht erreichbar - du hörst deine Downloads.") }
-                            .onFailure { _phase.value = AppPhase.NeedsLogin(message(error)) }
-                    } else {
-                        _phase.value = AppPhase.NeedsLogin(message(error))
-                    }
+                    // `markUnreachable` is what makes the next read take the
+                    // downloads instead of the server, and it has to have taken
+                    // effect before it runs - see [Library.offline]. `Library`
+                    // has usually set it already; a login that has not stored a
+                    // snapshot yet is the case where it has not.
+                    lib.markUnreachable()
+                    fallBackToDownloads(reason = message(error))
                 }
         }
+    }
+
+    /**
+     * Shows the library as it looks without a server, and says why once.
+     *
+     * [reason] empty means nothing is wrong that the user did not choose - the
+     * manual offline switch needs no explanation, the banner in the shell says
+     * it already.
+     */
+    private suspend fun fallBackToDownloads(reason: String) {
+        if (!lib.hasSnapshot) {
+            _phase.value = AppPhase.OfflineEmpty(reason.ifEmpty { NO_SERVER })
+            return
+        }
+        val wasReady = _phase.value is AppPhase.Ready
+        runCatching { applyBootstrap(lib.bootstrap()) }
+            .onSuccess { if (!wasReady && reason.isNotEmpty()) say(OFFLINE_TOAST) }
+            .onFailure {
+                // The snapshot said there was an account and reading it still
+                // failed, which leaves nothing to draw. Not a login problem
+                // either, so still not the login form.
+                _phase.value = AppPhase.OfflineEmpty(message(it))
+            }
+    }
+
+    /** Tries the server once more from the offline screen or the banner. */
+    fun retryConnection() {
+        lib.markReachable()
+        start()
     }
 
     fun login(server: String, user: String, pass: String, onDone: (Boolean) -> Unit) {
@@ -165,16 +208,30 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    /**
+     * The only thing that may take the stored account away, which is why it also
+     * clears it here: [start] hands a phone with a snapshot straight into its
+     * downloads and never asks for a password, so a logout that left the
+     * snapshot behind would be undone by the next cold start.
+     */
     fun logout() {
         viewModelScope.launch {
             player.clearQueue()
             api.logout()
+            lib.store.forgetAccount()
             _phase.value = AppPhase.NeedsLogin()
         }
     }
 
     private fun applyBootstrap(data: Bootstrap) {
         _phase.value = AppPhase.Ready(data)
+        // Asked here rather than in `init`, which is the fix for a picker that
+        // insisted the server had no ffmpeg: at construction time nobody is
+        // logged in yet, so the request came back 401 and the answer - false -
+        // was then kept for the rest of the session. This runs after every
+        // successful bootstrap, which is exactly when the question can be
+        // answered, and it is cheap enough not to need a guard.
+        loadQualitySupport()
         // Player settings live on the account so they follow to another device -
         // all but the volume, which is not applied here at all. It is the web
         // app's slider, and on a phone the loudness is the system's: multiplying
@@ -251,6 +308,96 @@ class AppViewModel : ViewModel() {
     }
 
     /**
+     * Stops a running download and takes back what it fetched.
+     *
+     * Only what **this** run fetched - see [Downloads.cancelRun]. Anything that
+     * was already on the phone stays, which is the difference between a cancel
+     * and a wipe.
+     */
+    fun cancelDownloadRun() {
+        val removed = downloads.cancelRun()
+        say(
+            when (removed) {
+                0 -> "Download abgebrochen."
+                1 -> "Download abgebrochen, 1 Song wieder entfernt."
+                else -> "Download abgebrochen, $removed Songs wieder entfernt."
+            }
+        )
+    }
+
+    // --- Quality --------------------------------------------------------------
+    // Per device, not per account: this phone on mobile data and the browser on
+    // the LAN are the same login and want opposite things. See [Settings].
+
+    val streamQuality: StateFlow<Quality> get() = app.settings.streamQuality
+    val downloadQuality: StateFlow<Quality> get() = app.settings.downloadQuality
+
+    /**
+     * Whether the server can serve anything but the original.
+     *
+     * Asked once and remembered. An instance without ffmpeg has one quality, and
+     * a picker offering a second there would be a switch that does nothing.
+     */
+    private val _qualityReady = MutableStateFlow(false)
+    val qualityReady: StateFlow<Boolean> = _qualityReady.asStateFlow()
+
+    private fun loadQualitySupport() {
+        // Offline the question cannot be asked, and the last answer is the best
+        // one there is - so it is left alone rather than reset to false.
+        if (lib.offline.value) return
+        viewModelScope.launch {
+            runCatching { api.quality() }.onSuccess { _qualityReady.value = it.ready }
+        }
+    }
+
+    /**
+     * Changing the stream quality applies to the **running song too**, not only
+     * to the next one. A setting you have to skip a track to hear is a setting
+     * nobody tries out; the position is carried over, so it costs the buffer.
+     */
+    fun setStreamQuality(quality: Quality) {
+        app.settings.setStreamQuality(quality)
+        player.reopenAtCurrentQuality()
+        say("Streaming: ${quality.label}")
+    }
+
+    /**
+     * The download default. Deliberately does **not** touch anything already on
+     * the phone: a song fetched as FLAC stays a FLAC, and this only decides what
+     * the next download asks for.
+     */
+    fun setDownloadQuality(quality: Quality) {
+        app.settings.setDownloadQuality(quality)
+        say("Downloads: ${quality.label}")
+    }
+
+    /** The format [track] is really being heard in, for the player's indicator. */
+    fun formatOf(track: Track): String = formatLabel(track, player.servedQuality(track))
+
+    /**
+     * The chip under the transport: one tap, the other quality.
+     *
+     * There are two answers, so a picker for them would be a menu with two
+     * entries. A song already on the phone is untouched by this - it is the file
+     * it is - so tapping while a download plays says so rather than pretending
+     * to have changed something.
+     */
+    fun toggleStreamQuality() {
+        if (!_qualityReady.value) {
+            say("Dieser Server liefert nur das Original.", true)
+            return
+        }
+        val playing = player.state.value.current
+        if (playing != null && downloads.store.fileOf(playing.id) != null) {
+            say("Läuft vom Gerät - die Qualität steht mit dem Download fest.")
+            return
+        }
+        setStreamQuality(
+            if (streamQuality.value == Quality.ORIGINAL) Quality.OPUS128 else Quality.ORIGINAL
+        )
+    }
+
+    /**
      * The user's own offline switch. Turning it off is also the way back after
      * the app fell offline by itself, so it re-reads the library either way.
      */
@@ -303,6 +450,19 @@ class AppViewModel : ViewModel() {
         _theme.value = mode
     }
 
+    /**
+     * Arms or disarms shuffle, and remembers it on the account like the player's
+     * own switch does.
+     *
+     * **Starts nothing.** That is the whole point of the change: shuffle is a
+     * setting, and the play button is what plays. See
+     * [org.sonorus.player.PlayerController.playCollection].
+     */
+    fun toggleShuffle() {
+        player.setShuffle(!player.state.value.shuffle)
+        savePlayerPrefs()
+    }
+
     // --- Ratings --------------------------------------------------------------
 
     /**
@@ -340,37 +500,6 @@ class AppViewModel : ViewModel() {
                     ratings[trackId] = it.stars
                     onDone(it.stars)
                     refreshQuietly()
-                }
-                .onFailure { say(message(it), true) }
-        }
-    }
-
-    /**
-     * The same for whole records, and a map of its own: an album and a track can
-     * carry the same id, so one map would have them overwrite each other.
-     *
-     * It exists for the reason [ratings] does - a screen fetches once and the
-     * star given here would otherwise still be drawn the old way - and it is
-     * read by the Alben grid as well as by the album's own page.
-     */
-    private val albumRatings = mutableStateMapOf<Int, Int>()
-
-    /** The rating to draw for [album]: what this phone last set, else the row's. */
-    fun albumStarsOf(album: Album): Int = albumRatings[album.id] ?: album.stars
-
-    /**
-     * Rates a whole record. Clicking the star it already has clears it, the same
-     * as a song - and no star playlist reads this, so unlike [rate] there is
-     * nothing to refresh afterwards.
-     */
-    fun rateAlbum(albumId: Int, stars: Int, current: Int, onDone: (Int) -> Unit = {}) {
-        if (needsServer()) return
-        val next = if (current == stars) 0 else stars
-        viewModelScope.launch {
-            runCatching { api.rateAlbum(albumId, next) }
-                .onSuccess {
-                    albumRatings[albumId] = it.stars
-                    onDone(it.stars)
                 }
                 .onFailure { say(message(it), true) }
         }
@@ -598,6 +727,11 @@ class AppViewModel : ViewModel() {
 
     fun message(error: Throwable): String = when (error) {
         is ApiException -> error.message
-        else -> error.message?.takeIf { it.isNotBlank() } ?: "Der Server ist nicht erreichbar."
+        else -> error.message?.takeIf { it.isNotBlank() } ?: NO_SERVER
+    }
+
+    private companion object {
+        const val NO_SERVER = "Der Server ist nicht erreichbar."
+        const val OFFLINE_TOAST = "Offline - du hörst deine Downloads."
     }
 }

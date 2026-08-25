@@ -1,8 +1,5 @@
 package org.sonorus.ui.screens
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,11 +30,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
@@ -72,6 +68,7 @@ import org.sonorus.ui.toggled
  */
 private val COMPACT_MAX_HEIGHT = 320.dp
 
+
 /**
  * The floor under which the strip stops fitting and the one-row panel takes over.
  *
@@ -90,26 +87,27 @@ private val STRIP_MIN_HEIGHT = 175.dp
 /**
  * Whether the app has been squeezed into a strip of a split screen.
  *
- * Both halves of the test are re-read on every configuration change, which is
- * what dragging the divider produces - so this follows the divider rather than
- * being decided once at startup.
+ * [height] is the height the app has really been given, measured from the root
+ * composable - **not** `Configuration.screenHeightDp`, and that swap is the fix
+ * for the whole feature not triggering at all.
+ *
+ * The old test was `isInMultiWindowMode && screenHeightDp < 320.dp`, and on
+ * Florian's phone it answered false in a split screen ungefähr 140 dp tall: the
+ * app drew its full library shell - top bar, tab row, transport - into a strip
+ * the height of two rows, which is the state in the screenshot from
+ * 2026-08-25. Which of the two halves lied was not worth finding out, because
+ * neither had to be asked: a composable can measure the box it is being drawn
+ * in, and that number cannot be stale, cannot lag a configuration change and
+ * does not depend on how a ROM reports multi-window.
+ *
+ * The multi-window test went with it and is not missed. It was there to keep a
+ * phone in landscape out of the compact branch, and the height alone already
+ * does that: the shortest landscape window on a phone is ungefähr 360 dp, well
+ * clear of the 320 dp line. Anything genuinely under it - a split screen, a
+ * freeform window, a foldable's cover screen - wants the strip whether or not
+ * Android calls it multi-window.
  */
-@Composable
-fun isCompactWindow(): Boolean {
-    val configuration = LocalConfiguration.current
-    val context = LocalContext.current
-    val multiWindow = remember(configuration) { context.activity()?.isInMultiWindowMode == true }
-    return multiWindow && configuration.screenHeightDp.dp < COMPACT_MAX_HEIGHT
-}
-
-private fun Context.activity(): Activity? {
-    var context = this
-    while (context is ContextWrapper) {
-        if (context is Activity) return context
-        context = context.baseContext
-    }
-    return null
-}
+fun isCompactWindow(height: Dp): Boolean = height < COMPACT_MAX_HEIGHT
 
 /**
  * The player as a strip, for the corner of a split screen.

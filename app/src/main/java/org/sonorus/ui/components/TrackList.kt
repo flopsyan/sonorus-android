@@ -87,6 +87,14 @@ fun TrackList(
     numbered: Boolean = true,
     showAlbum: Boolean = false,
     showYear: Boolean = false,
+    /**
+     * Per track rather than per list, which is the only way to get a
+     * compilation right: on an ordinary album the name under every row is the
+     * one already printed at the top of the page, and on "Various" it is the
+     * only thing that tells the twelve rows apart. A single guest track on an
+     * otherwise solo record is the same question again, one row at a time.
+     */
+    showArtist: (Track) -> Boolean = { true },
     coverUrl: (Track) -> String? = { null },
     contentPadding: PaddingValues = PaddingValues(bottom = 24.dp),
     header: (@Composable () -> Unit)? = null,
@@ -106,6 +114,7 @@ fun TrackList(
                 elsewhere = !currentFromHere,
                 showAlbum = showAlbum,
                 showYear = showYear,
+                showArtist = showArtist(track),
                 stars = actions.starsOf(track),
                 downloaded = actions.statusOf(track) == DownloadStatus.DONE,
                 coverUrl = coverUrl(track),

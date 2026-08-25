@@ -6,6 +6,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -13,6 +14,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import org.sonorus.data.Library
+import org.sonorus.data.Quality
 import org.sonorus.data.Settings
 import org.sonorus.data.Shuffle
 import org.sonorus.data.SonorusApi
@@ -110,6 +112,9 @@ class PlayerController(
 
     /** Positions in [PlayerState.queue] that were really played, oldest first. */
     private val history = ArrayDeque<Int>()
+
+    /** How many times in a row playback has been rescued - see [onPlayerError]. */
+    private var recoveries = 0
 
     /** Called when a rating or a play is written, so the UI can refresh. */
     var onPlayCounted: (() -> Unit)? = null
@@ -406,6 +411,26 @@ class PlayerController(
     }
 
     /**
+     * The play button of a collection: this list, from the top or dealt out,
+     * according to whether shuffle is **already** armed.
+     *
+     * The distinction from [shuffleTracks] is the whole of Spotify's rule and
+     * the reason this exists. Shuffle there is a switch, not a verb: throwing it
+     * arms the next thing you play and starts nothing by itself. Sonorus had it
+     * as a second play button, so the one control that is supposed to be
+     * harmless to try started the music every time it was touched.
+     */
+    fun playCollection(tracks: List<Track>, source: String = "", sourceKey: String = "") {
+        val list = playable(tracks)
+        if (list.isEmpty()) return
+        // Shuffled, no song has earned the front of the queue - a fixed zero
+        // would open every random run of an album with its first track and only
+        // shuffle the rest.
+        val start = if (_state.value.shuffle) list.indices.random() else 0
+        playTracks(list, start, source, sourceKey)
+    }
+
+    /**
      * The same queue, but for a caller that hands the songs to ExoPlayer itself:
      * Android Auto, where the session sets the playlist the moment a row is
      * tapped. Only the app's own view of the queue is written here - pushing the
@@ -588,6 +613,27 @@ class PlayerController(
         startTicker()
     }
 
+    /**
+     * Reopens the running track at the quality that is set now.
+     *
+     * Only ever for a **streamed** song: a download is the file it is, and
+     * nothing here re-fetches one. `rearrangeAround` cannot help - the URI has
+     * changed, so the item really does have to be built again - but the position
+     * and whether it was playing are carried over, so the switch costs the
+     * buffer and nothing else.
+     */
+    fun reopenAtCurrentQuality() {
+        val track = _state.value.current ?: return
+        if (library.store.fileOf(track.id) != null) return
+        val at = exoPlayer.currentPosition.coerceAtLeast(0)
+        val wasPlaying = exoPlayer.playWhenReady
+        val index = exoPlayer.currentMediaItemIndex
+        exoPlayer.replaceMediaItem(index, mediaItem(track))
+        exoPlayer.seekTo(index, at)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = wasPlaying
+    }
+
     fun seekTo(ms: Long) {
         exoPlayer.seekTo(ms)
         // The rail is let go and drawn from the state again in the same frame,
@@ -689,7 +735,13 @@ class PlayerController(
     fun mediaItem(track: Track): MediaItem {
         val local = library.store.fileOf(track.id)
         return MediaItem.Builder()
-            .setUri(local?.let { Uri.fromFile(it) } ?: api.streamUrl(track.id).toUri())
+            .setUri(
+                local?.let { Uri.fromFile(it) }
+                    // Streamed at whatever this phone is set to. A download is
+                    // never re-fetched for it: what is here is here, and the
+                    // point of a download is that nothing is fetched twice.
+                    ?: api.streamUrl(track.id, settings.streamQuality.value).toUri()
+            )
             .setMediaId(track.id.toString())
             .setMediaMetadata(
                 MediaMetadata.Builder()
@@ -704,6 +756,21 @@ class PlayerController(
                     .build()
             )
             .build()
+    }
+
+    /**
+     * What [track] is really being heard as right now.
+     *
+     * Three cases, and they genuinely differ. A downloaded song is whatever it
+     * was fetched as, which the index remembers - changing the setting later
+     * does not reach back and change a file already on the phone. A streamed one
+     * is what the server would serve for the current setting, worked out by the
+     * same rule the server uses. And a song that is not playing at all has no
+     * answer, so it gets the setting's own name.
+     */
+    fun servedQuality(track: Track): Quality {
+        library.store.entryOf(track.id)?.let { return Quality.of(it.quality) }
+        return Quality.served(track, settings.streamQuality.value)
     }
 
     private fun pushPlaylist(tracks: List<Track>, index: Int, positionMs: Long) {
@@ -761,11 +828,89 @@ class PlayerController(
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) reportListening()
             if (playbackState == Player.STATE_READY) {
+                recoveries = 0
                 _state.value = _state.value.copy(
                     durationMs = exoPlayer.duration.takeIf { it > 0 } ?: 0,
                 )
             }
         }
+
+        /**
+         * The network went away mid-song.
+         *
+         * This used to surface as `Unable to resolve host "sonorus.flopsyan.eu"`
+         * in the media notification, which is both ugly and useless: the phone
+         * knows perfectly well that it has downloads, and Spotify in the same
+         * situation simply carries on with them. So does this now.
+         *
+         * Three steps, in order. Tell the library the server is gone, so every
+         * screen switches over and the banner appears rather than a list of
+         * songs that cannot be opened. Then rebuild the queue out of what is
+         * actually on the phone. Then keep playing where it makes sense to.
+         *
+         * A player error is **consumed** here rather than left standing:
+         * ExoPlayer stays in its error state until something prepares it again,
+         * and media3 shows that state in the notification. Recovering is what
+         * takes it back off the lock screen.
+         */
+        override fun onPlayerError(error: PlaybackException) {
+            if (!isNetworkError(error)) return
+            library.markUnreachable()
+
+            // A guard against the obvious loop: recovering into another track
+            // that also cannot be played would try forever. STATE_READY resets
+            // it, so an ordinary drop-out costs one recovery and no more.
+            if (recoveries >= MAX_RECOVERIES) {
+                exoPlayer.playWhenReady = false
+                return
+            }
+            recoveries += 1
+            recoverOffline()
+        }
+    }
+
+    private fun isNetworkError(error: PlaybackException): Boolean = when (error.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+        PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        -> true
+        else -> false
+    }
+
+    /**
+     * Carries on with what is on the phone after the network went.
+     *
+     * The running song keeps playing if it was downloaded - the same file, from
+     * the second it stopped at. If it was being streamed, the queue moves on to
+     * the next song that *is* here, because a queue that stops on the first
+     * thing it cannot fetch is a queue that has ended.
+     *
+     * With nothing downloaded there is nothing to do but stop quietly. That is
+     * not a failure to report: the phone has no network and no files, and a
+     * message saying so is the banner the shell is already showing.
+     */
+    private fun recoverOffline() {
+        val state = _state.value
+        val here = state.order.filter { library.store.fileOf(state.queue[it].id) != null }
+        if (here.isEmpty()) {
+            exoPlayer.playWhenReady = false
+            return
+        }
+
+        val current = state.order.getOrNull(state.pos)
+        val keepCurrent = current != null && current in here
+        val at = if (keepCurrent) here.indexOf(current) else {
+            // The next downloaded song *after* where the queue stood, so the run
+            // carries on forwards rather than jumping back to the top.
+            here.indexOfFirst { state.order.indexOf(it) > state.pos }.takeIf { it >= 0 } ?: 0
+        }
+        val positionMs = if (keepCurrent) exoPlayer.currentPosition.coerceAtLeast(0) else 0
+
+        _state.value = state.copy(order = here, pos = at)
+        pushPlaylist(here.map { state.queue[it] }, at, positionMs)
+        exoPlayer.playWhenReady = true
     }
 
     fun release() {
@@ -785,6 +930,12 @@ class PlayerController(
         const val MAX_STEP = 2.0
         /** Seconds of playback between two writes of the playhead. */
         const val SAVE_POSITION_EVERY = 5.0
+
+        /**
+         * One rescue per drop-out. More than that means the songs it is falling
+         * back on cannot be played either, and trying again would be a loop.
+         */
+        const val MAX_RECOVERIES = 1
     }
 }
 

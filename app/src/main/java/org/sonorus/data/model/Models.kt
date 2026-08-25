@@ -72,20 +72,6 @@ data class Album(
     val trackCount: Int = 0,
     val duration: Double = 0.0,
     /**
-     * The stars this account gave the record itself, 0 for one nobody has rated.
-     *
-     * Completely independent of the songs in [tracks] and never derived from
-     * them: a five-star record may hold a song that never got a star, and both
-     * statements are true at once. Unlike a track rating it feeds no star
-     * playlist - it is there to show in the Alben grid and to sort it by.
-     *
-     * Only the list and detail endpoints send it, so it stays 0 on an album that
-     * arrived through the home screen or an artist page - neither draws stars.
-     * The offline snapshot builds its albums out of downloaded songs and knows
-     * no ratings at all, so it says 0 for every record.
-     */
-    val stars: Int = 0,
-    /**
      * The genres of the album, which is a fact about the album and not about
      * whatever songs are in it right now - the server hands them down to every
      * one of them, the ones the folder gains later included. Only the detail
@@ -234,6 +220,7 @@ data class User(
 @Serializable
 data class ScanState(
     val running: Boolean = false,
+    /** `walking`, `reading`, `pruning`, `transcoding`, `done` or `error`. */
     val phase: String = "",
     val done: Int = 0,
     val total: Int = 0,
@@ -393,6 +380,27 @@ data class ScanResponse(
     val scan: ScanState = ScanState(),
     val lastScan: String? = null,
     val alreadyRunning: Boolean = false,
+)
+
+/**
+ * What `GET /api/quality` answers.
+ *
+ * [ready] is the only field the app really acts on: an instance without ffmpeg
+ * can serve nothing but the original, and a picker that offers a second choice
+ * there would be a switch that quietly does nothing.
+ */
+@Serializable
+data class QualityResponse(
+    val ready: Boolean = false,
+    val profiles: List<QualityProfile> = emptyList(),
+)
+
+@Serializable
+data class QualityProfile(
+    val name: String = "",
+    val label: String = "",
+    val codec: String = "",
+    val bitrate: Int = 0,
 )
 
 @Serializable

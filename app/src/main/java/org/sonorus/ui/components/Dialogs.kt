@@ -48,6 +48,12 @@ fun SonorusDialog(
     title: String,
     onDismiss: () -> Unit,
     confirmLabel: String? = null,
+    /**
+     * The way out. "Abbrechen" everywhere except where the *action* is itself an
+     * abort - a dialog offering "Abbrechen" next to "Abbrechen" says nothing
+     * about which button does what.
+     */
+    dismissLabel: String = "Abbrechen",
     confirmEnabled: Boolean = true,
     onConfirm: (() -> Unit)? = null,
     content: @Composable () -> Unit,
@@ -70,7 +76,7 @@ fun SonorusDialog(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                 ) {
-                    SonorusButton("Abbrechen", onClick = onDismiss)
+                    SonorusButton(dismissLabel, onClick = onDismiss)
                     if (onConfirm != null && confirmLabel != null) {
                         SonorusButton(
                             confirmLabel,
@@ -132,11 +138,12 @@ fun ConfirmDialog(
     title: String,
     message: String,
     confirmLabel: String = "Löschen",
+    dismissLabel: String = "Abbrechen",
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
-    SonorusDialog(title, onDismiss, confirmLabel, onConfirm = onConfirm) {
+    SonorusDialog(title, onDismiss, confirmLabel, dismissLabel = dismissLabel, onConfirm = onConfirm) {
         Text(message, style = MaterialTheme.typography.bodyMedium, color = colors.textDim)
     }
 }

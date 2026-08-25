@@ -72,8 +72,20 @@ class SonorusApi(private val session: Session) {
     /**
      * `res.sendFile(..., { acceptRanges: true })` on the server means Range
      * requests work, which is what gives ExoPlayer its seek bar for free.
+     *
+     * The original carries **no query at all** rather than `?q=original`, and
+     * that is deliberate on both sides: the URL is what ExoPlayer keys its cache
+     * and its `Range` requests on, and the plain stream has to keep the plain
+     * URL. It is also what every queue saved before the quality setting existed
+     * still asks for.
      */
-    fun streamUrl(trackId: Int): String = "${session.serverUrl}/api/stream/$trackId"
+    fun streamUrl(trackId: Int, quality: Quality = Quality.ORIGINAL): String {
+        val base = "${session.serverUrl}/api/stream/$trackId"
+        return if (quality == Quality.ORIGINAL) base else "$base?q=${quality.wire}"
+    }
+
+    /** What this server can serve, so a picker never offers what cannot work. */
+    suspend fun quality(): QualityResponse = get("/api/quality")
 
     // --- Login ----------------------------------------------------------------
 
@@ -289,14 +301,6 @@ class SonorusApi(private val session: Session) {
 
     suspend fun rate(trackId: Int, stars: Int): RatingResponse =
         put("/api/tracks/$trackId/rating", buildJsonObject { put("stars", stars) })
-
-    /**
-     * The stars on a whole record, which no song of it knows about. The same
-     * shape as [rate], minus the counts - those describe the star playlists, and
-     * an album rating feeds none.
-     */
-    suspend fun rateAlbum(albumId: Int, stars: Int): RatingResponse =
-        put("/api/albums/$albumId/rating", buildJsonObject { put("stars", stars) })
 
     suspend fun startPlay(trackId: Int, seconds: Double): PlayResponse =
         post("/api/plays", buildJsonObject {

@@ -368,7 +368,6 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
                 // From the view model and not from the row: a record rated on
                 // this phone has to redraw here too, and nothing refetches the
                 // grid. Same reason as the stars on a track row.
-                stars = vm.albumStarsOf(album),
                 // Re-sorting the grid slides the cards to their new places
                 // instead of the whole page changing under the finger.
                 modifier = Modifier.animateItem(),
@@ -435,13 +434,14 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                     // put on, so it is introduced like one.
                     DetailHead(
                         title = data.genre.name,
-                        subtitle = listOf(
+                        meta = listOf(
                             Fmt.plural(data.genre.tracks.size, "Song", "Songs"),
                             Fmt.durationLong(data.genre.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playTracks(data.genre.tracks, 0, data.genre.name, key) },
-                        onShuffle = { vm.player.shuffleTracks(data.genre.tracks, data.genre.name, key) },
+                        onPlay = { vm.player.playCollection(data.genre.tracks, data.genre.name, key) },
+                        shuffle = player.shuffle,
+                        onToggleShuffle = { vm.toggleShuffle() },
                         download = { CollectionDownload(vm, data.genre.tracks) },
                     )
                     all.value?.genres?.let { genres ->
@@ -515,13 +515,14 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
                     // what the selection adds up to.
                     DetailHead(
                         title = title,
-                        subtitle = listOf(
+                        meta = listOf(
                             Fmt.plural(data.tracks.size, "Song", "Songs"),
                             Fmt.durationLong(data.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.tracks).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playTracks(data.tracks, 0, title, key) },
-                        onShuffle = { vm.player.shuffleTracks(data.tracks, title, key) },
+                        onPlay = { vm.player.playCollection(data.tracks, title, key) },
+                        shuffle = player.shuffle,
+                        onToggleShuffle = { vm.toggleShuffle() },
                         download = { CollectionDownload(vm, data.tracks) },
                     )
                     PickerRow(

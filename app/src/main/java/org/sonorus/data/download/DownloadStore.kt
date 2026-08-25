@@ -40,6 +40,25 @@ class DownloadStore(private val root: File) {
     private val indexFile = File(root, "library.json")
     private val tempFile = File(root, "library.json.tmp")
 
+    /**
+     * The last look at the account, in a file of its own.
+     *
+     * It used to ride along in the index, and that was the bug behind the worst
+     * failure this feature can have: a cold start with no network showed the
+     * **login screen**. Three ways led there, and all three were the same
+     * mistake - the proof that somebody is logged in was being thrown away with
+     * data that had nothing to do with it. "Alle Downloads entfernen" wiped the
+     * index and the account with it; an index that failed to parse fell back to
+     * an empty snapshot and took the account down too; and a [OfflineSnapshot]
+     * VERSION bump discarded the whole file on the next app update.
+     *
+     * Kept apart, none of the three can happen: the downloads are a fact about
+     * this phone's storage and may be thrown away freely, while the account is
+     * the answer to "is anybody logged in", which only logging out may change.
+     */
+    private val accountFile = File(root, "account.json")
+    private val accountTemp = File(root, "account.json.tmp")
+
     private val lock = Any()
 
     @Volatile
@@ -67,6 +86,9 @@ class DownloadStore(private val root: File) {
     val count: Int get() = byId.size
 
     val bytes: Long get() = state.tracks.sumOf { it.bytes }
+
+    /** The index entry of a downloaded track, or null if it is not here. */
+    fun entryOf(trackId: Int): DownloadedTrack? = byId[trackId]
 
     /** The playable file of a downloaded track, or null if it is not here. */
     fun fileOf(trackId: Int): File? {
@@ -110,8 +132,23 @@ class DownloadStore(private val root: File) {
      * The last look at the account. Stored on every successful bootstrap,
      * because who is logged in and how the player is set cannot be asked for
      * once the server is gone - and the shell needs both before it draws.
+     *
+     * Written to [accountFile] rather than into the index; see the note there.
      */
-    fun rememberAccount(bootstrap: Bootstrap) = update { s -> s.copy(account = bootstrap) }
+    fun rememberAccount(bootstrap: Bootstrap) {
+        synchronized(lock) {
+            writeAccount(bootstrap)
+            publish(state.copy(account = bootstrap))
+        }
+    }
+
+    /** Logging out. The only thing that may take the account away. */
+    fun forgetAccount() {
+        synchronized(lock) {
+            accountFile.delete()
+            publish(state.copy(account = null))
+        }
+    }
 
     /** Drops one song and its file. The artwork stays - other songs share it. */
     fun remove(trackId: Int) = update { s ->
@@ -123,14 +160,21 @@ class DownloadStore(private val root: File) {
         )
     }
 
-    /** Everything goes, the account snapshot included - this is a clean slate. */
+    /**
+     * Every downloaded file goes, and the index with it.
+     *
+     * The account snapshot deliberately **stays**. Throwing away the songs on
+     * this phone says nothing about who is logged in, and taking the login with
+     * them is how a phone with no network ended up at the login screen after
+     * nothing worse than "Alle Downloads entfernen".
+     */
     fun clear() {
         synchronized(lock) {
             audioDir.deleteRecursively()
             coverDir.deleteRecursively()
             audioDir.mkdirs()
             coverDir.mkdirs()
-            write(OfflineSnapshot())
+            write(OfflineSnapshot(account = state.account))
         }
     }
 
@@ -161,11 +205,17 @@ class DownloadStore(private val root: File) {
         }
     }
 
-    /** Whole file, then rename: a kill mid-write cannot leave half an index. */
+    /**
+     * Whole file, then rename: a kill mid-write cannot leave half an index.
+     *
+     * The account is stripped before writing. It lives in [accountFile] and
+     * having it in both would let a stale copy in the index win on the next
+     * load.
+     */
     private fun write(next: OfflineSnapshot) {
         root.mkdirs()
         val stamped = next.copy(version = OfflineSnapshot.VERSION)
-        tempFile.writeText(json.encodeToString(OfflineSnapshot.serializer(), stamped))
+        tempFile.writeText(json.encodeToString(OfflineSnapshot.serializer(), stamped.copy(account = null)))
         if (!tempFile.renameTo(indexFile)) {
             // Some filesystems refuse to rename onto an existing file.
             indexFile.delete()
@@ -174,13 +224,39 @@ class DownloadStore(private val root: File) {
         publish(stamped)
     }
 
+    private fun writeAccount(account: Bootstrap) {
+        root.mkdirs()
+        runCatching {
+            accountTemp.writeText(json.encodeToString(Bootstrap.serializer(), account))
+            if (!accountTemp.renameTo(accountFile)) {
+                accountFile.delete()
+                accountTemp.renameTo(accountFile)
+            }
+        }
+    }
+
+    /**
+     * Reads both files, and reads them **independently**.
+     *
+     * A failure on one must not cost the other: an index that cannot be parsed
+     * leaves an empty download list and a phone that is still logged in, which
+     * is exactly what the situation is.
+     */
     private fun load() {
-        val text = runCatching { indexFile.takeIf { it.isFile }?.readText() }.getOrNull()
-        val read = text
+        val index = runCatching { indexFile.takeIf { it.isFile }?.readText() }.getOrNull()
             ?.let { runCatching { json.decodeFromString(OfflineSnapshot.serializer(), it) }.getOrNull() }
             ?.takeIf { it.version == OfflineSnapshot.VERSION }
             ?: OfflineSnapshot()
-        publish(read)
+
+        val account = runCatching { accountFile.takeIf { it.isFile }?.readText() }.getOrNull()
+            ?.let { runCatching { json.decodeFromString(Bootstrap.serializer(), it) }.getOrNull() }
+            // An index written before the account moved out still carries one.
+            // Taken over rather than dropped, so an update does not log anybody
+            // out of their downloads.
+            ?: index.account
+
+        publish(index.copy(account = account))
+        if (account != null && !accountFile.isFile) writeAccount(account)
     }
 
     private fun publish(next: OfflineSnapshot) {

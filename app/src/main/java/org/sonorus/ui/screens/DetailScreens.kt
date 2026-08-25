@@ -1,19 +1,36 @@
 package org.sonorus.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.DownloadForOffline
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
@@ -32,7 +51,10 @@ import org.sonorus.data.model.Track
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
+import org.sonorus.ui.Motion
 import org.sonorus.ui.Routes
+import org.sonorus.ui.pressable
+import org.sonorus.ui.toggled
 import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.CoverMosaic
 import org.sonorus.ui.components.albumCovers
@@ -42,16 +64,27 @@ import org.sonorus.ui.components.MediaCard
 import org.sonorus.ui.components.RackLabelText
 import org.sonorus.ui.components.Section
 import org.sonorus.ui.components.SonorusButton
-import org.sonorus.ui.components.Stars
 import org.sonorus.ui.components.TrackList
 import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.starLabel
 import org.sonorus.ui.theme.SonorusTheme
 
 /**
- * The head of a detail page: artwork, title, a quiet line, and the buttons.
+ * The head of a detail page: artwork, title, who it is by, the facts, the icons.
+ *
  * Shared by everything that is a collection you put on - an album, an artist, a
  * playlist, a star playlist, a genre - which is why it is not private.
+ *
+ * Laid out the way Spotify lays it out, and for the reason Spotify does: this
+ * page is opened to *play* something, so the artwork leads, the name is the
+ * heading it deserves, and the one control that matters is a circle on the right
+ * that the thumb finds without looking. It used to be four labelled buttons in
+ * two rows of equal weight, which said that "Bearbeiten" and "Abspielen" were
+ * the same kind of thing.
+ *
+ * The four lines from top to bottom are deliberate and each earns its place:
+ * cover, title, artist, then the two facts worth knowing before pressing play -
+ * how much of it there is and when it came out.
  *
  * [coverUrls] is a list rather than one picture: a collection without artwork of
  * its own shows the covers of the first four albums in it (see [CoverMosaic]),
@@ -60,74 +93,129 @@ import org.sonorus.ui.theme.SonorusTheme
 @Composable
 fun DetailHead(
     title: String,
-    subtitle: String,
     coverUrls: List<String>,
+    /** Who it is by, on its own line under the title. Empty leaves the line out. */
+    artist: String = "",
+    /** The quiet line of facts: how many songs, what date, how long. */
+    meta: String = "",
     round: Boolean = false,
     onPlay: () -> Unit,
-    onShuffle: () -> Unit,
+    /**
+     * Whether shuffle is armed, and how to arm it.
+     *
+     * A **switch and not a second play button**, which is the whole change here.
+     * Spotify's shuffle arms the next thing you play and starts nothing by
+     * itself; Sonorus had it as "Zufällig", a button that began playing the
+     * moment it was touched. So the one control you would expect to be safe to
+     * try was the one that started the music. Now it lights up and waits, and
+     * the play button deals the order out.
+     */
+    shuffle: Boolean = false,
+    onToggleShuffle: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
     /** The download control, which every collection has and only its head draws. */
     download: (@Composable () -> Unit)? = null,
-    /**
-     * The stars of the collection itself, for the one kind that has any: a
-     * record. Given its own row under the buttons rather than a place among
-     * them - "Bearbeiten" next to it changes the shared library, while a rating
-     * belongs to the account alone, and the two must not read as one set.
-     */
-    rating: (@Composable () -> Unit)? = null,
 ) {
     val colors = SonorusTheme.colors
-    Column(Modifier.fillMaxWidth().padding(16.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            CoverMosaic(
-                coverUrls,
-                Modifier.size(112.dp),
-                if (round) CircleShape else RoundedCornerShape(10.dp),
-                title,
+    val haptics = LocalHapticFeedback.current
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+        // Centred, and sized against the window rather than fixed: 58 % is large
+        // enough to be the thing the page is about and small enough that the
+        // title and the transport are still on screen without scrolling, which
+        // is the whole of "aber nicht zu groß".
+        CoverMosaic(
+            coverUrls,
+            Modifier
+                .align(Alignment.CenterHorizontally)
+                .fillMaxWidth(0.58f)
+                .widthIn(max = 260.dp)
+                .aspectRatio(1f),
+            if (round) CircleShape else RoundedCornerShape(10.dp),
+            title,
+        )
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = colors.text,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (artist.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                artist,
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.textDim,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = colors.text,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (subtitle.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.textDim,
+        }
+        if (meta.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                meta,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
+        // What is done *to* the collection sits on the left as quiet glyphs;
+        // what is done *with* it is the pair on the right. The gap between the
+        // two groups is the sentence: these are not the same kind of button.
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            download?.invoke()
+            onEdit?.let {
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = it, modifier = Modifier.size(44.dp)) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        "Bearbeiten",
+                        tint = colors.textDim,
+                        modifier = Modifier.size(24.dp),
                     )
                 }
             }
-        }
-        Spacer(Modifier.height(14.dp))
-        // Two rows: the transport first, then what is done *with* the collection
-        // rather than to it. Four buttons do not fit across a phone.
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SonorusButton("Abspielen", primary = true, onClick = onPlay)
-            SonorusButton("Zufällig", onClick = onShuffle)
-        }
-        if (download != null || onEdit != null) {
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                download?.invoke()
-                onEdit?.let { SonorusButton("Bearbeiten", onClick = it) }
+            Spacer(Modifier.weight(1f))
+            onToggleShuffle?.let { toggle ->
+                val tint by animateColorAsState(
+                    if (shuffle) colors.accent else colors.textDim,
+                    Motion.quick(),
+                    label = "shuffle",
+                )
+                IconButton(
+                    onClick = {
+                        haptics.toggled(!shuffle)
+                        toggle()
+                    },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(Icons.Filled.Shuffle, "Zufall", tint = tint, modifier = Modifier.size(26.dp))
+                }
             }
-        }
-        rating?.let {
-            Spacer(Modifier.height(14.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent)
+                    .pressable(dip = 0.94f, onClick = onPlay),
+                contentAlignment = Alignment.Center,
             ) {
-                RackLabelText("Album bewerten")
-                it()
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    "Abspielen",
+                    tint = colors.accentInk,
+                    modifier = Modifier.size(30.dp),
+                )
             }
         }
     }
@@ -137,10 +225,16 @@ fun DetailHead(
  * The download control of a whole collection - an album, a playlist, a genre, a
  * rating, an artist.
  *
- * One button with several states rather than a switch, because there are
- * several different things to say: nothing here yet, part of it, it is coming,
- * it is all here. Taking it back asks first - on a phone a mistap would
- * otherwise throw away an hour of downloading.
+ * One glyph with four states rather than a switch, because there are four
+ * different things to say: nothing here yet, part of it, it is coming, it is all
+ * here. Taking it back asks first - on a phone a mistap would otherwise throw
+ * away an hour of downloading.
+ *
+ * **While it runs it is a ring, and the ring goes by bytes.** Three of ten songs
+ * that happen to be the three long ones are not thirty per cent of the work, and
+ * a bar that says so stalls near the end and then jumps. Tapping it again during
+ * a run cancels - see [AppViewModel.cancelDownloadRun] for why only what *this*
+ * run fetched is taken back.
  *
  * [playlist] is passed for a playlist and for nothing else. A playlist's order
  * exists nowhere but on the server, so it is stored along with the songs; every
@@ -149,8 +243,10 @@ fun DetailHead(
 @UnstableApi
 @Composable
 fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist? = null) {
+    val colors = SonorusTheme.colors
     val state by vm.downloads.state.collectAsState()
-    var confirming by remember { mutableStateOf(false) }
+    var confirmingRemove by remember { mutableStateOf(false) }
+    var confirmingCancel by remember { mutableStateOf(false) }
 
     val here = tracks.filter { !it.missing }
     if (here.isEmpty()) return
@@ -158,23 +254,104 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist
     val busy = here.count { it.id == state.active || it.id in state.queued }
     val start = { if (playlist != null) vm.downloadPlaylist(playlist, here) else vm.download(here) }
 
-    when {
-        busy > 0 -> SonorusButton("Lädt … $done/${here.size}", enabled = false) {}
-        done == here.size -> SonorusButton("Heruntergeladen") { confirming = true }
-        done > 0 -> SonorusButton("Rest laden ($done/${here.size})") { start() }
-        else -> SonorusButton("Herunterladen") { start() }
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        if (busy > 0) {
+            val progress = state.batchProgress
+            // Until the first size is known there is nothing honest to draw, so
+            // it sweeps rather than claiming zero.
+            if (progress == null) {
+                CircularProgressIndicator(
+                    Modifier.size(44.dp),
+                    color = colors.accent,
+                    trackColor = colors.surface2,
+                    strokeWidth = 3.dp,
+                )
+            } else {
+                val shown by animateFloatAsState(progress, Motion.standard(), label = "downloadRing")
+                CircularProgressIndicator(
+                    progress = { shown },
+                    modifier = Modifier.size(44.dp),
+                    color = colors.accent,
+                    trackColor = colors.surface2,
+                    strokeWidth = 3.dp,
+                )
+            }
+        }
+        IconButton(
+            onClick = {
+                when {
+                    busy > 0 -> confirmingCancel = true
+                    done == here.size -> confirmingRemove = true
+                    else -> start()
+                }
+            },
+            modifier = Modifier.size(44.dp),
+        ) {
+            when {
+                // A square inside the ring, the way every transfer that can be
+                // stopped says so. The arrow would read as "it is still going".
+                busy > 0 -> Icon(
+                    Icons.Filled.Stop,
+                    "Download abbrechen",
+                    tint = colors.accent,
+                    modifier = Modifier.size(20.dp),
+                )
+                done == here.size -> Icon(
+                    Icons.Filled.DownloadDone,
+                    "Heruntergeladen - antippen zum Entfernen",
+                    tint = colors.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+                done > 0 -> Icon(
+                    Icons.Filled.DownloadForOffline,
+                    "Rest herunterladen ($done von ${here.size})",
+                    tint = colors.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+                else -> Icon(
+                    Icons.Filled.Download,
+                    "Herunterladen",
+                    tint = colors.textDim,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
     }
 
-    if (confirming) {
+    if (confirmingRemove) {
         ConfirmDialog(
             title = "Download entfernen",
             message = "${Fmt.plural(done, "Song", "Songs")} werden von diesem Gerät gelöscht. " +
                 "Auf dem Server bleibt alles, wie es ist.",
             confirmLabel = "Entfernen",
-            onDismiss = { confirming = false },
+            onDismiss = { confirmingRemove = false },
             onConfirm = {
-                confirming = false
+                confirmingRemove = false
                 vm.removeDownloads(here)
+            },
+        )
+    }
+
+    if (confirmingCancel) {
+        val fetched = vm.downloads.runCount
+        ConfirmDialog(
+            title = "Download abbrechen",
+            message = if (fetched > 0) {
+                "Der laufende Download wird abgebrochen. Die " +
+                    "${Fmt.plural(fetched, "Song", "Songs")}, die dabei schon geladen " +
+                    "wurden, werden wieder gelöscht - alles, was vorher schon auf dem " +
+                    "Gerät war, bleibt."
+            } else {
+                "Der laufende Download wird abgebrochen. Auf dem Gerät ändert sich nichts."
+            },
+            confirmLabel = "Download abbrechen",
+            // Not "Abbrechen" next to "Abbrechen": here the action *is* an
+            // abort, so the way out has to be named after what it does.
+            dismissLabel = "Weiter laden",
+            onDismiss = { confirmingCancel = false },
+            onConfirm = {
+                confirmingCancel = false
+                vm.cancelDownloadRun()
             },
         )
     }
@@ -202,34 +379,35 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                 onSaved = { load.reload() },
             )
         }
+        val source = "Album: ${album.title}"
         TrackList(
             tracks = tracks,
             currentTrackId = player.current?.id,
             currentFromHere = player.sourceKey == key,
-            actions = trackActions(vm, tracks, "Album: ${album.title}", key, onGo),
+            actions = trackActions(vm, tracks, source, key, onGo),
+            // The name under every row would be the one printed once at the top
+            // of the page, twelve times over. A compilation is the exception:
+            // there the artist really is the only thing telling the rows apart,
+            // and it is decided per track rather than per album so a single
+            // guest on an otherwise solo record still gets a name.
+            showArtist = { it.artist.isNotEmpty() && it.artist != album.artist },
             header = {
                 DetailHead(
                     title = album.title,
+                    artist = album.artist,
                     // The album page is the only place that prints the full
                     // date - everywhere else there is only room for the year.
-                    subtitle = listOfNotNull(
-                        album.artist.takeIf { it.isNotEmpty() },
-                        Fmt.releaseDate(album.releaseDate).takeIf { it.isNotEmpty() },
+                    meta = listOfNotNull(
                         Fmt.plural(album.trackCount, "Song", "Songs"),
+                        Fmt.releaseDate(album.releaseDate).takeIf { it.isNotEmpty() },
                         Fmt.durationLong(album.duration),
                     ).joinToString(" · "),
                     coverUrls = listOfNotNull(vm.coverUrl(album.cover)),
-                    onPlay = { vm.player.playTracks(tracks, 0, "Album: ${album.title}", key) },
-                    onShuffle = { vm.player.shuffleTracks(tracks, "Album: ${album.title}", key) },
+                    onPlay = { vm.player.playCollection(tracks, source, key) },
+                    shuffle = player.shuffle,
+                    onToggleShuffle = { vm.toggleShuffle() },
                     onEdit = { editing = true },
                     download = { CollectionDownload(vm, tracks) },
-                    // The one place a record is rated, and deliberately apart
-                    // from the stars in the list below it: those belong to the
-                    // songs and neither one follows the other.
-                    rating = {
-                        val stars = vm.albumStarsOf(album)
-                        Stars(stars, size = 20) { vm.rateAlbum(album.id, it, stars) }
-                    },
                 )
             },
         )
@@ -265,18 +443,22 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
             currentFromHere = player.sourceKey == key,
             actions = trackActions(vm, tracks, artist.name, key, onGo),
             showAlbum = true,
+            // Same rule as an album: the page is one person, so their name under
+            // every row says nothing. A track credited to somebody else does.
+            showArtist = { it.artist.isNotEmpty() && it.artist != artist.name },
             header = {
                 Column {
                     DetailHead(
                         title = artist.name,
-                        subtitle = listOf(
+                        meta = listOf(
                             Fmt.plural(artist.albums.size, "Album", "Alben"),
                             Fmt.plural(tracks.size, "Song", "Songs"),
                         ).joinToString(" · "),
                         coverUrls = listOfNotNull(vm.coverUrl(artist.cover)),
                         round = true,
-                        onPlay = { vm.player.playTracks(tracks, 0, artist.name, key) },
-                        onShuffle = { vm.player.shuffleTracks(tracks, artist.name, key) },
+                        onPlay = { vm.player.playCollection(tracks, artist.name, key) },
+                        shuffle = player.shuffle,
+                        onToggleShuffle = { vm.toggleShuffle() },
                         onEdit = { editing = true },
                         download = { CollectionDownload(vm, tracks) },
                     )
@@ -350,10 +532,12 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
             header = {
                 DetailHead(
                     title = "Singles",
-                    subtitle = "${data.artist.name} · ${Fmt.plural(singles.size, "Song", "Songs")}",
+                    artist = data.artist.name,
+                    meta = Fmt.plural(singles.size, "Song", "Songs"),
                     coverUrls = albumCovers(singles).mapNotNull { vm.coverUrl(it) },
-                    onPlay = { vm.player.playTracks(singles, 0, "Singles", key) },
-                    onShuffle = { vm.player.shuffleTracks(singles, "Singles", key) },
+                    onPlay = { vm.player.playCollection(singles, "Singles", key) },
+                    shuffle = player.shuffle,
+                    onToggleShuffle = { vm.toggleShuffle() },
                     download = { CollectionDownload(vm, singles) },
                 )
             },
@@ -392,14 +576,15 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
                 Column {
                     DetailHead(
                         title = label,
-                        subtitle = listOf(
-                            data.artist.name,
+                        artist = data.artist.name,
+                        meta = listOf(
                             Fmt.plural(filtered.size, "Song", "Songs"),
                             Fmt.durationLong(filtered.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(filtered).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playTracks(filtered, 0, label, key) },
-                        onShuffle = { vm.player.shuffleTracks(filtered, label, key) },
+                        onPlay = { vm.player.playCollection(filtered, label, key) },
+                        shuffle = player.shuffle,
+                        onToggleShuffle = { vm.toggleShuffle() },
                         download = { CollectionDownload(vm, filtered) },
                     )
                     PickerRow(
@@ -448,13 +633,14 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     // GET /api/playlists/:id answers { playlist, tracks } and
                     // carries neither count, so the head used to read
                     // "0 Songs - 0 Sek." over a list that was plainly not empty.
-                    subtitle = listOf(
+                    meta = listOf(
                         Fmt.plural(tracks.size, "Song", "Songs"),
                         Fmt.durationLong(tracks.sumOf { it.duration }),
                     ).joinToString(" · "),
                     coverUrls = albumCovers(tracks).mapNotNull { vm.coverUrl(it) },
-                    onPlay = { vm.player.playTracks(tracks, 0, data.playlist.name, key) },
-                    onShuffle = { vm.player.shuffleTracks(tracks, data.playlist.name, key) },
+                    onPlay = { vm.player.playCollection(tracks, data.playlist.name, key) },
+                    shuffle = player.shuffle,
+                    onToggleShuffle = { vm.toggleShuffle() },
                     // The one collection whose order has to be stored with it.
                     download = { CollectionDownload(vm, tracks, data.playlist) },
                 )
