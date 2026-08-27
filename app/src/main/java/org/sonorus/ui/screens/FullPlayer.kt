@@ -257,7 +257,19 @@ fun SharedTransitionScope.FullPlayer(
     val downloads by vm.downloads.state.collectAsState()
     val downloadStatus = downloads.statusOf(track.id)
 
-    BackHandler(onBack = onClose)
+    // Back closes what is *over* the player before it closes the player. The
+    // menu is a bottom sheet and takes its own back press; the words, the queue
+    // and the offset card are part of this screen, so they have to be peeled off
+    // by hand - innermost first. Without this, opening the words and pressing
+    // back dropped straight out to the library, which is not where you were.
+    BackHandler {
+        when {
+            showOffset -> showOffset = false
+            showQueue -> showQueue = false
+            showLyrics -> showLyrics = false
+            else -> onClose()
+        }
+    }
 
     // The words come out of the file itself, and only this screen shows them -
     // so only this screen asks for them, and only while it is open.
