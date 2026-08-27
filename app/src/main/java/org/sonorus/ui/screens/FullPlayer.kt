@@ -15,14 +15,15 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -92,6 +94,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -100,6 +103,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -178,19 +182,18 @@ private val PlayerTitle = TextStyle(
 private val PlayerSubtitle = TextStyle(fontSize = 17.sp, lineHeight = 23.sp)
 
 /**
- * What a tapped title costs to read once, end to end.
+ * What a tapped title does, in three numbers: how long it waits before it starts
+ * moving, how fast it then travels, and **how long it stands at its end before
+ * the ellipsis comes back**.
  *
- * `basicMarquee` neither reports that it has finished nor says how far it has to
- * travel, so the way back to an ellipsis has to be timed by hand. The distance
- * is estimated from the number of characters that do not fit - [MARQUEE_CHAR_DP]
- * is an average glyph at [PlayerTitle]'s size, not a measurement - so the timing
- * is approximate on purpose. Being wrong costs nothing either way: too early and
- * the run is cut short, too late and the name simply stands there a moment
- * longer before its "..." comes back.
+ * The hold is the point of doing this by hand. The end of a name is the half
+ * that was hidden, so it is the half worth reading, and it used to be on screen
+ * only in passing - the text arrived there and the "..." was back in the same
+ * moment.
  */
-private const val MARQUEE_CHAR_DP = 12f
-private const val MARQUEE_VELOCITY_DP = 45f
-private const val MARQUEE_LEAD_MS = 500L
+private const val TITLE_VELOCITY_DP = 45f
+private const val TITLE_LEAD_MS = 500L
+private const val TITLE_HOLD_MS = 2200L
 
 /**
  * The two lines over the artwork: what kind of list is playing, and which one.
@@ -475,45 +478,82 @@ fun SharedTransitionScope.FullPlayer(
                             // scroll for ever, unasked, which made the busiest
                             // line on the screen the one nobody had asked to
                             // move.
-                            var tooLong by remember(track.id) { mutableStateOf(false) }
+                            //
+                            // Driven by hand rather than by `basicMarquee`,
+                            // which cannot be stopped where the reader needs it:
+                            // one iteration carries the text a whole content
+                            // width further, so the end of the name is flush
+                            // right only in passing and there is no way to hold
+                            // it there.
                             var running by remember(track.id) { mutableStateOf(false) }
-                            var fieldDp by remember(track.id) { mutableFloatStateOf(0f) }
+                            var fieldPx by remember(track.id) { mutableIntStateOf(0) }
                             val density = LocalDensity.current
-                            LaunchedEffect(running) {
-                                if (!running) return@LaunchedEffect
-                                val over = (track.title.length * MARQUEE_CHAR_DP - fieldDp)
-                                    .coerceAtLeast(0f)
-                                delay(MARQUEE_LEAD_MS + (over / MARQUEE_VELOCITY_DP * 1000).toLong())
+                            val measurer = rememberTextMeasurer()
+                            // Measured, not estimated off a character count: the
+                            // travel has to end exactly where the name does, or
+                            // the pause at the end pauses on the wrong thing.
+                            val titlePx = remember(track.title, measurer) {
+                                measurer.measure(
+                                    track.title,
+                                    style = PlayerTitle,
+                                    softWrap = false,
+                                    maxLines = 1,
+                                ).size.width
+                            }
+                            val over = (titlePx - fieldPx).coerceAtLeast(0)
+                            val shift = remember(track.id) { Animatable(0f) }
+                            LaunchedEffect(running, over) {
+                                if (!running || over <= 0) {
+                                    shift.snapTo(0f)
+                                    return@LaunchedEffect
+                                }
+                                delay(TITLE_LEAD_MS)
+                                val seconds =
+                                    with(density) { over.toDp().value } / TITLE_VELOCITY_DP
+                                shift.animateTo(
+                                    -over.toFloat(),
+                                    tween((seconds * 1000).toInt(), easing = LinearEasing),
+                                )
+                                delay(TITLE_HOLD_MS)
                                 running = false
                             }
-                            Text(
-                                track.title,
-                                style = PlayerTitle,
-                                color = colors.text,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                // Measured off the ellipsized draw, which is the
-                                // only one whose width *is* the field: inside a
-                                // marquee the text is measured unbounded.
-                                onTextLayout = { result ->
-                                    if (!running) {
-                                        tooLong = result.hasVisualOverflow
-                                        fieldDp = with(density) { result.size.width.toDp().value }
-                                    }
-                                },
-                                modifier = Modifier
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clipToBounds()
+                                    // The field, measured on the box rather than
+                                    // on the text: while it runs the text is
+                                    // wider than the field on purpose.
+                                    .onSizeChanged { fieldPx = it.width }
                                     .then(
-                                        if (tooLong) Modifier.clickable { running = true }
+                                        if (over > 0) Modifier.clickable { running = true }
                                         else Modifier
                                     )
-                                    .then(
-                                        if (running) Modifier.basicMarquee(
-                                            iterations = 1,
-                                            initialDelayMillis = MARQUEE_LEAD_MS.toInt(),
-                                            velocity = MARQUEE_VELOCITY_DP.dp,
-                                        ) else Modifier
-                                    ),
-                            )
+                            ) {
+                                Text(
+                                    track.title,
+                                    style = PlayerTitle,
+                                    color = colors.text,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = if (running) TextOverflow.Clip
+                                    else TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        // Laid out whole while it runs and
+                                        // clipped by the box; at rest it is the
+                                        // box's width, so the ellipsis has
+                                        // something to cut.
+                                        .then(
+                                            if (running) {
+                                                Modifier.wrapContentWidth(
+                                                    Alignment.Start,
+                                                    unbounded = true,
+                                                )
+                                            } else Modifier.fillMaxWidth()
+                                        )
+                                        .graphicsLayer { translationX = shift.value },
+                                )
+                            }
                             Spacer(Modifier.height(3.dp))
                             // Two links, not one line: the album used to be part
                             // of the interpret's target and therefore led to the
