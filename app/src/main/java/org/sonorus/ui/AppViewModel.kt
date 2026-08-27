@@ -314,6 +314,19 @@ class AppViewModel : ViewModel() {
      * was already on the phone stays, which is the difference between a cancel
      * and a wipe.
      */
+    /**
+     * Stops one song's download.
+     *
+     * Nothing is taken back, unlike [cancelDownloadRun]: what has been written
+     * stays and the next attempt picks it up from there. One song is a small
+     * enough thing that a half of it is worth keeping, and there is no run whose
+     * songs would have to be told apart from what was already on the phone.
+     */
+    fun cancelDownload(track: Track) {
+        downloads.cancel(track.id)
+        say("Download abgebrochen.")
+    }
+
     fun cancelDownloadRun() {
         val removed = downloads.cancelRun()
         say(

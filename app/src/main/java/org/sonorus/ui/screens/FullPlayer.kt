@@ -67,7 +67,9 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -121,6 +123,7 @@ import org.sonorus.ui.Routes
 import org.sonorus.ui.armed
 import org.sonorus.ui.pressable
 import org.sonorus.ui.components.Chip
+import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.Cover
 import org.sonorus.ui.components.MenuItem
 import org.sonorus.ui.components.PlayerCoverKey
@@ -257,6 +260,7 @@ fun SharedTransitionScope.FullPlayer(
     var showOffset by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
+    var confirmingCancel by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
     // What this phone has of the song. Read here rather than passed in, so the
     // button below redraws the moment the download finishes.
@@ -580,40 +584,78 @@ fun SharedTransitionScope.FullPlayer(
                         // says what tapping does *now*, exactly as the row menu
                         // does - a missing file has nothing to fetch.
                         if (!track.missing) {
-                            IconButton(
-                                onClick = {
-                                    when (downloadStatus) {
-                                        DownloadStatus.DONE -> vm.removeDownloads(listOf(track))
-                                        DownloadStatus.RUNNING,
-                                        DownloadStatus.QUEUED -> vm.downloads.cancel(track.id)
-                                        else -> vm.download(listOf(track))
+                            // While it runs the button is a ring, exactly as a
+                            // whole album's is - see [CollectionDownload]. One
+                            // song is a shorter wait than an album, but it is
+                            // the same question being asked ("is it coming?")
+                            // and the same tap that stops it, so it must not be
+                            // a different control.
+                            val fetching = downloadStatus == DownloadStatus.RUNNING ||
+                                downloadStatus == DownloadStatus.QUEUED
+                            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                                if (fetching) {
+                                    // Queued, or running but not yet weighed:
+                                    // there is nothing honest to draw, so it
+                                    // sweeps rather than claiming zero.
+                                    val progress = downloads.progress
+                                        .takeIf { downloadStatus == DownloadStatus.RUNNING && it > 0f }
+                                    if (progress == null) {
+                                        CircularProgressIndicator(
+                                            Modifier.size(40.dp),
+                                            color = colors.accent,
+                                            trackColor = colors.surface2,
+                                            strokeWidth = 2.5.dp,
+                                        )
+                                    } else {
+                                        val shown by animateFloatAsState(
+                                            progress, Motion.standard(), label = "trackDownloadRing",
+                                        )
+                                        CircularProgressIndicator(
+                                            progress = { shown },
+                                            modifier = Modifier.size(40.dp),
+                                            color = colors.accent,
+                                            trackColor = colors.surface2,
+                                            strokeWidth = 2.5.dp,
+                                        )
                                     }
-                                },
-                                modifier = Modifier.size(44.dp),
-                            ) {
-                                Icon(
-                                    when (downloadStatus) {
-                                        DownloadStatus.DONE -> Icons.Filled.DownloadDone
-                                        DownloadStatus.RUNNING,
-                                        DownloadStatus.QUEUED -> Icons.Filled.Downloading
-                                        else -> Icons.Filled.Download
+                                }
+                                IconButton(
+                                    onClick = {
+                                        when {
+                                            fetching -> confirmingCancel = true
+                                            downloadStatus == DownloadStatus.DONE ->
+                                                vm.removeDownloads(listOf(track))
+                                            else -> vm.download(listOf(track))
+                                        }
                                     },
-                                    when (downloadStatus) {
-                                        DownloadStatus.DONE -> "Download entfernen"
-                                        DownloadStatus.RUNNING,
-                                        DownloadStatus.QUEUED -> "Download abbrechen"
-                                        DownloadStatus.FAILED -> "Download erneut versuchen"
-                                        else -> "Herunterladen"
-                                    },
-                                    tint = when (downloadStatus) {
-                                        DownloadStatus.DONE,
-                                        DownloadStatus.RUNNING,
-                                        DownloadStatus.QUEUED -> colors.accent
-                                        DownloadStatus.FAILED -> colors.danger
-                                        else -> colors.textDim
-                                    },
-                                    modifier = Modifier.size(26.dp),
-                                )
+                                    modifier = Modifier.size(44.dp),
+                                ) {
+                                    Icon(
+                                        when {
+                                            // A square inside the ring, the way
+                                            // every transfer that can be stopped
+                                            // says so.
+                                            fetching -> Icons.Filled.Stop
+                                            downloadStatus == DownloadStatus.DONE -> Icons.Filled.DownloadDone
+                                            else -> Icons.Filled.Download
+                                        },
+                                        when (downloadStatus) {
+                                            DownloadStatus.DONE -> "Download entfernen"
+                                            DownloadStatus.RUNNING,
+                                            DownloadStatus.QUEUED -> "Download abbrechen"
+                                            DownloadStatus.FAILED -> "Download erneut versuchen"
+                                            else -> "Herunterladen"
+                                        },
+                                        tint = when (downloadStatus) {
+                                            DownloadStatus.DONE,
+                                            DownloadStatus.RUNNING,
+                                            DownloadStatus.QUEUED -> colors.accent
+                                            DownloadStatus.FAILED -> colors.danger
+                                            else -> colors.textDim
+                                        },
+                                        modifier = Modifier.size(if (fetching) 18.dp else 26.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -839,6 +881,28 @@ fun SharedTransitionScope.FullPlayer(
 
     if (showQuality) {
         QualitySheet(vm, onDismiss = { showQuality = false })
+    }
+
+    // Asked rather than done, the way a whole collection's cancel is - a mistap
+    // on a control that is *already* an accent-coloured ring should not be the
+    // thing that stops the download. What it costs is different though, and the
+    // wording says so: one song is stopped where it stands and picks the rest up
+    // later, where cancelling a run takes its songs back off the phone.
+    if (confirmingCancel) {
+        ConfirmDialog(
+            title = "Download abbrechen",
+            message = "\"${track.title}\" wird nicht weiter geladen. Was schon auf dem " +
+                "Gerät ist, bleibt und wird beim nächsten Versuch fortgesetzt.",
+            confirmLabel = "Download abbrechen",
+            // Not "Abbrechen" next to "Abbrechen": here the action *is* an
+            // abort, so the way out has to be named after what it does.
+            dismissLabel = "Weiter laden",
+            onDismiss = { confirmingCancel = false },
+            onConfirm = {
+                confirmingCancel = false
+                vm.cancelDownload(track)
+            },
+        )
     }
 }
 
