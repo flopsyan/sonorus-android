@@ -533,6 +533,31 @@ class PlayerController(
         exoPlayer.removeMediaItem(orderIndex)
     }
 
+    /**
+     * Moves one entry of the play order, leaving the running track where it is.
+     *
+     * Only what is still to come can move: a move that landed on or before the
+     * current position would push the running song into a past it has already
+     * left, and the panel offers no handle there for the same reason. [from] and
+     * [to] read as they do in `moveInQueue` in the web app - the entry is taken
+     * out first and put back at [to] in the shortened list, which is what
+     * `Player.moveMediaItem` does too, so the two lists stay in step.
+     *
+     * The position is read back off the new order rather than adjusted, because
+     * the order *is* the answer to where the running track ended up.
+     */
+    fun moveInQueue(from: Int, to: Int) {
+        val state = _state.value
+        if (from == to || from !in state.order.indices || to !in state.order.indices) return
+        if (from == state.pos || to <= state.pos) return
+        val current = state.order.getOrNull(state.pos) ?: return
+        val order = state.order.toMutableList().apply { add(to, removeAt(from)) }
+        _state.value = state.copy(order = order, pos = order.indexOf(current))
+        // Nothing around the running item is re-opened by this, so the sound
+        // carries on - unlike a fresh setMediaItems, see [rearrangeAround].
+        exoPlayer.moveMediaItem(from, to)
+    }
+
     // --- Transport ------------------------------------------------------------
 
     fun play() {

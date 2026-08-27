@@ -25,6 +25,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Downloading
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lyrics
@@ -80,8 +82,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,6 +96,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -102,6 +107,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.download.DownloadStatus
 import org.sonorus.data.Quality
@@ -349,39 +355,7 @@ fun SharedTransitionScope.FullPlayer(
                 }
 
                 if (showQueue) {
-                    // The real upcoming order - which is what shuffling once up
-                    // front, instead of per track, is for.
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                        itemsIndexed(state.upcoming) { i, item ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { vm.player.jumpTo(state.pos + 1 + i) }
-                                    .padding(vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Text("${i + 1}", style = num(12.sp), color = colors.textFaint)
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        item.title,
-                                        color = colors.text,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                    Text(
-                                        item.artist,
-                                        color = colors.textDim,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                                Text(Fmt.duration(item.duration), style = num(12.sp), color = colors.textDim)
-                            }
-                        }
-                    }
+                    QueuePanel(vm, state, Modifier.weight(1f).fillMaxWidth())
                 } else if (showLyrics) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         LyricsView(
@@ -867,6 +841,216 @@ fun SharedTransitionScope.FullPlayer(
         QualitySheet(vm, onDismiss = { showQuality = false })
     }
 }
+
+/**
+ * The queue, in the shape Spotify gives it: the running track above a line,
+ * everything still to come below it, and that order in your own hands.
+ *
+ * What was played **before** the running track is deliberately not here. It
+ * cannot be moved - a queue only ever moves forwards - and removing it would
+ * change nothing that is still going to be heard. The web app's panel starts at
+ * the same place for the same reason.
+ *
+ * Reordering is a drag off the handle and nothing else. On a touch screen a
+ * drag that may start anywhere on the row is the same gesture as scrolling the
+ * list, and a handle is the only thing that tells the two apart.
+ *
+ * The move reaches the player **once, when the finger lifts**. While the drag
+ * runs only this list is reordered, which keeps ExoPlayer out of it: one move
+ * per crossed row would re-cut the playlist a dozen times for a single gesture.
+ *
+ * Not built: scrolling the list by dragging against its edge. An entry can be
+ * moved as far as the panel shows, which is about a dozen rows.
+ */
+@Composable
+private fun QueuePanel(vm: AppViewModel, state: PlayerState, modifier: Modifier = Modifier) {
+    val colors = SonorusTheme.colors
+    val haptics = LocalHapticFeedback.current
+    val current = state.current ?: return
+    val upcoming = state.upcoming
+
+    // Where the drag started and where it stands, both as positions in
+    // [upcoming]. Null while nothing is being dragged.
+    var dragFrom by remember { mutableStateOf<Int?>(null) }
+    var dragTo by remember { mutableIntStateOf(0) }
+    // How far the finger has come since it went down, in pixels.
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // Every row here is the same height, so one measurement is what turns those
+    // pixels into a number of rows.
+    var rowHeight by remember { mutableIntStateOf(0) }
+
+    // The track moving on under the finger would leave the drag pointing at a
+    // different song than the one it was started on, so it ends the drag rather
+    // than moving the wrong entry.
+    LaunchedEffect(state.pos, upcoming.size) { dragFrom = null }
+    // `pointerInput` keeps the lambda it was created with for as long as its key
+    // holds - that is the whole point of the key - so a state read inside the
+    // gesture would be frozen at whatever was true when the row first composed.
+    // One advance later it would move an entry two places from the one under the
+    // finger. Everything the gesture reads therefore comes through here.
+    val live by rememberUpdatedState(state)
+
+    val from = dragFrom
+    val shown = if (from != null) upcoming.moved(from, dragTo) else upcoming
+
+    LazyColumn(modifier, state = rememberLazyListState()) {
+        item {
+            RackLabelText("Jetzt läuft", Modifier.padding(top = 8.dp, bottom = 4.dp))
+        }
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    Icons.Filled.GraphicEq,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(16.dp),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        current.title,
+                        color = colors.accent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        current.artist,
+                        color = colors.textDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+
+        if (shown.isEmpty()) {
+            item {
+                Text(
+                    "Danach kommt nichts mehr.",
+                    color = colors.textFaint,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 14.dp),
+                )
+            }
+            return@LazyColumn
+        }
+
+        item {
+            RackLabelText(
+                if (state.shuffle) "Als Nächstes (gemischt)" else "Als Nächstes",
+                Modifier.padding(top = 14.dp, bottom = 4.dp),
+            )
+        }
+        // No `key` on purpose: the rows are addressed by their position, and
+        // while a drag runs this list is deliberately a different order of the
+        // same songs. Keys would animate the swap the drag is already showing.
+        itemsIndexed(shown) { i, item ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    // The dragged row travels over its neighbours, not under
+                    // them - a lazy list draws its items in index order.
+                    .zIndex(if (from != null && i == dragTo) 1f else 0f)
+                    .graphicsLayer {
+                        // It follows the finger rather than the slot it has been
+                        // moved into, or it would jump a whole row ahead of the
+                        // hand at every crossing.
+                        if (from != null && i == dragTo) {
+                            translationY = dragOffset - (dragTo - from) * rowHeight.toFloat()
+                        }
+                    }
+                    .background(if (from != null && i == dragTo) colors.surface else Color.Transparent)
+                    .onSizeChanged { rowHeight = it.height }
+                    .clickable { vm.player.jumpTo(state.pos + 1 + i) }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("${i + 1}", style = num(12.sp), color = colors.textFaint)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        item.title,
+                        color = colors.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        item.artist,
+                        color = colors.textDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Icon(
+                    Icons.Filled.DragHandle,
+                    "Verschieben",
+                    tint = colors.textDim,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(10.dp)
+                        // Keyed on the slot, which is the one thing about this
+                        // row that does not change while it is being dragged.
+                        .pointerInput(i) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    dragFrom = i
+                                    dragTo = i
+                                    dragOffset = 0f
+                                    haptics.armed()
+                                },
+                                onDrag = { change, amount ->
+                                    // Or the list scrolls along with the row.
+                                    change.consume()
+                                    dragOffset += amount.y
+                                    val start = dragFrom ?: return@detectDragGestures
+                                    if (rowHeight > 0) {
+                                        dragTo = (start + (dragOffset / rowHeight).roundToInt())
+                                            .coerceIn(0, live.upcoming.lastIndex)
+                                    }
+                                },
+                                onDragEnd = {
+                                    val start = dragFrom
+                                    dragFrom = null
+                                    if (start != null && dragTo != start) {
+                                        // The panel counts from the track after
+                                        // the running one; the player counts
+                                        // positions in the play order.
+                                        vm.player.moveInQueue(
+                                            live.pos + 1 + start,
+                                            live.pos + 1 + dragTo,
+                                        )
+                                    }
+                                },
+                                onDragCancel = { dragFrom = null },
+                            )
+                        },
+                )
+                IconButton(
+                    onClick = { vm.player.removeFromQueue(state.pos + 1 + i) },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        "Aus der Warteschlange entfernen",
+                        tint = colors.textDim,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The same list with the entry at [from] taken out and put back in at [to]. */
+private fun <T> List<T>.moved(from: Int, to: Int): List<T> =
+    toMutableList().apply { add(to, removeAt(from)) }
 
 /**
  * The format under the transport, as a chip you can press.
