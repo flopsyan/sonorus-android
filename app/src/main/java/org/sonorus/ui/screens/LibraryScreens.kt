@@ -2,6 +2,7 @@ package org.sonorus.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,7 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -54,6 +57,8 @@ import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
 import org.sonorus.ui.Routes
 import org.sonorus.ui.components.Chip
+import org.sonorus.ui.components.FastScroller
+import org.sonorus.ui.components.scrollLabel
 import org.sonorus.ui.components.albumCovers
 import org.sonorus.ui.components.CardGridSkeleton
 import org.sonorus.ui.components.DetailSkeleton
@@ -241,6 +246,17 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     },
                 )
             },
+            // The bar on the right has to agree with the sort, or it would say
+            // "M" while the rows are ordered by artist. Year and "added" have
+            // no letter worth showing, so it falls back to the title rather
+            // than printing a digit that means nothing here.
+            labelOf = { track ->
+                when (sort) {
+                    "artist" -> scrollLabel(track.artist)
+                    "album" -> scrollLabel(track.album)
+                    else -> scrollLabel(track.title)
+                }
+            },
         )
     }
 }
@@ -298,8 +314,11 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val load = rememberLoad("artists") { vm.lib.artists() }
     LoadBox(load, skeleton = { CardGridSkeleton(round = true) }) { data ->
         if (data.artists.isEmpty()) return@LoadBox EmptyNote("Noch keine Interpreten.")
+        val grid = rememberLazyGridState()
+        Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
+            state = grid,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(8.dp, 8.dp, 8.dp, 24.dp),
         ) {
@@ -314,6 +333,8 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     modifier = Modifier.animateItem(),
                 ) { onGo(Routes.artist(artist.id)) }
             }
+        }
+        GridScroller(grid, data.artists.size) { scrollLabel(data.artists[it].name) }
         }
     }
 }
@@ -354,8 +375,11 @@ fun AlbumsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 @Composable
 fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
     if (albums.isEmpty()) return EmptyNote("Noch keine Alben.")
+    val grid = rememberLazyGridState()
+    Box(Modifier.fillMaxSize()) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(150.dp),
+        state = grid,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(8.dp, 8.dp, 8.dp, 24.dp),
     ) {
@@ -376,6 +400,8 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
             ) { onGo(Routes.album(album.id)) }
         }
     }
+    GridScroller(grid, albums.size) { scrollLabel(albums[it].title) }
+    }
 }
 
 // --- Genres -----------------------------------------------------------------
@@ -391,8 +417,11 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     "oder du vergibst sie von Hand am Album oder an einer Single."
             )
         }
+        val grid = rememberLazyGridState()
+        Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
+            state = grid,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(8.dp, 8.dp, 8.dp, 24.dp),
         ) {
@@ -407,7 +436,30 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 ) { onGo(Routes.genre(listOf(genre.id))) }
             }
         }
+        GridScroller(grid, data.genres.size) { scrollLabel(data.genres[it].name) }
+        }
     }
+}
+
+/**
+ * The fast scroller over a card grid. A grid counts *cells*, not rows, so the
+ * visible count has to be the number of cards on screen rather than the number
+ * of rows - otherwise the thumb is two or three times too small on a wide
+ * phone.
+ */
+@Composable
+private fun BoxScope.GridScroller(
+    state: LazyGridState,
+    count: Int,
+    labelAt: (Int) -> String,
+) {
+    FastScroller(
+        itemCount = count,
+        firstVisible = state.firstVisibleItemIndex,
+        visibleCount = state.layoutInfo.visibleItemsInfo.size.coerceAtLeast(1),
+        labelAt = labelAt,
+        onScrollTo = { state.scrollToItem(it) },
+    )
 }
 
 /**

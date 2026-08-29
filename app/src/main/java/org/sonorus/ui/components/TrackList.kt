@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
@@ -98,10 +99,22 @@ fun TrackList(
     coverUrl: (Track) -> String? = { null },
     contentPadding: PaddingValues = PaddingValues(bottom = 24.dp),
     header: (@Composable () -> Unit)? = null,
+    /**
+     * What a row files under for the fast scroller down the right-hand edge.
+     * The title by default, because that is what the list is sorted by unless a
+     * screen says otherwise - and a bar that says "M" while the rows are sorted
+     * by artist would be worse than no bar at all.
+     */
+    labelOf: (Track) -> String = { scrollLabel(it.title) },
 ) {
     var menuFor by remember { mutableStateOf<Pair<Int, Track>?>(null) }
+    val listState = rememberLazyListState()
+    // The header is item 0 where there is one, so a row's place in the list and
+    // its place in `tracks` are one apart.
+    val offset = if (header != null) 1 else 0
 
-    LazyColumn(modifier.fillMaxWidth(), contentPadding = contentPadding) {
+    Box(Modifier.fillMaxWidth()) {
+    LazyColumn(modifier.fillMaxWidth(), state = listState, contentPadding = contentPadding) {
         if (header != null) item { header() }
         if (tracks.isEmpty()) {
             item { EmptyNote("Hier ist noch nichts.") }
@@ -126,6 +139,15 @@ fun TrackList(
                 onMenu = { menuFor = index to track },
             )
         }
+    }
+
+    FastScroller(
+        itemCount = tracks.size,
+        firstVisible = (listState.firstVisibleItemIndex - offset).coerceAtLeast(0),
+        visibleCount = listState.layoutInfo.visibleItemsInfo.size.coerceAtLeast(1),
+        labelAt = { tracks.getOrNull(it)?.let(labelOf).orEmpty() },
+        onScrollTo = { listState.scrollToItem(it + offset) },
+    )
     }
 
     menuFor?.let { (index, track) ->
