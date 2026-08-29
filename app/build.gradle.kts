@@ -105,4 +105,7 @@ dependencies {
     // Android, so both can be tested on a plain JVM - which is the only way to
     // test them at all without a device in a plane.
     testImplementation(libs.junit)
+    // The play log hands its work to a coroutine, so the test has to be able to
+    // run that coroutine to the end rather than hope it got there.
+    testImplementation(libs.kotlinx.coroutines.test)
 }

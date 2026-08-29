@@ -302,10 +302,17 @@ class SonorusApi(private val session: Session) {
     suspend fun rate(trackId: Int, stars: Int): RatingResponse =
         put("/api/tracks/$trackId/rating", buildJsonObject { put("stars", stars) })
 
-    suspend fun startPlay(trackId: Int, seconds: Double): PlayResponse =
+    /**
+     * `playedAt` is sent only by [org.sonorus.data.PlayLog], for a play that was
+     * heard offline and is going out late: without it the server stamps the play
+     * on arrival, and a fortnight away would land on one day. An ordinary play
+     * leaves it empty and is stamped when it happens, as it always was.
+     */
+    suspend fun startPlay(trackId: Int, seconds: Double, playedAt: String = ""): PlayResponse =
         post("/api/plays", buildJsonObject {
             put("trackId", trackId)
             put("seconds", seconds)
+            if (playedAt.isNotEmpty()) put("playedAt", playedAt)
         })
 
     suspend fun updatePlay(playId: Int, seconds: Double) {

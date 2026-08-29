@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.Connectivity
 import org.sonorus.data.Library
+import org.sonorus.data.PlayLog
 import org.sonorus.data.Session
 import org.sonorus.data.Settings
 import org.sonorus.data.SonorusApi
@@ -43,6 +44,8 @@ class SonorusApp : Application() {
         private set
     lateinit var downloads: Downloads
         private set
+    lateinit var playLog: PlayLog
+        private set
     lateinit var player: PlayerController
         private set
 
@@ -62,7 +65,15 @@ class SonorusApp : Application() {
         store = DownloadStore(File(filesDir, "offline"))
         library = Library(api, store, connectivity, settings, scope)
         downloads = Downloads(this, api, store, connectivity, settings)
-        player = PlayerController(this, api, library, settings)
+        // Beside the downloads rather than inside them: what was heard offline
+        // is not a file, and it has to survive "Alle Downloads entfernen".
+        playLog = PlayLog(
+            file = File(filesDir, "offline/plays.json"),
+            offline = library.offline,
+            send = { trackId, seconds, playedAt -> api.startPlay(trackId, seconds, playedAt) },
+            scope = scope,
+        )
+        player = PlayerController(this, api, library, settings, playLog)
     }
 
     companion object {

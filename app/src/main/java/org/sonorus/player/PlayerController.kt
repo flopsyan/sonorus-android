@@ -14,6 +14,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import org.sonorus.data.Library
+import org.sonorus.data.PlayLog
 import org.sonorus.data.Quality
 import org.sonorus.data.Settings
 import org.sonorus.data.Shuffle
@@ -104,6 +105,7 @@ class PlayerController(
     private val api: SonorusApi,
     private val library: Library,
     private val settings: Settings,
+    private val playLog: PlayLog,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
 ) {
 
@@ -164,6 +166,9 @@ class PlayerController(
 
     private var playCounted = false
     private var playId: Int? = null
+
+    /** The handle of a play written to [PlayLog] because the phone was offline. */
+    private var pendingPlay: Long? = null
     private var listened = 0.0
     private var lastTick = -1.0
     private var reported = 0
@@ -219,35 +224,46 @@ class PlayerController(
 
         val track = _state.value.current ?: return
         val duration = track.duration
-        // A play is written on the server, so offline there is nothing to write
-        // and no point in a request per song that can only time out. What was
-        // heard in a plane is not counted - the server timestamps a play when it
-        // arrives, so sending it later would file it under the wrong day.
-        if (library.offline.value) return
         if (!playCounted && duration > 0 && listened >= countThreshold(duration)) {
             playCounted = true
             reported = listened.roundToInt()
             val id = track.id
             val seconds = listened
-            scope.launch {
-                runCatching { api.startPlay(id, seconds) }
-                    .onSuccess {
-                        playId = it.playId
-                        onPlayCounted?.invoke()
-                    }
+            // Offline there is nobody to tell, and a request per song that can
+            // only time out is worth not making - so the play is written down
+            // instead and goes out with the next connection. It carries the
+            // moment it happened, because the server would otherwise stamp it
+            // on arrival and file a fortnight of holiday under one day.
+            if (library.offline.value) {
+                pendingPlay = playLog.record(id, reported)
+            } else {
+                scope.launch {
+                    runCatching { api.startPlay(id, seconds) }
+                        .onSuccess {
+                            playId = it.playId
+                            onPlayCounted?.invoke()
+                        }
+                }
             }
-        } else if (playId != null && listened - reported >= REPORT_EVERY) {
+        } else if ((playId != null || pendingPlay != null) && listened - reported >= REPORT_EVERY) {
             reportListening()
         }
     }
 
-    /** Sends the running total for this play. */
+    /**
+     * Sends the running total for this play, or corrects it on the phone while
+     * the play is one that has not been sent yet.
+     */
     private fun reportListening() {
-        val id = playId ?: return
         val total = listened.roundToInt()
         if (total <= reported) return
+        val pending = pendingPlay
+        val id = playId
         reported = total
-        scope.launch { runCatching { api.updatePlay(id, total.toDouble()) } }
+        when {
+            pending != null -> playLog.update(pending, total)
+            id != null -> scope.launch { runCatching { api.updatePlay(id, total.toDouble()) } }
+        }
     }
 
     /**
@@ -259,6 +275,7 @@ class PlayerController(
         reportListening()
         playCounted = false
         playId = null
+        pendingPlay = null
         listened = 0.0
         lastTick = -1.0
         reported = 0
