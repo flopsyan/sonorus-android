@@ -308,6 +308,8 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     title = artist.name,
                     subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
                     coverUrl = vm.coverUrl(artist.cover),
+                    // Filled for "Various" only, which has no face of its own.
+                    coverUrls = artist.covers.mapNotNull { vm.coverUrl(it) },
                     round = true,
                     modifier = Modifier.animateItem(),
                 ) { onGo(Routes.artist(artist.id)) }
@@ -601,6 +603,7 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                                     title = artist.name,
                                                     subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
                                                     coverUrl = vm.coverUrl(artist.cover),
+                                                    coverUrls = artist.covers.mapNotNull { vm.coverUrl(it) },
                                                     round = true,
                                                     modifier = Modifier.width(130.dp),
                                                 ) { onGo(Routes.artist(artist.id)) }

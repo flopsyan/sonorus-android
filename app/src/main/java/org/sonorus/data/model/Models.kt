@@ -127,6 +127,13 @@ data class ArtistSummary(
     val id: Int,
     val name: String = "",
     val cover: String? = null,
+    /**
+     * Four covers for "Various" and an empty list for everybody else: the
+     * compilation folder is no person, so it shows the records it is made of as
+     * a mosaic instead of the artwork of whichever one is newest. The server
+     * decides that; an APK older than its server simply keeps the single cover.
+     */
+    val covers: List<String> = emptyList(),
     val trackCount: Int = 0,
     val albumCount: Int = 0,
 )
@@ -136,6 +143,8 @@ data class Artist(
     val id: Int,
     val name: String = "",
     val cover: String? = null,
+    /** The mosaic covers, filled for "Various" only - see [ArtistSummary]. */
+    val covers: List<String> = emptyList(),
     /** False means the picture is borrowed from an album or a single. */
     val hasOwnCover: Boolean = false,
     val albums: List<Album> = emptyList(),

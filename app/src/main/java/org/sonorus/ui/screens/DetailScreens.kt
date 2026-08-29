@@ -454,7 +454,10 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                             Fmt.plural(artist.albums.size, "Album", "Alben"),
                             Fmt.plural(tracks.size, "Song", "Songs"),
                         ).joinToString(" · "),
-                        coverUrls = listOfNotNull(vm.coverUrl(artist.cover)),
+                        // Filled for "Various" only, which then shows the four
+                        // compilations it is made of instead of one of them.
+                        coverUrls = artist.covers.mapNotNull { vm.coverUrl(it) }
+                            .ifEmpty { listOfNotNull(vm.coverUrl(artist.cover)) },
                         round = true,
                         onPlay = { vm.player.playCollection(tracks, artist.name, key) },
                         shuffle = player.shuffle,
