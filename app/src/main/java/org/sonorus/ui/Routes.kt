@@ -16,6 +16,15 @@ object Routes {
     const val ALBUM = "albums/{id}"
     const val GENRES = "genres"
     const val GENRE = "genres/{ids}"
+
+    // Spoken word. `base` is "audiobooks" or "audiodramas" and is the same word
+    // the server's paths use, so one screen serves both libraries - see
+    // spokenRoutes in the server's src/routes/api.js.
+    const val PODCASTS = "podcasts"
+    const val PODCAST = "podcasts/{id}"
+    const val SPOKEN = "spoken/{base}"
+    const val SPOKEN_AUTHOR = "spoken/{base}/authors/{id}"
+    const val BOOK = "spoken/{base}/books/{id}"
     const val PLAYLIST = "playlists/{id}"
     const val STARS = "stars/{stars}"
     const val SEARCH = "search"
@@ -32,6 +41,10 @@ object Routes {
     fun album(id: Int) = "albums/$id"
     fun genre(ids: List<Int>) = "genres/${ids.joinToString(",")}"
     fun playlist(id: Int) = "playlists/$id"
+    fun podcast(id: Int) = "podcasts/$id"
+    fun spoken(base: String) = "spoken/$base"
+    fun spokenAuthor(base: String, id: Int) = "spoken/$base/authors/$id"
+    fun book(base: String, id: Int) = "spoken/$base/books/$id"
     fun stars(values: List<Int>) = "stars/${values.joinToString(",")}"
 }
 

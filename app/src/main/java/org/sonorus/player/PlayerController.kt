@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import org.sonorus.data.Library
 import org.sonorus.data.PlayLog
+import org.sonorus.data.model.Chapter
 import org.sonorus.data.Quality
 import org.sonorus.data.Settings
 import org.sonorus.data.Shuffle
@@ -169,6 +170,119 @@ class PlayerController(
 
     /** The handle of a play written to [PlayLog] because the phone was offline. */
     private var pendingPlay: Long? = null
+
+    // --- Spoken word ----------------------------------------------------------
+    // Where the listener is in an episode or a book part, and which chapter of a
+    // book that second falls in. Both are what make a 50-hour file usable: one
+    // so it can be left and come back to, the other so the skip buttons and the
+    // notification have something to move between.
+
+    /** The track whose position is being reported, and the last value sent. */
+    private var progressTrack: Int? = null
+    private var progressSent = 0.0
+
+    /** The chapters of the running title, and which one the playhead is in. */
+    private val _chapters = MutableStateFlow<List<Chapter>>(emptyList())
+    val chapters: StateFlow<List<Chapter>> = _chapters.asStateFlow()
+    private var chapterBook: Int? = null
+
+    private val _chapterAt = MutableStateFlow(-1)
+
+    /** Index into [chapters] of the one being heard, or -1. */
+    val chapterAt: StateFlow<Int> = _chapterAt.asStateFlow()
+
+    /**
+     * Hands the player the chapters of the book that is playing. Called by the
+     * view model when the running track belongs to a different book - the same
+     * "load it once per book" the lyrics follow per song.
+     */
+    fun setChapters(bookId: Int?, list: List<Chapter>) {
+        chapterBook = bookId
+        _chapters.value = list
+        _chapterAt.value = -1
+        followChapter()
+    }
+
+    /** The chapters that lie inside the running *file*, in order. */
+    private fun chaptersHere(): List<Chapter> {
+        val track = _state.value.current ?: return emptyList()
+        if (track.audiobookId != chapterBook) return emptyList()
+        val at = _state.value.order.getOrNull(_state.value.pos) ?: return emptyList()
+        val partIndex = _state.value.order.indexOf(at)
+        return _chapters.value.filter { it.part == partIndex }
+    }
+
+    private fun followChapter() {
+        val here = chaptersHere()
+        if (here.isEmpty()) {
+            if (_chapterAt.value != -1) _chapterAt.value = -1
+            return
+        }
+        val at = exoPlayer.currentPosition / 1000.0
+        var found = here.first()
+        for (chapter in here) {
+            if (chapter.start <= at + 0.01 || chapter.offset <= at + 0.01) found = chapter else break
+        }
+        if (_chapterAt.value != found.index) _chapterAt.value = found.index
+    }
+
+    /** The chapter being heard, or null. */
+    fun currentChapter(): Chapter? =
+        _chapters.value.firstOrNull { it.index == _chapterAt.value }
+
+    /**
+     * One chapter back or forward, and whether there was one to move to.
+     *
+     * Back puts the playhead at the start of the chapter first and only leaves
+     * it on a second press inside [RESTART_AFTER_MS] - the same rule "back" already
+     * follows for a track, and the one a listener wants from a book: the usual
+     * reason to press it is having missed the last minute.
+     */
+    private fun skipChapter(forward: Boolean): Boolean {
+        val here = chaptersHere()
+        if (here.isEmpty()) return false
+        val current = currentChapter() ?: return false
+        val at = here.indexOfFirst { it.index == current.index }
+        if (at < 0) return false
+        val into = exoPlayer.currentPosition / 1000.0 - current.offset
+
+        if (!forward) {
+            if (into > RESTART_AFTER_MS / 1000.0) {
+                exoPlayer.seekTo((current.offset * 1000).toLong())
+                return true
+            }
+            if (at == 0) return false
+            exoPlayer.seekTo((here[at - 1].offset * 1000).toLong())
+            return true
+        }
+        if (at + 1 >= here.size) return false
+        exoPlayer.seekTo((here[at + 1].offset * 1000).toLong())
+        return true
+    }
+
+    /**
+     * Sends where the listener is, for an episode or a book part only.
+     *
+     * "Close enough to the end" is `min(30, duration * 5%)` and not a flat 30
+     * seconds - the web app learned that the hard way: against a 70-minute
+     * episode 30 s is nothing, against a 40-second book part it calls everything
+     * past second ten finished. Seeking back out of the tail un-finishes it,
+     * which is why the track is still followed after it was marked complete.
+     */
+    private fun reportProgress(force: Boolean = false) {
+        val track = _state.value.current ?: return
+        if (!track.isSpoken) return
+        val position = exoPlayer.currentPosition / 1000.0
+        val duration = exoPlayer.duration.takeIf { it > 0 }?.div(1000.0) ?: track.duration
+        if (duration <= 0) return
+        if (!force && progressTrack == track.id && kotlin.math.abs(position - progressSent) < PROGRESS_EVERY) return
+
+        progressTrack = track.id
+        progressSent = position
+        val tail = minOf(30.0, duration * 0.05)
+        val done = position >= duration - tail
+        scope.launch { runCatching { api.setProgress(track.id, position, done) } }
+    }
     private var listened = 0.0
     private var lastTick = -1.0
     private var reported = 0
@@ -221,6 +335,11 @@ class PlayerController(
             if (step > 0 && step < MAX_STEP) listened += step
         }
         lastTick = positionSec
+
+        // Where the listener is in an episode or a book, and which chapter that
+        // is. Both return at once unless something actually changed.
+        reportProgress()
+        followChapter()
 
         val track = _state.value.current ?: return
         val duration = track.duration
@@ -400,10 +519,24 @@ class PlayerController(
      * list, or clicking row 5 of a list with a missing row 2 would start the
      * wrong song.
      */
-    fun playTracks(tracks: List<Track>, startIndex: Int = 0, source: String = "", sourceKey: String = "") {
+    /**
+     * `startAtSeconds` is for spoken word: an episode or a book part is opened
+     * *where it was left*, and a chapter tapped in a list is opened at its own
+     * offset. Handing it to `setMediaItems` rather than seeking afterwards is
+     * what stops the file being opened at zero and jumped a moment later.
+     */
+    fun playTracks(
+        tracks: List<Track>,
+        startIndex: Int = 0,
+        source: String = "",
+        sourceKey: String = "",
+        startAtSeconds: Double = -1.0,
+    ) {
         val queued = adoptQueue(tracks, startIndex, source, sourceKey)
         if (queued.tracks.isEmpty()) return
-        pushPlaylist(queued.tracks, queued.startIndex, 0)
+        val at = if (startAtSeconds >= 0) startAtSeconds
+        else queued.tracks.getOrNull(queued.startIndex)?.resumeAt ?: 0.0
+        pushPlaylist(queued.tracks, queued.startIndex, (at * 1000).toLong())
         exoPlayer.playWhenReady = true
     }
 
@@ -595,6 +728,14 @@ class PlayerController(
     fun next() {
         val state = _state.value
         if (state.order.isEmpty()) return
+        // Inside a book "next" means one chapter, not one file - there is only
+        // ever the one file, so the old meaning had nothing to do. Running out
+        // of chapters falls through to the queue, so a book of several parts
+        // carries on into the next file instead of stopping dead.
+        if (skipChapter(forward = true)) {
+            resetListening()
+            return
+        }
         pushHistory()
         if (exoPlayer.hasNextMediaItem()) {
             exoPlayer.seekToNextMediaItem()
@@ -629,6 +770,12 @@ class PlayerController(
         // More than three seconds in, the first press starts the track over. The
         // second press is then inside those three seconds and goes back for
         // real.
+        // One chapter back, for the same reason "next" moves one forward.
+        if (skipChapter(forward = false)) {
+            resetListening()
+            return
+        }
+
         if (restartFirst && exoPlayer.currentPosition > RESTART_AFTER_MS) {
             resetListening()
             exoPlayer.seekTo(0)
@@ -847,9 +994,21 @@ class PlayerController(
 
     private inner class PlayerListener : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // The part that is being left keeps its position, or a book of
+            // several files would forget the boundary it just crossed.
+            reportProgress(force = true)
+            progressTrack = null
+            progressSent = 0.0
             // Repeat-one plays the same row again, which is a second play.
             resetListening()
             val index = exoPlayer.currentMediaItemIndex
+            // The next part of a book carries its own position, and an automatic
+            // advance would otherwise start it at zero - the one place a book of
+            // several files could still lose where the listener was.
+            val next = _state.value.let { it.queue.getOrNull(it.order.getOrNull(index) ?: -1) }
+            if (next != null && next.isSpoken && next.resumeAt > 1.0 && exoPlayer.currentPosition < 1000) {
+                exoPlayer.seekTo((next.resumeAt * 1000).toLong())
+            }
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 // An automatic advance still belongs in the history, or "back"
                 // after a run of songs would have nothing to walk.
@@ -965,6 +1124,8 @@ class PlayerController(
     private companion object {
         const val COUNT_AFTER = 30.0
         const val REPORT_EVERY = 20
+        /** Seconds between two position reports for spoken word. */
+        const val PROGRESS_EVERY = 10.0
         const val RESTART_AFTER_MS = 3_000L
         const val HISTORY_MAX = 100
         const val TICK_MS = 500L

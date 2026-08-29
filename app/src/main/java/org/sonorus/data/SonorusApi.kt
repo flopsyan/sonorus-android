@@ -323,6 +323,48 @@ class SonorusApi(private val session: Session) {
         delete<JsonElement>("/api/plays")
     }
 
+    // --- Spoken word ----------------------------------------------------------
+    // Three libraries, two shapes. Audiobooks and radio plays are the same
+    // endpoints at two paths ("audiobooks" / "audiodramas"), which is what the
+    // `base` argument is - see spokenRoutes in the server's src/routes/api.js.
+
+    suspend fun podcasts(): PodcastsResponse = get("/api/podcasts")
+
+    /** `sort` is "new" or "old"; the server remembers the choice per account. */
+    suspend fun podcast(id: Int, sort: String? = null): PodcastResponse =
+        get("/api/podcasts/$id", mapOf("sort" to sort))
+
+    /**
+     * Where the listener stopped in an episode or a book part. `completed` says
+     * it is done with; the server takes both and the two clients agree on it.
+     */
+    suspend fun setProgress(trackId: Int, position: Double, completed: Boolean? = null) {
+        put<JsonElement>("/api/progress/$trackId", buildJsonObject {
+            put("position", position)
+            if (completed != null) put("completed", completed)
+        })
+    }
+
+    suspend fun spoken(base: String): SpokenResponse = get("/api/$base")
+
+    suspend fun spokenAuthor(base: String, id: Int): SpokenAuthorResponse =
+        get("/api/$base/authors/$id")
+
+    suspend fun book(base: String, id: Int): BookResponse = get("/api/$base/books/$id")
+
+    suspend fun setBookHeard(base: String, id: Int, heard: Boolean): BookResponse =
+        put("/api/$base/books/$id/heard", buildJsonObject { put("heard", heard) })
+
+    /** The narrator and the release date. A radio play sends only the date. */
+    suspend fun editBook(base: String, id: Int, narrator: String?, date: String): BookResponse =
+        patch("/api/$base/books/$id", buildJsonObject {
+            if (narrator != null) put("narrator", narrator)
+            put("date", date)
+        })
+
+    suspend fun editAuthorCover(base: String, id: Int, cover: JsonElement): SpokenAuthorResponse =
+        patch("/api/$base/authors/$id", buildJsonObject { put("cover", cover) })
+
     // --- Playlists ------------------------------------------------------------
 
     suspend fun playlists(): PlaylistsResponse = get("/api/playlists")

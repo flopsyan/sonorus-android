@@ -6,14 +6,19 @@ import org.sonorus.data.model.AlbumResponse
 import org.sonorus.data.model.AlbumsResponse
 import org.sonorus.data.model.ArtistResponse
 import org.sonorus.data.model.ArtistsResponse
+import org.sonorus.data.model.BookResponse
 import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.GenreResponse
 import org.sonorus.data.model.GenresResponse
 import org.sonorus.data.model.HomeResponse
 import org.sonorus.data.model.LyricsResponse
 import org.sonorus.data.model.PlaylistResponse
+import org.sonorus.data.model.PodcastResponse
+import org.sonorus.data.model.PodcastsResponse
 import org.sonorus.data.model.SearchResponse
 import org.sonorus.data.model.ShuffleResponse
+import org.sonorus.data.model.SpokenAuthorResponse
+import org.sonorus.data.model.SpokenResponse
 import org.sonorus.data.model.StarsResponse
 import org.sonorus.data.model.TracksResponse
 import kotlinx.coroutines.CoroutineScope
@@ -220,6 +225,35 @@ class Library(
     suspend fun tracksByIds(ids: List<Int>): TracksResponse =
         if (offline.value) Offline.tracksByIds(store.snapshot, ids)
         else reachableAfter { api.tracksByIds(ids) }
+
+    // --- Spoken word ----------------------------------------------------------
+    // Deliberately without an offline path. The downloads hold songs, and
+    // nothing on the phone can answer "which episodes does this show have" - so
+    // rather than a screen that is empty and does not say why, these say the
+    // one true thing: the server is not there. If spoken word ever becomes
+    // downloadable, this is the line that changes.
+
+    private fun onlyOnline(what: String): Nothing =
+        throw ApiException("offline", "$what gibt es nur online - offline hörst du deine Downloads.")
+
+    suspend fun podcasts(): PodcastsResponse =
+        if (offline.value) onlyOnline("Podcasts") else reachableAfter { api.podcasts() }
+
+    suspend fun podcast(id: Int, sort: String? = null): PodcastResponse =
+        if (offline.value) onlyOnline("Podcasts") else reachableAfter { api.podcast(id, sort) }
+
+    suspend fun spoken(base: String): SpokenResponse =
+        if (offline.value) onlyOnline(spokenName(base)) else reachableAfter { api.spoken(base) }
+
+    suspend fun spokenAuthor(base: String, id: Int): SpokenAuthorResponse =
+        if (offline.value) onlyOnline(spokenName(base))
+        else reachableAfter { api.spokenAuthor(base, id) }
+
+    suspend fun book(base: String, id: Int): BookResponse =
+        if (offline.value) onlyOnline(spokenName(base)) else reachableAfter { api.book(base, id) }
+
+    private fun spokenName(base: String) =
+        if (base == "audiodramas") "Hörspiele" else "Hörbücher"
 
     // --- Artwork --------------------------------------------------------------
 

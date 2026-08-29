@@ -25,7 +25,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -107,6 +109,30 @@ class AppViewModel : ViewModel() {
             lib.offline.drop(1).collect { offline ->
                 if (!offline) start() else refreshQuietly()
             }
+        }
+
+        // The chapters of the book that is playing, fetched once per book - the
+        // same "load it once and only when it changed" the lyrics follow per
+        // song. The player cannot do this itself: it talks to ExoPlayer and to
+        // the API, and which chapters a book has is a library question.
+        viewModelScope.launch {
+            player.state
+                .map { it.current?.takeIf { t -> t.audiobookId != null } }
+                .map { it?.audiobookId to (it?.bookKind ?: "") }
+                .distinctUntilChanged()
+                .collect { (bookId, kind) ->
+                    if (bookId == null) {
+                        player.setChapters(null, emptyList())
+                        return@collect
+                    }
+                    val base = if (kind == "drama") "audiodramas" else "audiobooks"
+                    // A book without its chapters is the book as it was before
+                    // they existed: one long bar and its own title. Nothing here
+                    // is worth an error message.
+                    val chapters = runCatching { lib.book(base, bookId).book.chapters }
+                        .getOrDefault(emptyList())
+                    player.setChapters(bookId, chapters)
+                }
         }
     }
 

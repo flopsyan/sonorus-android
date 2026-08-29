@@ -36,9 +36,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.sonorus.data.model.Chapter
 import org.sonorus.data.model.Track
 import org.sonorus.ui.Motion
 import org.sonorus.ui.pressable
+import org.sonorus.ui.nowLines
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.toggled
 
@@ -71,6 +73,8 @@ fun SharedTransitionScope.PlayerBar(
     durationMs: Long,
     coverUrl: String?,
     coverVisible: Boolean,
+    /** The chapter being heard, for a book. Null for everything else. */
+    chapter: Chapter? = null,
     modifier: Modifier = Modifier,
     onToggle: () -> Unit,
     onNext: () -> Unit,
@@ -126,8 +130,11 @@ fun SharedTransitionScope.PlayerBar(
                 track.title,
             )
             Column(Modifier.weight(1f)) {
+                // A book names its chapter and the book where a song names its
+                // title and its interpret - see [nowLines].
+                val lines = nowLines(track, chapter)
                 Text(
-                    track.title,
+                    lines.title,
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.text,
                     maxLines = 1,
@@ -137,7 +144,10 @@ fun SharedTransitionScope.PlayerBar(
                     modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
                 )
                 Text(
-                    track.artist,
+                    listOfNotNull(
+                        lines.artist.takeIf { it.isNotEmpty() },
+                        lines.album.takeIf { it.isNotEmpty() && track.audiobookId != null },
+                    ).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textDim,
                     maxLines = 1,

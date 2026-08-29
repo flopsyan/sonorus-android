@@ -18,6 +18,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.model.Album
+import org.sonorus.data.model.Book
+import org.sonorus.data.model.SpokenAuthor
 import org.sonorus.data.model.Track
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
@@ -237,6 +239,137 @@ fun EditArtistDialog(
                     cover.fy = 0.5f
                 }
             },
+        )
+    }
+}
+
+/**
+ * "Autor bearbeiten": the picture, and nothing else - the artist dialog word for
+ * word, because an author stands in exactly the artist's position. Kept as its
+ * own function rather than a shared one with a path passed in: the two look
+ * alike today, and an author is not an interpret.
+ */
+@UnstableApi
+@Composable
+fun EditAuthorDialog(
+    vm: AppViewModel,
+    base: String,
+    author: SpokenAuthor,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val cover = remember { CoverChoice() }
+    var busy by remember { mutableStateOf(false) }
+
+    SonorusDialog(
+        title = "Autor bearbeiten",
+        onDismiss = onDismiss,
+        confirmLabel = if (busy) "Speichert …" else "Speichern",
+        confirmEnabled = !busy && cover.changed,
+        onConfirm = {
+            busy = true
+            scope.launch {
+                val payload = coverPayload(vm, cover)
+                if (payload == null) {
+                    busy = false
+                    return@launch
+                }
+                runCatching { vm.api.editAuthorCover(base, author.id, payload) }
+                    .onSuccess {
+                        onSaved()
+                        onDismiss()
+                        vm.say("Bild gespeichert.")
+                    }
+                    .onFailure { vm.say(vm.message(it), true) }
+                busy = false
+            }
+        },
+    ) {
+        CoverField(
+            choice = cover,
+            currentUrl = vm.coverUrl(author.cover),
+            onPicked = { uri ->
+                scope.launch {
+                    cover.source = CoverImage.load(context, uri)
+                    cover.cleared = false
+                    cover.fx = 0.5f
+                    cover.fy = 0.5f
+                }
+            },
+        )
+        Text(
+            "Ohne eigenes Bild zeigt Sonorus das Cover eines Titels. Der Name kommt aus dem " +
+                "Ordnernamen und lässt sich hier nicht ändern.",
+            style = MaterialTheme.typography.bodySmall,
+            color = SonorusTheme.colors.textDim,
+        )
+    }
+}
+
+/**
+ * "Hörbuch bearbeiten": who reads it and when it came out.
+ *
+ * Both are read from the file already - `composer` and `date` on an Audible m4b
+ * - so this is not where the answer comes from, it is where it is corrected.
+ * The date is the one that usually needs it: the tag holds a bare year, the
+ * listener may know the day, and Sonorus asks nothing on the internet.
+ *
+ * A radio play has a cast rather than a reader, so it gets no narrator field at
+ * all - a list of six actors under "Gesprochen von" would read as one person
+ * doing a bad job.
+ */
+@UnstableApi
+@Composable
+fun EditBookDialog(
+    vm: AppViewModel,
+    base: String,
+    book: Book,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var narrator by remember { mutableStateOf(book.narrator) }
+    var date by remember { mutableStateOf(Fmt.releaseDateInput(book.releaseDate)) }
+    var busy by remember { mutableStateOf(false) }
+    val isDrama = book.isDrama
+
+    SonorusDialog(
+        title = if (isDrama) "Hörspiel bearbeiten" else "Hörbuch bearbeiten",
+        onDismiss = onDismiss,
+        confirmLabel = if (busy) "Speichert …" else "Speichern",
+        confirmEnabled = !busy,
+        onConfirm = {
+            busy = true
+            scope.launch {
+                runCatching {
+                    vm.api.editBook(base, book.id, if (isDrama) null else narrator, date.trim())
+                }
+                    .onSuccess {
+                        onSaved()
+                        onDismiss()
+                        vm.say(if (isDrama) "Hörspiel gespeichert." else "Hörbuch gespeichert.")
+                    }
+                    .onFailure { vm.say(vm.message(it), true) }
+                busy = false
+            }
+        },
+    ) {
+        if (!isDrama) {
+            DialogField("Sprecher", narrator, placeholder = "z. B. Simon Jäger") { narrator = it }
+        }
+        DialogField("Erscheinungsdatum", date, placeholder = "26.10.2016, 10.2016 oder 2016") { date = it }
+        Text(
+            if (isDrama) {
+                "Ein Hörspiel hat eine Besetzung statt eines Sprechers, deshalb steht hier keine " +
+                    "„Gesprochen von“-Zeile. Titel und Autor kommen aus den Ordnernamen."
+            } else {
+                "„Gesprochen von“ steht auf der Buchseite; leer lassen blendet die Zeile aus. " +
+                    "Titel und Autor kommen aus den Ordnernamen."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = SonorusTheme.colors.textDim,
         )
     }
 }

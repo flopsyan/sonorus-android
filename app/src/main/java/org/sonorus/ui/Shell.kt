@@ -36,15 +36,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.TheaterComedy
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -133,6 +136,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val offline by vm.offline.collectAsState()
     var expanded by remember { mutableStateOf(false) }
     var listsOpen by remember { mutableStateOf(false) }
+    var spokenOpen by remember { mutableStateOf(false) }
     // What the bar keeps drawing while it folds away - see the bar itself.
     var lastTrack by remember { mutableStateOf(playerState.current) }
     playerState.current?.let { lastTrack = it }
@@ -219,6 +223,12 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                         // or the bar would empty out before it has finished
                         // folding away.
                         val shown = current ?: lastTrack
+                        // Read, not merely collected: the index is what makes
+                        // this recompose as the playhead crosses into the next
+                        // chapter, which is the only thing that moves while a
+                        // book plays - the file never changes.
+                        val chapterIndex by vm.player.chapterAt.collectAsState()
+                        val chapter = remember(chapterIndex) { vm.player.currentChapter() }
                         if (shown != null) {
                             PlayerBar(
                                 track = shown,
@@ -227,6 +237,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                                 durationMs = playerState.durationMs,
                                 coverUrl = vm.coverUrl(shown.cover),
                                 coverVisible = !expanded,
+                                chapter = chapter,
                                 onToggle = { vm.player.toggle() },
                                 onNext = { vm.player.next() },
                                 onPrevious = { vm.player.previous() },
@@ -241,6 +252,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                     BottomTabs(
                         route = route,
                         listsOpen = listsOpen,
+                        spokenOpen = spokenOpen,
                         onGo = { target ->
                             // A tab is a place, not a step: switching between
                             // them must not pile up a back stack.
@@ -251,6 +263,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                             }
                         },
                         onLists = { listsOpen = true },
+                        onSpoken = { spokenOpen = true },
                     )
                 }
             },
@@ -288,6 +301,32 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                 PlaylistLibrary(vm, data) { target ->
                     listsOpen = false
                     nav.navigate(target) { launchSingleTop = true }
+                }
+            }
+        }
+    }
+
+    // Three libraries behind one tab, the way the playlists sit behind theirs:
+    // a sheet that asks which one rather than a fourth and fifth tab that would
+    // not fit. Podcasts, Hörbücher, Hörspiele - each a page of its own.
+    if (spokenOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { spokenOpen = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = colors.surface,
+        ) {
+            val goSpoken: (String) -> Unit = { target ->
+                spokenOpen = false
+                nav.navigate(target) { launchSingleTop = true }
+            }
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                SidebarLabel("Gesprochenes")
+                SidebarRow(Icons.Filled.Mic, "Podcasts") { goSpoken(Routes.PODCASTS) }
+                SidebarRow(Icons.AutoMirrored.Filled.MenuBook, "Hörbücher") {
+                    goSpoken(Routes.spoken("audiobooks"))
+                }
+                SidebarRow(Icons.Filled.TheaterComedy, "Hörspiele") {
+                    goSpoken(Routes.spoken("audiodramas"))
                 }
             }
         }
@@ -363,6 +402,7 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
     Routes.ARTISTS -> "Interpreten"
     Routes.ALBUMS -> "Alben"
     Routes.GENRES -> "Genres"
+    Routes.PODCASTS -> "Podcasts"
     Routes.SEARCH -> "Suche"
     Routes.DOWNLOADS -> "Downloads"
     Routes.SETTINGS -> "Einstellungen"
@@ -382,8 +422,10 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
 private fun BottomTabs(
     route: String?,
     listsOpen: Boolean,
+    spokenOpen: Boolean,
     onGo: (String) -> Unit,
     onLists: () -> Unit,
+    onSpoken: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
     Column(
@@ -398,7 +440,15 @@ private fun BottomTabs(
             Tab(Icons.Filled.MusicNote, "Alle Songs", route == Routes.TRACKS) { onGo(Routes.TRACKS) }
             Tab(Icons.Filled.Person, "Interpreten", route.inSection("artists")) { onGo(Routes.ARTISTS) }
             Tab(Icons.Filled.Album, "Alben", route.inSection("albums")) { onGo(Routes.ALBUMS) }
-            Tab(Icons.Filled.Category, "Genres", route.inSection("genres")) { onGo(Routes.GENRES) }
+            // Genres moved to the drawer, where a list of 144 names belongs.
+            // The bottom row is six places wide and this is worth one of them:
+            // spoken word is three libraries and none of them had a way in.
+            Tab(
+                icon = Icons.AutoMirrored.Filled.MenuBook,
+                label = "Gesprochenes",
+                selected = spokenOpen || route.inSection("podcasts") || route.inSection("spoken"),
+                onClick = onSpoken,
+            )
             Tab(
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 label = "Playlists",
@@ -523,6 +573,11 @@ private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
         SidebarRow(Icons.Filled.Person, "Interpreten", data.stats.artists) { onGo(Routes.ARTISTS) }
         SidebarRow(Icons.Filled.Album, "Alben", data.stats.albums) { onGo(Routes.ALBUMS) }
         SidebarRow(Icons.Filled.Category, "Genres", data.stats.genres) { onGo(Routes.GENRES) }
+        // The three spoken-word libraries. In the drawer as well as behind the
+        // bottom tab, because the drawer is the one place that lists everything.
+        SidebarRow(Icons.Filled.Mic, "Podcasts") { onGo(Routes.PODCASTS) }
+        SidebarRow(Icons.AutoMirrored.Filled.MenuBook, "Hörbücher") { onGo(Routes.spoken("audiobooks")) }
+        SidebarRow(Icons.Filled.TheaterComedy, "Hörspiele") { onGo(Routes.spoken("audiodramas")) }
         // Not a sixth kind of list but a place: what is on the phone rather than
         // on the server, and the one page that still works with nothing behind it.
         val downloads by vm.downloads.state.collectAsState()

@@ -55,7 +55,27 @@ data class Track(
     /** Only from the home page. */
     val playCount: Int? = null,
     val lastPlayed: String? = null,
+    // --- Spoken word ---------------------------------------------------------
+    /** Set on a podcast episode. The client reads it as "this is spoken word". */
+    val podcastId: Int? = null,
+    val podcast: String = "",
+    val episodeNo: Int? = null,
+    /** Set on a part of a book or a radio play; `title` is the title of the whole. */
+    val audiobookId: Int? = null,
+    val book: String = "",
+    /** 'book' or 'drama' - which of the two libraries the part belongs to. */
+    val bookKind: String = "",
+    val author: String = "",
+    val bookAuthorId: Int? = null,
+    val partNo: Int? = null,
+    /** Seconds into this episode or part, and whether it is done with. */
+    val position: Double = 0.0,
+    val completed: Boolean = false,
+    /** Where playback picks up: the position, or zero once it is finished. */
+    val resumeAt: Double = 0.0,
 ) {
+    /** Neither rated nor put on a playlist, and it remembers a position. */
+    val isSpoken: Boolean get() = podcastId != null || audiobookId != null
     /** A single lies directly in the artist folder and belongs to no album. */
     val isSingle: Boolean get() = albumId == null
 }
@@ -355,6 +375,11 @@ data class SearchResponse(
     val tracks: List<Track> = emptyList(),
     val artists: List<ArtistSummary> = emptyList(),
     val albums: List<Album> = emptyList(),
+    // Spoken word is its own section rather than mixed into the songs: an
+    // episode is not a song, and 691 of them would bury the answer.
+    val episodes: List<Track> = emptyList(),
+    val books: List<Book> = emptyList(),
+    val dramas: List<Book> = emptyList(),
 )
 
 @Serializable
@@ -423,3 +448,155 @@ data class UsersResponse(
 
 @Serializable
 data class ProfileResponse(val user: User)
+
+// --- Spoken word -------------------------------------------------------------
+// Podcasts, audiobooks and radio plays. Three tabs to the listener; underneath,
+// an episode and a book part are both rows in `tracks` with a remembered
+// position, which is why [Track] carries `podcastId` / `audiobookId` and the
+// player needs to know nothing else about them.
+
+/** A show in the list. */
+@Serializable
+data class PodcastSummary(
+    val id: Int,
+    val name: String = "",
+    val description: String = "",
+    val cover: String? = null,
+    val episodeCount: Int = 0,
+    val unplayedCount: Int = 0,
+    val duration: Double = 0.0,
+    /** Date of the newest episode, `YYYY-MM-DD`. */
+    val latest: String = "",
+)
+
+/** One show with its episodes. */
+@Serializable
+data class Podcast(
+    val id: Int,
+    val name: String = "",
+    val description: String = "",
+    val cover: String? = null,
+    val episodeCount: Int = 0,
+    val unplayedCount: Int = 0,
+    val duration: Double = 0.0,
+    val latest: String = "",
+    /** `new` or `old` - remembered on the account, not on the phone. */
+    val sort: String = "new",
+    /** The episode to carry on with, if there is one. */
+    val resume: Track? = null,
+    val episodes: List<Track> = emptyList(),
+)
+
+/** An author in the list of a spoken-word library. */
+@Serializable
+data class SpokenAuthorSummary(
+    val id: Int,
+    val name: String = "",
+    val cover: String? = null,
+    val bookCount: Int = 0,
+    val duration: Double = 0.0,
+)
+
+@Serializable
+data class SpokenAuthor(
+    val id: Int,
+    val name: String = "",
+    val cover: String? = null,
+    /** False means the picture is borrowed from one of their titles. */
+    val hasOwnCover: Boolean = false,
+    val books: List<Book> = emptyList(),
+)
+
+/**
+ * A book or a radio play - one thing to the listener, however many files it is
+ * made of. `kind` is 'book' or 'drama' and decides which library it belongs to
+ * and whether it has a narrator: a play has a cast, and Florian asked for the
+ * "Gesprochen von" line to stay away from one.
+ */
+@Serializable
+data class Book(
+    val id: Int,
+    val title: String = "",
+    val author: String = "",
+    val authorId: Int? = null,
+    val cover: String? = null,
+    val kind: String = "book",
+    val narrator: String = "",
+    val releaseDate: String = "",
+    val year: Int? = null,
+    val duration: Double = 0.0,
+    val elapsed: Double = 0.0,
+    val remaining: Double = 0.0,
+    val started: Boolean = false,
+    val finished: Boolean = false,
+    val resume: BookResume = BookResume(),
+    /** Numbered across the whole title. Empty when the files carry no marks. */
+    val chapters: List<Chapter> = emptyList(),
+    /**
+     * The files. **Never drawn** - they are what the play button hands to the
+     * queue, and that is the whole of their job. A book is one thing to the
+     * listener and the parts only decide the order it plays in.
+     */
+    val parts: List<Track> = emptyList(),
+) {
+    val isDrama: Boolean get() = kind == "drama"
+}
+
+/** Which part to open and how far into it. */
+@Serializable
+data class BookResume(val index: Int = 0, val offset: Double = 0.0)
+
+/**
+ * One chapter mark. [start] and [end] are seconds into the whole title, for the
+ * list and the "which chapter is this" question; [part] and [offset] say which
+ * file it lies in and where, which is what a jump needs.
+ */
+@Serializable
+data class Chapter(
+    val index: Int = 0,
+    val title: String = "",
+    val start: Double = 0.0,
+    val end: Double = 0.0,
+    val part: Int = 0,
+    val offset: Double = 0.0,
+)
+
+@Serializable
+data class PodcastStats(
+    val shows: Int = 0,
+    val episodes: Int = 0,
+    val duration: Double = 0.0,
+    val unplayed: Int = 0,
+)
+
+@Serializable
+data class SpokenStats(
+    val books: Int = 0,
+    val authors: Int = 0,
+    val duration: Double = 0.0,
+    val open: Int = 0,
+)
+
+@Serializable
+data class PodcastsResponse(
+    val podcasts: List<PodcastSummary> = emptyList(),
+    @SerialName("continue") val carryOn: List<Track> = emptyList(),
+    val stats: PodcastStats = PodcastStats(),
+)
+
+@Serializable
+data class PodcastResponse(val podcast: Podcast)
+
+@Serializable
+data class SpokenResponse(
+    val kind: String = "book",
+    val authors: List<SpokenAuthorSummary> = emptyList(),
+    @SerialName("continue") val carryOn: List<Book> = emptyList(),
+    val stats: SpokenStats = SpokenStats(),
+)
+
+@Serializable
+data class SpokenAuthorResponse(val author: SpokenAuthor)
+
+@Serializable
+data class BookResponse(val book: Book)

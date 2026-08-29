@@ -16,6 +16,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import org.sonorus.ui.screens.AccountsScreen
+import org.sonorus.ui.screens.BookScreen
+import org.sonorus.ui.screens.PodcastScreen
+import org.sonorus.ui.screens.PodcastsScreen
+import org.sonorus.ui.screens.SpokenAuthorScreen
+import org.sonorus.ui.screens.SpokenScreen
 import org.sonorus.ui.screens.AlbumScreen
 import org.sonorus.ui.screens.AlbumsScreen
 import org.sonorus.ui.screens.ArtistScreen
@@ -54,6 +59,7 @@ private const val SLIDE = 6
  */
 private val TABS = setOf(
     Routes.HOME, Routes.TRACKS, Routes.ARTISTS, Routes.ALBUMS, Routes.GENRES,
+    Routes.PODCASTS, Routes.SPOKEN,
 )
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.betweenTabs() =
@@ -148,5 +154,49 @@ fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
             Routes.PLAYLIST,
             arguments = listOf(navArgument("id") { type = NavType.IntType }),
         ) { PlaylistScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        // Spoken word. `base` is "audiobooks" or "audiodramas" - the same word
+        // the server's paths use, so one screen serves both libraries.
+        composable(Routes.PODCASTS) { PodcastsScreen(vm, go) }
+
+        composable(
+            Routes.PODCAST,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { PodcastScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        composable(
+            Routes.SPOKEN,
+            arguments = listOf(navArgument("base") { type = NavType.StringType }),
+        ) { SpokenScreen(vm, it.arguments?.getString("base") ?: "audiobooks", go) }
+
+        composable(
+            Routes.SPOKEN_AUTHOR,
+            arguments = listOf(
+                navArgument("base") { type = NavType.StringType },
+                navArgument("id") { type = NavType.IntType },
+            ),
+        ) {
+            SpokenAuthorScreen(
+                vm,
+                it.arguments?.getString("base") ?: "audiobooks",
+                it.arguments?.getInt("id") ?: 0,
+                go,
+            )
+        }
+
+        composable(
+            Routes.BOOK,
+            arguments = listOf(
+                navArgument("base") { type = NavType.StringType },
+                navArgument("id") { type = NavType.IntType },
+            ),
+        ) {
+            BookScreen(
+                vm,
+                it.arguments?.getString("base") ?: "audiobooks",
+                it.arguments?.getInt("id") ?: 0,
+                go,
+            )
+        }
     }
 }
