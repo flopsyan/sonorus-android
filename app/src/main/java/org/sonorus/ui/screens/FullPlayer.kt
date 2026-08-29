@@ -124,6 +124,7 @@ import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.Motion
 import org.sonorus.ui.Routes
+import org.sonorus.ui.nowLines
 import org.sonorus.ui.armed
 import org.sonorus.ui.pressable
 import org.sonorus.ui.components.Chip
@@ -283,6 +284,12 @@ fun SharedTransitionScope.FullPlayer(
             else -> onClose()
         }
     }
+
+    // Which chapter of a book is being heard. Read rather than merely collected:
+    // the index is what makes this screen redraw as the playhead crosses into
+    // the next one, which is the only thing that moves while a book plays.
+    val chapterIndex by vm.player.chapterAt.collectAsState()
+    val chapter = remember(chapterIndex) { vm.player.currentChapter() }
 
     // The words come out of the file itself, and only this screen shows them -
     // so only this screen asks for them, and only while it is open.
@@ -492,16 +499,21 @@ fun SharedTransitionScope.FullPlayer(
                             // Measured, not estimated off a character count: the
                             // travel has to end exactly where the name does, or
                             // the pause at the end pauses on the wrong thing.
-                            val titlePx = remember(track.title, measurer) {
+                            // A book names its chapter here, and the book and
+                            // its author below - see [nowLines]. Measured off
+                            // the string that is actually drawn, or the marquee
+                            // would stop in the wrong place.
+                            val lines = nowLines(track, chapter)
+                            val titlePx = remember(lines.title, measurer) {
                                 measurer.measure(
-                                    track.title,
+                                    lines.title,
                                     style = PlayerTitle,
                                     softWrap = false,
                                     maxLines = 1,
                                 ).size.width
                             }
                             val over = (titlePx - fieldPx).coerceAtLeast(0)
-                            val shift = remember(track.id) { Animatable(0f) }
+                            val shift = remember(track.id, lines.title) { Animatable(0f) }
                             LaunchedEffect(running, over) {
                                 if (!running || over <= 0) {
                                     shift.snapTo(0f)
@@ -531,7 +543,7 @@ fun SharedTransitionScope.FullPlayer(
                                     )
                             ) {
                                 Text(
-                                    track.title,
+                                    lines.title,
                                     style = PlayerTitle,
                                     color = colors.text,
                                     maxLines = 1,
@@ -564,10 +576,28 @@ fun SharedTransitionScope.FullPlayer(
                             // interpret that has no page of its own, and a
                             // single has no album - either half is a plain
                             // caption then rather than a tap that does nothing.
+                            // A book's two links lead into its own library: the
+                            // book where a song has its interpret, the author
+                            // where it has its album.
+                            val spokenBase =
+                                if (track.bookKind == "drama") "audiodramas" else "audiobooks"
+                            val firstTarget: (() -> Unit)? = when {
+                                track.audiobookId != null ->
+                                    { { onGo(Routes.book(spokenBase, track.audiobookId)) } }
+                                track.artistId != null -> { { onGo(Routes.artist(track.artistId)) } }
+                                else -> null
+                            }
+                            val secondTarget: (() -> Unit)? = when {
+                                track.audiobookId != null && track.bookAuthorId != null ->
+                                    { { onGo(Routes.spokenAuthor(spokenBase, track.bookAuthorId)) } }
+                                track.audiobookId == null && track.albumId != null ->
+                                    { { onGo(Routes.album(track.albumId)) } }
+                                else -> null
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (track.artist.isNotEmpty()) {
+                                if (lines.artist.isNotEmpty()) {
                                     Text(
-                                        track.artist,
+                                        lines.artist,
                                         style = PlayerSubtitle,
                                         color = colors.textDim,
                                         maxLines = 1,
@@ -575,13 +605,13 @@ fun SharedTransitionScope.FullPlayer(
                                         modifier = Modifier
                                             .weight(1f, fill = false)
                                             .then(
-                                                track.artistId?.let { id ->
-                                                    Modifier.clickable { onGo(Routes.artist(id)) }
+                                                firstTarget?.let { go ->
+                                                    Modifier.clickable { go() }
                                                 } ?: Modifier
                                             ),
                                     )
                                 }
-                                if (track.artist.isNotEmpty() && track.album.isNotEmpty()) {
+                                if (lines.artist.isNotEmpty() && lines.album.isNotEmpty()) {
                                     Text(
                                         " · ",
                                         style = PlayerSubtitle,
@@ -589,9 +619,9 @@ fun SharedTransitionScope.FullPlayer(
                                         maxLines = 1,
                                     )
                                 }
-                                if (track.album.isNotEmpty()) {
+                                if (lines.album.isNotEmpty()) {
                                     Text(
-                                        track.album,
+                                        lines.album,
                                         style = PlayerSubtitle,
                                         color = colors.textDim,
                                         maxLines = 1,
@@ -599,8 +629,8 @@ fun SharedTransitionScope.FullPlayer(
                                         modifier = Modifier
                                             .weight(1f, fill = false)
                                             .then(
-                                                track.albumId?.let { id ->
-                                                    Modifier.clickable { onGo(Routes.album(id)) }
+                                                secondTarget?.let { go ->
+                                                    Modifier.clickable { go() }
                                                 } ?: Modifier
                                             ),
                                     )
