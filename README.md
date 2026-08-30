@@ -54,6 +54,30 @@ It switches on its own, below **320 dp of window height and only in multi-window
 so a phone held sideways still gets the whole app. Dragging the divider back
 restores the shell on the page it was on.
 
+## Qualität
+
+Two settings of their own, both per **device** and not per account: what is
+streamed, and what a download fetches. A phone on a train and a browser on the
+LAN are the same login and want opposite things.
+
+**Only lossless is ever re-encoded** - FLAC, WAV, ALAC, APE, WavPack, DSD. An
+MP3, an AAC or an Opus file is handed over as it lies whatever its bitrate, so
+picking "Opus 128" changes nothing at all for a podcast that is already an MP3.
+The chip under the transport therefore says the format really coming out of the
+speaker, not the one that was asked for, and one tap on it switches the setting
+mid-song. The rule sits in `Quality.served` and mirrors `willTranscode` on the
+server: **change one side and change the other**, `QualityTest` is what catches
+it if you do not.
+
+## Statistik
+
+The same page the web app has, and it counts **all four libraries**: music,
+podcasts, audiobooks and radio plays. The playtime, the chart and the averages
+are all of them together; a Spielzeit table splits the selected period per
+library, and "Meistgehörtes Gesprochenes" ranks shows, books and radio plays.
+The three music top lists stay music alone - one 70-minute episode outweighs a
+dozen songs.
+
 ## Downloads and offline use
 
 Songs, albums, playlists, genres and rating lists can be pulled onto the device

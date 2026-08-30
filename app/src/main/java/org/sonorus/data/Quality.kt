@@ -30,46 +30,24 @@ enum class Quality(val wire: String, val label: String, val short: String) {
             entries.firstOrNull { it.wire == wire } ?: ORIGINAL
 
         /**
-         * The bitrate a profile targets, in bits per second. Only the small one
-         * has a target at all - the original is whatever the file is.
-         */
-        private const val OPUS_BITS = 128_000
-
-        /**
-         * The same margin the server keeps, and it has to stay the same number:
-         * both sides work out what is really served, and a client that disagrees
-         * would draw a format the speaker is not playing.
-         */
-        private const val UPWARD_MARGIN = 1.1
-
-        /**
          * What [track] is **really** served as when [wanted] is asked for.
          *
          * This mirrors `willTranscode` in the server's `src/lib/transcode.js`,
-         * and deliberately so: the app has the codec, the bitrate and the
-         * lossless flag of every track already, so the format under the
-         * transport can be right without a request per song. The server says the
-         * same thing in `X-Sonorus-Quality`, which is what a download reads -
-         * there the answer is in hand anyway.
+         * and deliberately so: the app has the codec and the lossless flag of
+         * every track already, so the format under the transport can be right
+         * without a request per song. The server says the same thing in
+         * `X-Sonorus-Quality`, which is what a download reads - there the answer
+         * is in hand anyway. **Change one side and change this one.**
          *
-         * Lossless always shrinks. Lossy only when it is clearly above the
-         * target: a 128k MP3 turned into a 128k Opus is smaller by nothing worth
-         * having and worse by a generation of loss.
+         * **Only lossless shrinks.** A file that is already lossy - MP3, AAC,
+         * Opus, Vorbis - is handed over as it lies, whatever its bitrate:
+         * ffmpeg goes down the ladder and never sideways, and re-encoding one
+         * lossy file into another costs a generation of loss on a file that was
+         * small enough to begin with. Florian's rule, 2026-08-30, after 312
+         * podcast episodes at 160-320 kbps were being re-encoded on the phone.
          */
-        fun served(track: Track, wanted: Quality): Quality {
-            if (wanted == ORIGINAL) return ORIGINAL
-            if (track.lossless) return wanted
-            val source = bitrateOf(track)
-            if (source <= 0) return ORIGINAL
-            return if (source > OPUS_BITS * UPWARD_MARGIN) wanted else ORIGINAL
-        }
-
-        /**
-         * A track's bitrate, falling back to what its length and its codec say
-         * nothing about - the row carries one for almost everything, and a null
-         * must not read as "low" or every such file would stay on the original.
-         */
-        private fun bitrateOf(track: Track): Int = track.bitrate ?: 0
+        fun served(track: Track, wanted: Quality): Quality =
+            if (wanted != ORIGINAL && track.lossless) wanted else ORIGINAL
     }
 }
 
