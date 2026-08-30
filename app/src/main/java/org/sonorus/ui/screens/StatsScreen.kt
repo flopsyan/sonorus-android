@@ -39,6 +39,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.model.ChartPoint
+import org.sonorus.data.model.KindTotal
+import org.sonorus.data.model.KindTotals
+import org.sonorus.data.model.SpokenLibraries
 import org.sonorus.data.model.TopEntry
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
@@ -168,11 +171,14 @@ fun StatsScreen(vm: AppViewModel) {
                 periodKey = current,
             )
 
+            KindTable(p.kinds)
+
             TopList("Meistgehörte Songs", data.listening.top.tracks, vm, subtitleOf = { it.artist })
             TopList("Meistgehörte Interpreten", data.listening.top.artists, vm, round = true) {
                 Fmt.plural(it.tracks, "Song", "Songs")
             }
             TopList("Meistgehörte Alben", data.listening.top.albums, vm) { it.artist }
+            TopList("Meistgehörtes Gesprochenes", data.listening.top.spoken, vm) { spokenSub(it) }
 
             // Lifetime, on purpose - see the note above.
             RackLabelText("Durchschnitt", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
@@ -206,9 +212,145 @@ fun StatsScreen(vm: AppViewModel) {
                 Readout2("Spielzeit", Fmt.durationRack(data.library.duration))
                 Readout2("Größe", Fmt.bytes(data.library.size))
             }
+
+            SpokenPanel(data.spoken)
           }
         }
     }
+}
+
+/**
+ * The selected period, split by the library it was listened to in.
+ *
+ * Every library keeps its row even when it was silent - that is what says it is
+ * counted on this page at all, and a row left out would say nothing. There is
+ * no bar here on purpose: the top lists on this screen have none either, and a
+ * meter next to a percentage on a phone is the same number drawn twice.
+ */
+@Composable
+private fun KindTable(kinds: KindTotals) {
+    val colors = SonorusTheme.colors
+    RackLabelText("Spielzeit", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+    StatPanel {
+        KindRow("Musik", kinds.music, kinds.total.seconds)
+        KindRow("Podcasts", kinds.podcast, kinds.total.seconds)
+        KindRow("Hörbücher", kinds.book, kinds.total.seconds)
+        KindRow("Hörspiele", kinds.drama, kinds.total.seconds)
+        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
+        KindRow("Gesamt", kinds.total, 0.0, accent = true)
+    }
+}
+
+@Composable
+private fun KindRow(label: String, value: KindTotal, total: Double, accent: Boolean = false) {
+    val colors = SonorusTheme.colors
+    // Quiet libraries step back rather than disappear.
+    val dim = value.seconds <= 0.0 && !accent
+    val share = if (total > 0.0) Math.round(value.seconds / total * 100).toInt() else -1
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (dim) colors.textFaint else colors.textDim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (share >= 0) {
+            Text("$share %", style = num(11.sp), color = colors.textFaint)
+        }
+        Text(
+            Fmt.plural(value.plays, "Wiedergabe", "Wiedergaben"),
+            style = num(11.sp),
+            color = colors.textFaint,
+        )
+        Text(
+            Fmt.durationRack(value.seconds),
+            style = num(if (accent) 15.sp else 13.sp),
+            color = when {
+                accent -> colors.accent
+                dim -> colors.textFaint
+                else -> colors.text
+            },
+        )
+    }
+}
+
+/**
+ * What the three spoken libraries hold, the way the Bibliothek panel above says
+ * it for the music. One row each rather than three panels: they answer the same
+ * question in different words, and a podcast has Folgen where a book has Teile.
+ */
+@Composable
+private fun SpokenPanel(spoken: SpokenLibraries) {
+    RackLabelText("Gesprochenes", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+    StatPanel {
+        SpokenRow(
+            "Podcasts",
+            listOf(
+                Fmt.plural(spoken.podcasts.shows, "Show", "Shows"),
+                Fmt.plural(spoken.podcasts.episodes, "Folge", "Folgen"),
+                "${spoken.podcasts.unplayed} ungehört",
+            ),
+            spoken.podcasts.duration,
+        )
+        SpokenRow(
+            "Hörbücher",
+            listOf(
+                Fmt.plural(spoken.books.books, "Buch", "Bücher"),
+                Fmt.plural(spoken.books.authors, "Autor", "Autoren"),
+                "${spoken.books.open} offen",
+            ),
+            spoken.books.duration,
+        )
+        SpokenRow(
+            "Hörspiele",
+            listOf(
+                Fmt.plural(spoken.dramas.books, "Hörspiel", "Hörspiele"),
+                Fmt.plural(spoken.dramas.authors, "Autor", "Autoren"),
+                "${spoken.dramas.open} offen",
+            ),
+            spoken.dramas.duration,
+        )
+    }
+}
+
+@Composable
+private fun SpokenRow(label: String, parts: List<String>, seconds: Double) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.text)
+            Text(
+                parts.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textDim,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(Fmt.durationRack(seconds), style = num(13.sp), color = colors.text)
+    }
+}
+
+// One list holds three libraries, so every row says which one it is. The author
+// follows where there is one - a show has none.
+private fun spokenSub(entry: TopEntry): String {
+    val word = when (entry.kind) {
+        "podcast" -> "Podcast"
+        "book" -> "Hörbuch"
+        "drama" -> "Hörspiel"
+        else -> "Gesprochenes"
+    }
+    return if (entry.artist.isBlank()) word else "$word · ${entry.artist}"
 }
 
 @Composable

@@ -9,11 +9,31 @@ import kotlinx.serialization.Serializable
  * a period is (day / week / month / year / all) and the key says which one. The
  * chart is the breakdown *inside* that period, and the top lists answer for
  * exactly the same period - which is what makes the two say the same thing.
+ *
+ * **All four libraries count.** The playtime, the chart and the averages read
+ * music, podcasts, audiobooks and radio plays alike; only the three top lists
+ * and the Songs / Interpreten / Alben counts stay music, because one 70-minute
+ * episode outweighs a dozen songs.
  */
 @Serializable
 data class StatsResponse(
     val library: LibraryStats = LibraryStats(),
+    /** The three spoken libraries, the way [library] speaks for the music one. */
+    val spoken: SpokenLibraries = SpokenLibraries(),
     val listening: Listening = Listening(),
+)
+
+/**
+ * The library numbers of the spoken word, one block per library.
+ *
+ * The three shapes are the ones the podcast and book screens already parse -
+ * this only gathers them, so nothing new had to be described to the parser.
+ */
+@Serializable
+data class SpokenLibraries(
+    val podcasts: PodcastStats = PodcastStats(),
+    val books: SpokenStats = SpokenStats(),
+    val dramas: SpokenStats = SpokenStats(),
 )
 
 @Serializable
@@ -69,7 +89,29 @@ data class StatPeriod(
     val first: String = "",
     val current: String = "",
     val totals: PeriodTotals = PeriodTotals(),
+    /** The same period, split by the library it was listened to in. */
+    val kinds: KindTotals = KindTotals(),
 )
+
+/**
+ * How much of the period was music and how much was spoken word.
+ *
+ * Every library is here even when it was silent, and that is the point: a row
+ * reading "Podcasts 0 Sek." is what tells the reader that podcasts are counted
+ * on this page, and an absent one would tell them nothing. [total] is what the
+ * readout above the table says - the four added up.
+ */
+@Serializable
+data class KindTotals(
+    val music: KindTotal = KindTotal(),
+    val podcast: KindTotal = KindTotal(),
+    val book: KindTotal = KindTotal(),
+    val drama: KindTotal = KindTotal(),
+    val total: KindTotal = KindTotal(),
+)
+
+@Serializable
+data class KindTotal(val plays: Int = 0, val seconds: Double = 0.0)
 
 @Serializable
 data class PeriodTotals(
@@ -88,6 +130,13 @@ data class TopLists(
     val tracks: List<TopEntry> = emptyList(),
     val artists: List<TopEntry> = emptyList(),
     val albums: List<TopEntry> = emptyList(),
+    /**
+     * All three spoken libraries in one list. What is ranked is the show, the
+     * book or the radio play - never the file, because a book is one thing
+     * whose parts are never shown, and a list of parts would name the same
+     * book forty times. [TopEntry.kind] says which library a row came from.
+     */
+    val spoken: List<TopEntry> = emptyList(),
 )
 
 /** One shape for all three lists - an artist puts its name in [title] too. */
@@ -104,4 +153,6 @@ data class TopEntry(
     val seconds: Double = 0.0,
     /** Only on the artist list: how many distinct tracks were played. */
     val tracks: Int = 0,
+    /** Only on the spoken list: "podcast", "book" or "drama". */
+    val kind: String = "",
 )
