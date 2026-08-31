@@ -10,7 +10,12 @@ import org.sonorus.data.Library
 import org.sonorus.data.Quality
 import org.sonorus.data.SonorusApi
 import org.sonorus.data.formatLabel
+import org.sonorus.data.download.DownloadSync
 import org.sonorus.data.download.Downloads
+import org.sonorus.data.download.OfflineCollection
+import org.sonorus.data.sync.PendingWrites
+import org.sonorus.data.sync.TreeEdits
+import org.sonorus.data.sync.WriteSync
 import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Playlist
@@ -68,6 +73,23 @@ class AppViewModel : ViewModel() {
      */
     val lib: Library get() = app.library
     val downloads: Downloads get() = app.downloads
+
+    /** What was done without a server and is waiting to be sent. */
+    private val pending: PendingWrites get() = app.pending
+    private val writeSync: WriteSync get() = app.writeSync
+    private val downloadSync: DownloadSync get() = app.downloadSync
+
+    /**
+     * How many offline edits are still waiting, for the line in Einstellungen.
+     * Plays are not counted: nobody thinks of listening as an edit, and a number
+     * that climbs while you simply listen would read as something being stuck.
+     */
+    private val _waiting = MutableStateFlow(0)
+    val waitingWrites: StateFlow<Int> = _waiting.asStateFlow()
+
+    private fun countWaiting() {
+        _waiting.value = pending.edits
+    }
 
     /** True while the app is working out of its downloads. */
     val offline: StateFlow<Boolean> get() = lib.offline
@@ -172,7 +194,10 @@ class AppViewModel : ViewModel() {
             // would throw the navigation away and blink the player bar.
             if (_phase.value !is AppPhase.Ready) _phase.value = AppPhase.Starting
             runCatching { lib.bootstrap() }
-                .onSuccess { applyBootstrap(it) }
+                .onSuccess {
+                    applyBootstrap(it)
+                    syncWithServer()
+                }
                 .onFailure { error ->
                     // `markUnreachable` is what makes the next read take the
                     // downloads instead of the server, and it has to have taken
@@ -273,6 +298,54 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch { player.restoreQueue() }
     }
 
+    /**
+     * Everything that was waiting for a server, now that there is one.
+     *
+     * Runs after every successful bootstrap, which is both the app's start and
+     * the moment it finds its way back - see the collector in `init`. The order
+     * is not free: **the edits go up before the downloads are reconciled**, or
+     * a song added to a playlist in a plane would be compared against a server
+     * that has not heard about it yet and be deleted again on the spot.
+     */
+    private fun syncWithServer() {
+        viewModelScope.launch {
+            val sent = runCatching { writeSync.flush() }.getOrNull()
+            countWaiting()
+            if (sent != null && sent.sent > 0) refreshQuietly()
+            if (sent != null && sent.dropped > 0) {
+                say(
+                    "${Fmt.plural(sent.dropped, "Änderung", "Änderungen")} vom Server " +
+                        "abgelehnt - vermutlich gibt es die Playlist nicht mehr.",
+                    true,
+                )
+            }
+            val changed = runCatching { downloadSync.reconcileAll() }.getOrNull() ?: return@launch
+            if (changed.added > 0 && changed.removed > 0) {
+                say("Downloads angeglichen: ${changed.added} dazu, ${changed.removed} entfernt.")
+            } else if (changed.added > 0) {
+                say("${Fmt.plural(changed.added, "Song", "Songs")} werden nachgeladen.")
+            } else if (changed.removed > 0) {
+                say("${Fmt.plural(changed.removed, "Download", "Downloads")} entfernt.")
+            }
+        }
+    }
+
+    /**
+     * The collection on screen, against the list the screen has just loaded.
+     *
+     * The cheap half of the sync: no request, because the page already holds
+     * what the server says. This is what makes an album or a playlist right the
+     * moment it is opened rather than at the next start.
+     */
+    fun reconcileOnScreen(collection: OfflineCollection?, tracks: List<Track>) {
+        if (collection == null || lib.offline.value) return
+        viewModelScope.launch {
+            val changed = downloadSync.apply(collection, tracks)
+            if (changed.added > 0) say("${Fmt.plural(changed.added, "Song", "Songs")} werden nachgeladen.")
+            if (changed.removed > 0) say("${Fmt.plural(changed.removed, "Download", "Downloads")} entfernt.")
+        }
+    }
+
     /** Reloads the sidebar numbers without flipping the screen to a spinner. */
     fun refreshQuietly() {
         viewModelScope.launch {
@@ -316,16 +389,50 @@ class AppViewModel : ViewModel() {
         )
     }
 
-    /** A playlist keeps its order, which nothing in a track could say. */
-    fun downloadPlaylist(playlist: Playlist, tracks: List<Track>) {
-        if (needsServer()) return
-        downloads.addPlaylist(playlist, tracks.filter { !it.missing })
-        say("\"${playlist.name}\" wird heruntergeladen.")
+    /**
+     * Takes named songs off the phone, and remembers that it was on purpose.
+     *
+     * The second half is what makes the button stick: a song of a downloaded
+     * playlist would otherwise be fetched again by the next reconcile, which is
+     * doing what it is for and looks exactly like a bug. Asking for the song
+     * again - on its own or with its collection - takes the exclusion back.
+     */
+    fun removeDownloads(tracks: List<Track>) {
+        val ids = tracks.map { it.id }
+        downloads.store.exclude(ids)
+        downloads.removeAll(ids)
+        say(if (tracks.size == 1) "Download entfernt." else "${tracks.size} Downloads entfernt.")
     }
 
-    fun removeDownloads(tracks: List<Track>) {
-        downloads.removeAll(tracks.map { it.id })
-        say(if (tracks.size == 1) "Download entfernt." else "${tracks.size} Downloads entfernt.")
+    /** A whole collection onto the phone, and kept in step with the server. */
+    fun downloadCollection(collection: OfflineCollection, tracks: List<Track>) {
+        if (needsServer()) return
+        val fresh = tracks.filterNot { it.missing }
+        downloads.addCollection(collection, fresh)
+        val missing = fresh.count { !downloads.store.isDownloaded(it.id) }
+        say(
+            when {
+                !downloads.allowedNow -> "In die Warteschlange - es wartet auf WLAN."
+                missing == 0 -> "Ist schon heruntergeladen."
+                missing == 1 -> "Wird heruntergeladen."
+                else -> "$missing Songs werden heruntergeladen."
+            }
+        )
+    }
+
+    /**
+     * Gives a collection back. Only the songs nothing else holds really go -
+     * one that also sits in a downloaded album or playlist stays.
+     */
+    fun removeCollection(collection: OfflineCollection) {
+        val kept = collection.trackIds.size - downloads.removeCollection(collection)
+        say(
+            when {
+                kept > 0 -> "Download entfernt. ${Fmt.plural(kept, "Song bleibt", "Songs bleiben")} - " +
+                    "sie hängen noch woanders drin."
+                else -> "Download entfernt."
+            }
+        )
     }
 
     fun clearDownloads() {
@@ -371,6 +478,27 @@ class AppViewModel : ViewModel() {
     val streamQuality: StateFlow<Quality> get() = app.settings.streamQuality
     val downloadQuality: StateFlow<Quality> get() = app.settings.downloadQuality
 
+    /** What is really asked for, which on mobile data need not be what is set. */
+    val servedStreamQuality: StateFlow<Quality> get() = app.quality.streamQuality
+
+    /** Whether the original may be asked for at all on this connection. */
+    val losslessAllowed: StateFlow<Boolean> get() = app.quality.losslessAllowed
+
+    val losslessWifiOnly: StateFlow<Boolean> get() = app.settings.losslessWifiOnly
+
+    fun setLosslessWifiOnly(on: Boolean) {
+        app.settings.setLosslessWifiOnly(on)
+        // The running song keeps its stream on purpose: switching this must not
+        // put a gap in the music. It applies to the next track, and to this one
+        // as soon as anything else reopens it.
+        say(if (on) "Lossless nur noch über WLAN." else "Lossless auch über mobile Daten.")
+    }
+
+    fun setDownloadsWifiOnly(on: Boolean) {
+        downloads.setWifiOnly(on)
+        say(if (on) "Downloads warten auf WLAN." else "Downloads laufen auch über mobile Daten.")
+    }
+
     /**
      * Whether the server can serve anything but the original.
      *
@@ -395,6 +523,14 @@ class AppViewModel : ViewModel() {
      * nobody tries out; the position is carried over, so it costs the buffer.
      */
     fun setStreamQuality(quality: Quality) {
+        // The one thing the picker may not do: pick the original on a metered
+        // connection while it is meant to be Wi-Fi only. Said out loud rather
+        // than silently ignored - a switch that does not move and does not
+        // explain itself reads as broken.
+        if (quality == Quality.ORIGINAL && !losslessAllowed.value) {
+            say("Lossless ist auf WLAN beschränkt - mit mobilen Daten bleibt es bei Opus 128.", true)
+            return
+        }
         app.settings.setStreamQuality(quality)
         player.reopenAtCurrentQuality()
         say("Streaming: ${quality.label}")
@@ -414,26 +550,20 @@ class AppViewModel : ViewModel() {
     fun formatOf(track: Track): String = formatLabel(track, player.servedQuality(track))
 
     /**
-     * The chip under the transport: one tap, the other quality.
+     * Whether the chip under the transport opens its picker, and what it says
+     * when it does not.
      *
-     * There are two answers, so a picker for them would be a menu with two
-     * entries. A song already on the phone is untouched by this - it is the file
-     * it is - so tapping while a download plays says so rather than pretending
-     * to have changed something.
+     * It used to switch on the tap itself. A sheet with the choices in it is
+     * what it is now - there are two of them today, and the moment there is a
+     * third a toggle would have been the wrong shape all along.
      */
-    fun toggleStreamQuality() {
-        if (!_qualityReady.value) {
-            say("Dieser Server liefert nur das Original.", true)
-            return
-        }
+    fun qualityPickerBlocked(): String? {
+        if (!_qualityReady.value) return "Dieser Server liefert nur das Original."
         val playing = player.state.value.current
         if (playing != null && downloads.store.fileOf(playing.id) != null) {
-            say("Läuft vom Gerät - die Qualität steht mit dem Download fest.")
-            return
+            return "Läuft vom Gerät - die Qualität steht mit dem Download fest."
         }
-        setStreamQuality(
-            if (streamQuality.value == Quality.ORIGINAL) Quality.OPUS128 else Quality.ORIGINAL
-        )
+        return null
     }
 
     /**
@@ -528,8 +658,20 @@ class AppViewModel : ViewModel() {
      * app. [onDone] carries the new value back so a list can redraw its row.
      */
     fun rate(trackId: Int, stars: Int, current: Int, onDone: (Int) -> Unit = {}) {
-        if (needsServer()) return
         val next = if (current == stars) 0 else stars
+        // Offline the star is kept rather than refused. It is written onto the
+        // row this phone holds - so the star playlists offline are right at
+        // once - and queued for the server. Rating a library is done by ear on
+        // a sofa or a train, which is exactly where there is no server.
+        if (lib.offline.value) {
+            pending.rate(trackId, next)
+            downloads.store.applyRating(trackId, next)
+            ratings[trackId] = next
+            onDone(next)
+            countWaiting()
+            say("Bewertet - wird übertragen, sobald der Server wieder da ist.")
+            return
+        }
         viewModelScope.launch {
             runCatching { api.rate(trackId, next) }
                 .onSuccess {
@@ -539,6 +681,10 @@ class AppViewModel : ViewModel() {
                     ratings[trackId] = it.stars
                     onDone(it.stars)
                     refreshQuietly()
+                    // A star moves a song between the star playlists, so a
+                    // downloaded one has to follow. Costs nothing when none is
+                    // downloaded, which is the ordinary case.
+                    viewModelScope.launch { runCatching { downloadSync.reconcileKind("stars") } }
                 }
                 .onFailure { say(message(it), true) }
         }
@@ -575,12 +721,16 @@ class AppViewModel : ViewModel() {
 
     /** Adds a track to a playlist and refreshes the sidebar counts. */
     fun addToPlaylist(playlistId: Int, trackId: Int, playlistName: String) {
-        if (needsServer()) return
+        if (lib.offline.value) {
+            offlineAdd(playlistId, trackId, playlistName)
+            return
+        }
         viewModelScope.launch {
             runCatching { api.addToPlaylist(playlistId, listOf(trackId)) }
                 .onSuccess {
                     say("Zu \"$playlistName\" hinzugefügt.")
                     refreshQuietly()
+                    playlistChanged(playlistId)
                 }
                 .onFailure { say(message(it), true) }
         }
@@ -662,7 +812,8 @@ class AppViewModel : ViewModel() {
     val pendingAddCanCreate: StateFlow<Boolean> = _pendingAddCanCreate.asStateFlow()
 
     fun askForPlaylist(track: Track, allowCreate: Boolean = true) {
-        if (needsServer()) return
+        // No server needed any more: putting a song into a playlist is one of
+        // the things that works offline and is sent later.
         _pendingAddCanCreate.value = allowCreate
         _pendingAdd.value = track
     }
@@ -696,17 +847,49 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun createPlaylist(name: String, folderId: Int? = null, then: (() -> Unit)? = null) =
+    fun createPlaylist(name: String, folderId: Int? = null, then: (() -> Unit)? = null) {
+        if (lib.offline.value) {
+            createLocalPlaylist(name, folderId)
+            then?.invoke()
+            say("Playlist \"$name\" angelegt - wird nachgetragen.")
+            return
+        }
         withTree(onDone = { then?.invoke(); say("Playlist \"$name\" angelegt.") }) {
             api.createPlaylist(name, folderId)
         }
+    }
+
+    /**
+     * A playlist that exists on this phone and nowhere else yet.
+     *
+     * Its id is negative and handed out by the queue, which is what lets songs
+     * be put into it before any server has heard of it - see
+     * [org.sonorus.data.sync.PendingWrites.localId]. When the create is finally
+     * sent, the real id takes its place everywhere at once.
+     */
+    private fun createLocalPlaylist(name: String, folderId: Int?): Int {
+        val id = pending.localId()
+        pending.createPlaylist(id, name, folderId)
+        downloads.store.rememberCollection(OfflineCollection(kind = "playlist", id = id, name = name))
+        downloads.store.updateTree {
+            TreeEdits.addPlaylist(it, Playlist(id = id, name = name, folderId = folderId))
+        }
+        countWaiting()
+        refreshQuietly()
+        return id
+    }
 
     /**
      * Creates a playlist and puts the waiting track straight into it - the one
      * flow where a new list is never wanted empty.
      */
     fun createPlaylistWithTrack(name: String, track: Track) {
-        if (needsServer()) return
+        if (lib.offline.value) {
+            val id = createLocalPlaylist(name, null)
+            offlineAdd(id, track.id, name)
+            _pendingAdd.value = null
+            return
+        }
         viewModelScope.launch {
             runCatching {
                 val created = api.createPlaylist(name, null)
@@ -722,36 +905,173 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    fun renamePlaylist(id: Int, name: String, then: () -> Unit = {}) =
+    fun renamePlaylist(id: Int, name: String, then: () -> Unit = {}) {
+        if (lib.offline.value) {
+            pending.renamePlaylist(id, name)
+            downloads.store.rememberCollection(
+                downloads.store.collectionOf("playlist", listOf(id))?.copy(name = name)
+                    ?: OfflineCollection(kind = "playlist", id = id, name = name)
+            )
+            downloads.store.updateTree { TreeEdits.renamePlaylist(it, id, name) }
+            countWaiting()
+            refreshQuietly()
+            then()
+            say("Umbenannt - wird nachgetragen.")
+            return
+        }
         withTree(then) { api.renamePlaylist(id, name) }
+    }
 
     fun pinPlaylist(id: Int, pinned: Boolean, then: () -> Unit = {}) =
         withTree(then) { api.pinPlaylist(id, pinned) }
 
-    fun deletePlaylist(id: Int, then: () -> Unit = {}) =
+    fun deletePlaylist(id: Int, then: () -> Unit = {}) {
+        if (lib.offline.value) {
+            pending.deletePlaylist(id)
+            // The songs stay on the phone unless nothing else wants them - the
+            // same rule as removing the download of a collection, because that
+            // is what deleting a downloaded playlist is.
+            downloads.store.collectionOf("playlist", listOf(id))?.let { downloads.removeCollection(it) }
+            downloads.store.updateTree { TreeEdits.deletePlaylist(it, id) }
+            countWaiting()
+            refreshQuietly()
+            then()
+            say("Playlist gelöscht - wird nachgetragen.")
+            return
+        }
         withTree({ then(); say("Playlist gelöscht.") }) { api.deletePlaylist(id) }
+    }
 
-    fun createFolder(name: String) =
+    fun createFolder(name: String) {
+        if (lib.offline.value) {
+            val id = pending.localId()
+            pending.createFolder(id, name)
+            downloads.store.updateTree { TreeEdits.addFolder(it, id, name) }
+            countWaiting()
+            refreshQuietly()
+            say("Ordner \"$name\" angelegt - wird nachgetragen.")
+            return
+        }
         withTree({ say("Ordner \"$name\" angelegt.") }) { api.createFolder(name) }
+    }
 
-    fun renameFolder(id: Int, name: String) = withTree { api.renameFolder(id, name) }
+    fun renameFolder(id: Int, name: String) {
+        if (lib.offline.value) {
+            pending.renameFolder(id, name)
+            downloads.store.updateTree { TreeEdits.renameFolder(it, id, name) }
+            countWaiting()
+            refreshQuietly()
+            return
+        }
+        withTree { api.renameFolder(id, name) }
+    }
 
     /** Deleting a folder keeps its playlists - they move to the top level. */
-    fun deleteFolder(id: Int) =
+    fun deleteFolder(id: Int) {
+        if (lib.offline.value) {
+            pending.deleteFolder(id)
+            downloads.store.updateTree { TreeEdits.deleteFolder(it, id) }
+            countWaiting()
+            refreshQuietly()
+            say("Ordner gelöscht, die Playlists sind erhalten - wird nachgetragen.")
+            return
+        }
         withTree({ say("Ordner gelöscht, die Playlists sind erhalten.") }) { api.deleteFolder(id) }
+    }
 
-    fun movePlaylist(id: Int, folderId: Int?) = withTree { api.movePlaylist(id, folderId) }
+    fun movePlaylist(id: Int, folderId: Int?) {
+        if (lib.offline.value) {
+            pending.movePlaylist(id, folderId)
+            downloads.store.updateTree { TreeEdits.movePlaylist(it, id, folderId) }
+            countWaiting()
+            refreshQuietly()
+            return
+        }
+        withTree { api.movePlaylist(id, folderId) }
+    }
 
-    fun removeFromPlaylist(playlistId: Int, itemId: Int, onDone: () -> Unit) {
-        if (needsServer()) return
+    /**
+     * Takes a song out of a playlist - and, if the playlist is downloaded, off
+     * the phone with it.
+     *
+     * The whole track rather than its item id, because offline there may be no
+     * item id at all: a song put into the list in a plane has no row on the
+     * server yet.
+     */
+    fun removeFromPlaylist(playlistId: Int, track: Track, onDone: () -> Unit) {
+        if (lib.offline.value) {
+            offlineRemoveFromPlaylist(playlistId, track, onDone)
+            return
+        }
+        val itemId = track.itemId?.toInt() ?: return
         viewModelScope.launch {
             runCatching { api.removeFromPlaylist(playlistId, itemId) }
                 .onSuccess {
                     onDone()
                     refreshQuietly()
+                    // The download follows the playlist: the song goes unless
+                    // something else on this phone still holds it.
+                    playlistChanged(playlistId)
                 }
                 .onFailure { say(message(it), true) }
         }
+    }
+
+    /** A playlist changed on the server, so its download has to catch up. */
+    private fun playlistChanged(playlistId: Int) {
+        if (lib.offline.value) return
+        if (downloads.store.collectionOf("playlist", listOf(playlistId)) == null) return
+        viewModelScope.launch {
+            val changed = runCatching { downloadSync.reconcile("playlist", listOf(playlistId)) }
+                .getOrNull() ?: return@launch
+            if (changed.added > 0) say("${Fmt.plural(changed.added, "Song", "Songs")} werden geladen.")
+            if (changed.removed > 0) say("${Fmt.plural(changed.removed, "Download", "Downloads")} entfernt.")
+        }
+    }
+
+    // --- The same writes, without a server ------------------------------------
+    //
+    // Every one of these does the same two things: change what this phone shows
+    // *now*, and write down what the server has to be told later. Doing only the
+    // second would look like the app had swallowed the edit.
+
+    private fun offlineAdd(playlistId: Int, trackId: Int, playlistName: String) {
+        val queued = pending.addToPlaylist(playlistId, trackId)
+        downloads.store.addToCollection(playlistId, trackId, playlistName)
+        applyOfflineCount(playlistId)
+        countWaiting()
+        say(
+            if (queued) "Zu \"$playlistName\" hinzugefügt - wird nachgetragen."
+            else "Zu \"$playlistName\" hinzugefügt."
+        )
+    }
+
+    /**
+     * Takes a song out of a playlist without a server.
+     *
+     * The download goes with it when nothing else holds it - the same rule the
+     * online path follows, and the reason it is worth having offline too: the
+     * point of taking a song out of a downloaded playlist is usually the space.
+     */
+    private fun offlineRemoveFromPlaylist(playlistId: Int, track: Track, onDone: () -> Unit) {
+        pending.removeFromPlaylist(playlistId, track.id, track.itemId?.toInt() ?: 0)
+        downloads.store.removeFromCollection(playlistId, track.id)
+        val key = OfflineCollection(kind = "playlist", id = playlistId).key
+        if (!downloads.store.isHeld(track.id, exceptKey = key)) downloads.remove(track.id)
+        applyOfflineCount(playlistId)
+        countWaiting()
+        onDone()
+        say("Entfernt - wird nachgetragen.")
+    }
+
+    /** The sidebar count of a playlist that changed while there was no server. */
+    private fun applyOfflineCount(playlistId: Int) {
+        val songs = downloads.store.collectionOf("playlist", listOf(playlistId))?.trackIds.orEmpty()
+            .mapNotNull { downloads.store.entryOf(it)?.track }
+        downloads.store.updateTree {
+            TreeEdits.setCount(it, playlistId, songs.size, songs.sumOf { t -> t.duration })
+        }
+        refreshQuietly()
     }
 
     // --- Messages -------------------------------------------------------------

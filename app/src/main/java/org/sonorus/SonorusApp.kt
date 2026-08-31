@@ -5,11 +5,15 @@ import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.Connectivity
 import org.sonorus.data.Library
 import org.sonorus.data.PlayLog
+import org.sonorus.data.QualityPolicy
 import org.sonorus.data.Session
 import org.sonorus.data.Settings
 import org.sonorus.data.SonorusApi
 import org.sonorus.data.download.DownloadStore
+import org.sonorus.data.download.DownloadSync
 import org.sonorus.data.download.Downloads
+import org.sonorus.data.sync.PendingWrites
+import org.sonorus.data.sync.WriteSync
 import org.sonorus.player.PlayerController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,11 +46,25 @@ class SonorusApp : Application() {
         private set
     lateinit var library: Library
         private set
+
+    /** What may really be asked for on the connection this phone is on. */
+    lateinit var quality: QualityPolicy
+        private set
     lateinit var downloads: Downloads
         private set
     lateinit var playLog: PlayLog
         private set
     lateinit var player: PlayerController
+        private set
+
+    /** What was done without a server and has not been sent yet. */
+    lateinit var pending: PendingWrites
+        private set
+    lateinit var writeSync: WriteSync
+        private set
+
+    /** Keeps a downloaded collection in step with the collection it came from. */
+    lateinit var downloadSync: DownloadSync
         private set
 
     /** Outlives every screen, which is what the download queue needs. */
@@ -64,6 +82,7 @@ class SonorusApp : Application() {
         // is also what keeps a cold start free of a permission dialog.
         store = DownloadStore(File(filesDir, "offline"))
         library = Library(api, store, connectivity, settings, scope)
+        quality = QualityPolicy(settings, connectivity, scope)
         downloads = Downloads(this, api, store, connectivity, settings)
         // Beside the downloads rather than inside them: what was heard offline
         // is not a file, and it has to survive "Alle Downloads entfernen".
@@ -73,7 +92,12 @@ class SonorusApp : Application() {
             send = { trackId, seconds, playedAt -> api.startPlay(trackId, seconds, playedAt) },
             scope = scope,
         )
-        player = PlayerController(this, api, library, settings, playLog)
+        // The plays have their own log; this one carries the edits - ratings and
+        // everything that happens to a playlist.
+        pending = PendingWrites(File(filesDir, "offline/pending.json"))
+        writeSync = WriteSync(api, pending, store)
+        downloadSync = DownloadSync(library, downloads, store)
+        player = PlayerController(this, api, library, settings, quality, playLog)
     }
 
     companion object {

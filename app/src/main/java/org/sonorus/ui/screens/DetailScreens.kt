@@ -34,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,11 +47,13 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import org.sonorus.data.download.OfflineCollection
 import org.sonorus.data.model.Playlist
 import org.sonorus.data.model.Track
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
+import org.sonorus.ui.LocalOffline
 import org.sonorus.ui.Motion
 import org.sonorus.ui.Routes
 import org.sonorus.ui.pressable
@@ -242,17 +245,45 @@ fun DetailHead(
  */
 @UnstableApi
 @Composable
-fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist? = null) {
+fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, collection: OfflineCollection? = null) {
     val colors = SonorusTheme.colors
     val state by vm.downloads.state.collectAsState()
+    val offline = LocalOffline.current
     var confirmingRemove by remember { mutableStateOf(false) }
     var confirmingCancel by remember { mutableStateOf(false) }
 
     val here = tracks.filter { !it.missing }
-    if (here.isEmpty()) return
-    val done = here.count { it.id in state.done }
-    val busy = here.count { it.id == state.active || it.id in state.queued }
-    val start = { if (playlist != null) vm.downloadPlaylist(playlist, here) else vm.download(here) }
+    // What this phone remembers of the collection, if it is one that is kept in
+    // step at all. Recomputed whenever the download state changes, which is the
+    // same moment the store behind it does.
+    val remembered = remember(state, collection?.key) {
+        collection?.let { vm.downloads.store.collectionOf(it.kind, it.selection) }
+    }
+    if (here.isEmpty() && remembered == null) return
+
+    /**
+     * The songs the button is talking about.
+     *
+     * Offline this is the *remembered* list and not what is on screen, and that
+     * is the fix for the button Florian ran into: offline a playlist page shows
+     * only the songs that are downloaded, so counting those made every
+     * half-downloaded list look complete - and the button offered to delete it
+     * instead of to finish it.
+     */
+    val ids = if (offline && remembered != null) remembered.trackIds else here.map { it.id }
+    if (ids.isEmpty()) return
+    val done = ids.count { it in state.done }
+    val busy = ids.count { it == state.active || it in state.queued }
+    val start = {
+        if (collection != null) vm.downloadCollection(collection, here) else vm.download(here)
+    }
+
+    // A collection that is kept in step is reconciled the moment its page is
+    // open, out of the list the screen has just loaded - so no request of its
+    // own. This is what makes "a song was added in the browser" show up here.
+    LaunchedEffect(collection?.key, offline, tracks.size) {
+        if (!offline && remembered != null) vm.reconcileOnScreen(remembered, tracks)
+    }
 
     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
         if (busy > 0) {
@@ -281,7 +312,7 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist
             onClick = {
                 when {
                     busy > 0 -> confirmingCancel = true
-                    done == here.size -> confirmingRemove = true
+                    done == ids.size -> confirmingRemove = true
                     else -> start()
                 }
             },
@@ -296,7 +327,7 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist
                     tint = colors.accent,
                     modifier = Modifier.size(20.dp),
                 )
-                done == here.size -> Icon(
+                done == ids.size -> Icon(
                     Icons.Filled.DownloadDone,
                     "Heruntergeladen - antippen zum Entfernen",
                     tint = colors.accent,
@@ -304,7 +335,7 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist
                 )
                 done > 0 -> Icon(
                     Icons.Filled.DownloadForOffline,
-                    "Rest herunterladen ($done von ${here.size})",
+                    "Rest herunterladen ($done von ${ids.size})",
                     tint = colors.accent,
                     modifier = Modifier.size(24.dp),
                 )
@@ -321,13 +352,15 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist
     if (confirmingRemove) {
         ConfirmDialog(
             title = "Download entfernen",
-            message = "${Fmt.plural(done, "Song", "Songs")} werden von diesem Gerät gelöscht. " +
-                "Auf dem Server bleibt alles, wie es ist.",
+            message = removeMessage(vm, remembered, done),
             confirmLabel = "Entfernen",
             onDismiss = { confirmingRemove = false },
             onConfirm = {
                 confirmingRemove = false
-                vm.removeDownloads(here)
+                // Through the collection where there is one: only the songs
+                // nothing else holds are really deleted.
+                if (remembered != null) vm.removeCollection(remembered)
+                else vm.removeDownloads(here)
             },
         )
     }
@@ -354,6 +387,34 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, playlist: Playlist
                 vm.cancelDownloadRun()
             },
         )
+    }
+}
+
+/**
+ * What the confirmation says before a collection's download is given back.
+ *
+ * It counts the songs that will really go, because the answer is not "all of
+ * them": one that also sits in a downloaded album or another playlist stays,
+ * and a dialog that promised to delete it would be lying about the thing it is
+ * asking permission for.
+ */
+private fun removeMessage(vm: AppViewModel, collection: OfflineCollection?, done: Int): String {
+    val store = vm.downloads.store
+    if (collection == null) {
+        return "${Fmt.plural(done, "Song", "Songs")} werden von diesem Gerät gelöscht. " +
+            "Auf dem Server bleibt alles, wie es ist."
+    }
+    val going = collection.trackIds.count {
+        store.isDownloaded(it) && !store.isHeld(it, exceptKey = collection.key)
+    }
+    val kept = collection.trackIds.count { store.isDownloaded(it) } - going
+    val first = "${Fmt.plural(going, "Song", "Songs")} werden von diesem Gerät gelöscht. " +
+        "Auf dem Server bleibt alles, wie es ist."
+    return if (kept > 0) {
+        "$first ${Fmt.plural(kept, "Song bleibt", "Songs bleiben")} da - " +
+            "sie hängen noch in anderen Downloads."
+    } else {
+        first
     }
 }
 
@@ -407,7 +468,15 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     shuffle = player.shuffle,
                     onToggleShuffle = { vm.toggleShuffle() },
                     onEdit = { editing = true },
-                    download = { CollectionDownload(vm, tracks) },
+                    // Kept in step with the server: a song that appears on the
+                    // record after a scan is fetched, one that goes is let go.
+                    download = {
+                        CollectionDownload(
+                            vm,
+                            tracks,
+                            OfflineCollection(kind = "album", id = album.id, name = album.title),
+                        )
+                    },
                 )
             },
         )
@@ -622,11 +691,7 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                 source = data.playlist.name,
                 sourceKey = key,
                 onGo = onGo,
-                onRemove = { track ->
-                    track.itemId?.let { item ->
-                        vm.removeFromPlaylist(id, item) { load.reload() }
-                    }
-                },
+                onRemove = { track -> vm.removeFromPlaylist(id, track) { load.reload() } },
             ),
             showAlbum = true,
             header = {
@@ -645,7 +710,17 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     shuffle = player.shuffle,
                     onToggleShuffle = { vm.toggleShuffle() },
                     // The one collection whose order has to be stored with it.
-                    download = { CollectionDownload(vm, tracks, data.playlist) },
+                    download = {
+                        CollectionDownload(
+                            vm,
+                            tracks,
+                            OfflineCollection(
+                                kind = "playlist",
+                                id = data.playlist.id,
+                                name = data.playlist.name,
+                            ),
+                        )
+                    },
                 )
             },
         )

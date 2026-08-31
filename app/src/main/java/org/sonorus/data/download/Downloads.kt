@@ -2,12 +2,12 @@ package org.sonorus.data.download
 
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import org.sonorus.data.Connectivity
 import org.sonorus.data.Quality
 import org.sonorus.data.Settings
 import org.sonorus.data.SonorusApi
-import org.sonorus.data.model.Playlist
 import org.sonorus.data.model.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -148,6 +148,39 @@ class Downloads(
     private var worker: Job? = null
     private var current: Job? = null
 
+    /**
+     * Holds the CPU while songs are being fetched.
+     *
+     * The foreground service keeps the *process* alive, which is a different
+     * promise: with the screen off the device suspends anyway, and a download
+     * sitting in `read()` is simply not running any more. It then dies of the
+     * 30-second read timeout, which is exactly what "I locked my phone and the
+     * downloads stopped" looks like - and why it happened once in four tries
+     * rather than every time, because it needs the device to really go to
+     * sleep. Playback never showed it: ExoPlayer holds a wake lock of its own.
+     *
+     * Not reference counted, released in the worker's `finally`, and acquired
+     * with a limit per song so a crash between the two cannot leave the CPU
+     * held for the rest of the day.
+     */
+    private val power = context.getSystemService(PowerManager::class.java)
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private fun holdCpu() {
+        val lock = wakeLock ?: runCatching {
+            power?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_TAG)?.apply {
+                setReferenceCounted(false)
+            }
+        }.getOrNull()?.also { wakeLock = it } ?: return
+        // Acquiring again refreshes the limit, which is what makes one call per
+        // song enough for a run of any length.
+        runCatching { lock.acquire(WAKE_LIMIT_MS) }
+    }
+
+    private fun releaseCpu() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+    }
+
     init {
         // Files can vanish under the index - a phone that ran out of space, or
         // an app whose storage was cleared. An entry promising a file that is
@@ -172,8 +205,22 @@ class Downloads(
 
     // --- Asking for downloads -------------------------------------------------
 
-    /** Queues whatever is not here yet. A missing file is never queued. */
-    fun add(tracks: List<Track>) {
+    /**
+     * Queues whatever is not here yet. A missing file is never queued.
+     *
+     * [manual] says nobody but the user asked for these songs - a single track
+     * from its menu, or a page that is not kept in sync. Such a song is held by
+     * nothing else, so it is written down as its own reason to stay; without
+     * that, the first reconcile that saw it leave a playlist would delete a
+     * download the user had fetched deliberately.
+     */
+    fun add(tracks: List<Track>, manual: Boolean = true) {
+        val wanted = tracks.filterNot { it.missing }.map { it.id }
+        // Asking for a song again is the one way to take back "I deleted this
+        // one on purpose", whether it is asked for on its own or as part of the
+        // collection it sits in.
+        store.unexclude(wanted)
+        if (manual) store.rememberManual(wanted)
         synchronized(pending) {
             for (track in tracks) {
                 if (track.missing) continue
@@ -205,20 +252,38 @@ class Downloads(
     }
 
     /**
-     * A whole playlist. The order is stored with it: an album can be rebuilt
-     * from its songs, but the order somebody put a playlist in is written
-     * nowhere else, so offline it would be lost.
+     * A whole collection - a playlist, an album, a genre or a star list.
+     *
+     * What is stored with it is two things at once: a playlist's order, which
+     * nothing in a track says, and the list of songs the server had at this
+     * moment, which every later reconcile is a diff against. The songs are
+     * **not** marked manual - they are here because the collection is, and they
+     * go again when it lets go of them.
      */
-    fun addPlaylist(playlist: Playlist, tracks: List<Track>) {
-        store.rememberCollection(
-            OfflineCollection(
-                kind = "playlist",
-                id = playlist.id,
-                name = playlist.name,
-                trackIds = tracks.map { it.id },
-            )
-        )
-        add(tracks)
+    fun addCollection(collection: OfflineCollection, tracks: List<Track>) {
+        val here = tracks.filterNot { it.missing }
+        store.rememberCollection(collection.copy(trackIds = here.map { it.id }))
+        add(here, manual = false)
+    }
+
+    /**
+     * Gives a whole collection back: it is no longer downloaded, and every song
+     * of it goes **unless something else still holds it**.
+     *
+     * That last half is the rule Florian asked for: a song that sits in this
+     * playlist and in a downloaded album as well stays when the playlist lets
+     * go, because the album has not. Answers how many files really went, so the
+     * confirmation can say it.
+     */
+    fun removeCollection(collection: OfflineCollection): Int {
+        val going = collection.trackIds.filter { !store.isHeld(it, exceptKey = collection.key) }
+        for (id in going) cancel(id)
+        store.forgetCollection(collection.key)
+        scope.launch {
+            for (id in going) store.remove(id)
+            publish()
+        }
+        return going.size
     }
 
     /** Takes a song back off the phone. */
@@ -327,49 +392,58 @@ class Downloads(
         }
         startService()
         worker = scope.launch {
-            // The genre list is the one thing offline cannot derive with the
-            // server's own ids, so it rides along with every batch.
-            runCatching { api.genres() }.onSuccess { store.rememberGenres(it.genres) }
+            try {
+                // The genre list is the one thing offline cannot derive with the
+                // server's own ids, so it rides along with every batch.
+                runCatching { api.genres() }.onSuccess { store.rememberGenres(it.genres) }
 
-            while (true) {
-                if (!allowed()) break
-                val next = synchronized(pending) { pending.removeFirstOrNull() } ?: break
-                active = next
-                progress = 0f
-                publish()
+                while (true) {
+                    if (!allowed()) break
+                    val next = synchronized(pending) { pending.removeFirstOrNull() } ?: break
+                    // Before the song, not once before the run: acquiring again
+                    // refreshes the limit, so a long queue never outlives its lock.
+                    holdCpu()
+                    active = next
+                    progress = 0f
+                    publish()
 
-                var error: Throwable? = null
-                val job = launch { runCatching { fetch(next) }.onFailure { error = it } }
-                current = job
-                job.join()
-                current = null
+                    var error: Throwable? = null
+                    val job = launch { runCatching { fetch(next) }.onFailure { error = it } }
+                    current = job
+                    job.join()
+                    current = null
 
-                if (!job.isCancelled) {
-                    error?.let { synchronized(pending) { failed[next.id] = it.message ?: "Download fehlgeschlagen." } }
+                    if (!job.isCancelled) {
+                        error?.let { synchronized(pending) { failed[next.id] = it.message ?: "Download fehlgeschlagen." } }
+                    }
+                    // Whether it arrived or failed, this song is behind the run now -
+                    // a bar that stops at a file the server refused would never
+                    // finish. The estimate is used rather than the real size so the
+                    // total it is measured against stays the one it started with.
+                    runDoneBytes += estimate(next)
+                    active = null
+                    activeBytes = 0
+                    activeExpected = 0
+                    progress = 0f
+                    publish()
                 }
-                // Whether it arrived or failed, this song is behind the run now -
-                // a bar that stops at a file the server refused would never
-                // finish. The estimate is used rather than the real size so the
-                // total it is measured against stays the one it started with.
-                runDoneBytes += estimate(next)
                 active = null
-                activeBytes = 0
-                activeExpected = 0
-                progress = 0f
-                publish()
-            }
-            active = null
-            // The run is over: a fresh tap starts a fresh one, and a cancel
-            // after this point has nothing of its own left to take back.
-            synchronized(pending) {
-                if (pending.isEmpty()) {
-                    runDownloaded.clear()
-                    runTotalBytes = 0
-                    runDoneBytes = 0
+                // The run is over: a fresh tap starts a fresh one, and a cancel
+                // after this point has nothing of its own left to take back.
+                synchronized(pending) {
+                    if (pending.isEmpty()) {
+                        runDownloaded.clear()
+                        runTotalBytes = 0
+                        runDoneBytes = 0
+                    }
                 }
+                publish()
+                stopService()
+            } finally {
+                // Also on cancellation, which is the path a stopped run takes -
+                // a lock left held there would cost battery for nothing.
+                releaseCpu()
             }
-            publish()
-            stopService()
         }
     }
 
@@ -545,6 +619,15 @@ class Downloads(
 
     private companion object {
         const val REPORT_MS = 200L
+
+        const val WAKE_TAG = "sonorus:downloads"
+
+        /**
+         * The most one song may hold the CPU. Long enough for a two-hour
+         * audiobook file on a bad connection, short enough that a lock leaked
+         * by a crash is gone before the battery is.
+         */
+        const val WAKE_LIMIT_MS = 2 * 60 * 60 * 1000L
 
         /** The one profile's target, for the size estimate. */
         const val OPUS_BITS = 128_000

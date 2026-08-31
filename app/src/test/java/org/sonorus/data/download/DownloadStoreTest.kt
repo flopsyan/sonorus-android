@@ -88,7 +88,7 @@ class DownloadStoreTest {
     }
 
     @Test
-    fun `removing a song takes its file and its playlist entry with it`() {
+    fun `removing a song takes its file, and leaves the playlist's own list alone`() {
         store.put(store(1))
         store.put(store(2))
         store.rememberCollection(OfflineCollection(id = 5, name = "Abends", trackIds = listOf(1, 2)))
@@ -97,7 +97,12 @@ class DownloadStoreTest {
 
         assertFalse(store.targetOf(1, "mp3").exists())
         assertTrue(store.targetOf(2, "mp3").exists())
-        assertEquals(listOf(2), store.snapshot.playlists.single().trackIds)
+        // The list is what the *server* said the playlist holds, and it is the
+        // baseline the next reconcile diffs against. Editing it from this side
+        // would read as "the server dropped this song" and delete it a second
+        // time - or fetch it back, because the server still has it. Deleting a
+        // download on purpose is recorded as an exclusion instead.
+        assertEquals(listOf(1, 2), store.snapshot.playlists.single().trackIds)
     }
 
     @Test
@@ -108,6 +113,82 @@ class DownloadStoreTest {
         store.remove(1)
 
         assertTrue(store.snapshot.playlists.isEmpty())
+    }
+
+    // --- Who still wants a song, and who deleted one on purpose ---------------
+
+    @Test
+    fun `a song is held by every collection that lists it, and by a hand download`() {
+        store.rememberCollection(OfflineCollection(kind = "playlist", id = 5, trackIds = listOf(1, 2)))
+        store.rememberCollection(OfflineCollection(kind = "album", id = 9, trackIds = listOf(2, 3)))
+        store.rememberManual(listOf(4))
+
+        val playlist = OfflineCollection(kind = "playlist", id = 5).key
+        // Song 2 is in the album as well: the playlist letting go is not enough.
+        assertTrue(store.isHeld(2, exceptKey = playlist))
+        // Song 1 is only in this playlist, so it really is going.
+        assertFalse(store.isHeld(1, exceptKey = playlist))
+        // And one somebody fetched on its own is held by that alone.
+        assertTrue(store.isHeld(4, exceptKey = playlist))
+        assertEquals(setOf(2, 3, 4), store.heldBy(exceptKey = playlist))
+    }
+
+    @Test
+    fun `a genre selection and a single genre are different collections`() {
+        store.rememberCollection(OfflineCollection(kind = "genre", id = 3, ids = listOf(3), trackIds = listOf(1)))
+        store.rememberCollection(
+            OfflineCollection(kind = "genre", id = 3, ids = listOf(3, 7), trackIds = listOf(2))
+        )
+
+        // Matched on the whole selection, or `/genres/3,7` would overwrite the
+        // baseline of `/genres/3`.
+        assertEquals(2, store.collections.size)
+        assertEquals(listOf(1), store.collectionOf("genre", listOf(3))?.trackIds)
+        assertEquals(listOf(2), store.collectionOf("genre", listOf(3, 7))?.trackIds)
+    }
+
+    @Test
+    fun `a song deleted on purpose stays deleted until it is asked for again`() {
+        store.exclude(listOf(3))
+        assertEquals(listOf(3), store.snapshot.excluded)
+
+        store.unexclude(listOf(3))
+        assertTrue(store.snapshot.excluded.isEmpty())
+    }
+
+    @Test
+    fun `a playlist made on this phone keeps its songs when it gets a real id`() {
+        store.put(store(1))
+        store.rememberCollection(OfflineCollection(kind = "playlist", id = -1, name = "Flug", trackIds = listOf(1)))
+
+        store.remapCollection("playlist", local = -1, real = 42, name = "Flug")
+
+        assertNull(store.collectionOf("playlist", listOf(-1)))
+        assertEquals(listOf(1), store.collectionOf("playlist", listOf(42))?.trackIds)
+        assertEquals("Flug", store.collectionOf("playlist", listOf(42))?.name)
+    }
+
+    @Test
+    fun `a song can be put into a playlist and taken out again without a server`() {
+        store.addToCollection(7, 1, name = "Abends")
+        store.addToCollection(7, 2)
+        assertEquals(listOf(1, 2), store.collectionOf("playlist", listOf(7))?.trackIds)
+        assertEquals("Abends", store.collectionOf("playlist", listOf(7))?.name)
+
+        store.removeFromCollection(7, 1)
+        assertEquals(listOf(2), store.collectionOf("playlist", listOf(7))?.trackIds)
+
+        // Twice is once: a song sits in a playlist or it does not.
+        store.addToCollection(7, 2)
+        assertEquals(listOf(2), store.collectionOf("playlist", listOf(7))?.trackIds)
+    }
+
+    @Test
+    fun `a star given without a server is on the row after a restart`() {
+        store.put(store(1))
+        store.applyRating(1, 4)
+
+        assertEquals(4, DownloadStore(root).entryOf(1)?.track?.stars)
     }
 
     @Test

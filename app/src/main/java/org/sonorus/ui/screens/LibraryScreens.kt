@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
+import org.sonorus.data.download.OfflineCollection
 import org.sonorus.data.model.Album
 import org.sonorus.data.model.SortPref
 import org.sonorus.data.model.Track
@@ -496,7 +497,20 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                         onPlay = { vm.player.playCollection(data.genre.tracks, data.genre.name, key) },
                         shuffle = player.shuffle,
                         onToggleShuffle = { vm.toggleShuffle() },
-                        download = { CollectionDownload(vm, data.genre.tracks) },
+                        // A downloaded genre is kept in step: a song that is
+                        // tagged into it later is fetched with the rest.
+                        download = {
+                            CollectionDownload(
+                                vm,
+                                data.genre.tracks,
+                                OfflineCollection(
+                                    kind = "genre",
+                                    id = ids.firstOrNull() ?: 0,
+                                    name = data.genre.name,
+                                    ids = ids,
+                                ),
+                            )
+                        },
                     )
                     all.value?.genres?.let { genres ->
                         PickerRow(
@@ -577,7 +591,21 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
                         onPlay = { vm.player.playCollection(data.tracks, title, key) },
                         shuffle = player.shuffle,
                         onToggleShuffle = { vm.toggleShuffle() },
-                        download = { CollectionDownload(vm, data.tracks) },
+                        // Star playlists move by themselves - a song rated up
+                        // into this selection is fetched, one rated out of it
+                        // goes again unless something else holds it.
+                        download = {
+                            CollectionDownload(
+                                vm,
+                                data.tracks,
+                                OfflineCollection(
+                                    kind = "stars",
+                                    id = values.firstOrNull() ?: 0,
+                                    name = title,
+                                    ids = values,
+                                ),
+                            )
+                        },
                     )
                     PickerRow(
                         items = listOf(5, 4, 3, 2, 1, 0).map { it to starLabel(it) },

@@ -2,6 +2,7 @@ package org.sonorus.data.download
 
 import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.Genre
+import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Track
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -119,11 +120,127 @@ class DownloadStore(private val root: File) {
         if (path in s.covers) s else s.copy(covers = s.covers + path)
     }
 
-    /** The order somebody chose, which nothing in a track could say. */
+    /**
+     * What a collection held when the server was last asked - and, for a
+     * playlist, the order somebody chose.
+     *
+     * Matched on [OfflineCollection.key] rather than on the plain id, or the
+     * genre page `/genres/3,7` and the page `/genres/3` would overwrite each
+     * other's baseline.
+     */
     fun rememberCollection(collection: OfflineCollection) = update { s ->
-        s.copy(playlists = s.playlists.filterNot {
-            it.kind == collection.kind && it.id == collection.id
-        } + collection)
+        s.copy(playlists = s.playlists.filterNot { it.key == collection.key } + collection)
+    }
+
+    /** The collections this phone is keeping in step with the server. */
+    val collections: List<OfflineCollection> get() = state.playlists
+
+    fun collectionOf(kind: String, ids: List<Int>): OfflineCollection? {
+        val key = OfflineCollection(kind = kind, id = ids.firstOrNull() ?: 0, ids = ids).key
+        return state.playlists.firstOrNull { it.key == key }
+    }
+
+    /** This collection is no longer downloaded as a whole. */
+    fun forgetCollection(key: String) = update { s ->
+        s.copy(playlists = s.playlists.filterNot { it.key == key })
+    }
+
+    /**
+     * Songs somebody asked for on their own. They are held by nothing else, so
+     * without this they would be the first thing a reconcile deleted.
+     */
+    fun rememberManual(ids: List<Int>) = update { s ->
+        val fresh = ids.filterNot { it in s.manual }
+        if (fresh.isEmpty()) s else s.copy(manual = s.manual + fresh)
+    }
+
+    /**
+     * Whether anything still wants [trackId] on this phone: a collection that
+     * holds it, or the fact that somebody once fetched it by hand.
+     *
+     * [exceptKey] is the collection that is letting go of it right now, and it
+     * must not count itself.
+     */
+    fun isHeld(trackId: Int, exceptKey: String? = null): Boolean {
+        val s = state
+        if (trackId in s.manual) return true
+        return s.playlists.any { it.key != exceptKey && trackId in it.trackIds }
+    }
+
+    /** The same question for a whole list at once - what a reconcile needs. */
+    fun heldBy(exceptKey: String? = null): Set<Int> {
+        val s = state
+        return s.manual.toSet() + s.playlists.filter { it.key != exceptKey }.flatMap { it.trackIds }
+    }
+
+    /**
+     * "I deleted this one on purpose" - remembered so the collection it belongs
+     * to does not fetch it back on the next sync. See [OfflineSnapshot.excluded].
+     */
+    fun exclude(trackIds: List<Int>) = update { s ->
+        val fresh = trackIds.filterNot { it in s.excluded }
+        if (fresh.isEmpty()) s else s.copy(excluded = s.excluded + fresh)
+    }
+
+    /**
+     * A collection that lived on this phone only has a real id now.
+     *
+     * The songs stay exactly where they are - only the name of the box changes,
+     * which is what keeps a playlist created in a plane from turning into a
+     * second, empty list the moment it is synced.
+     */
+    fun remapCollection(kind: String, local: Int, real: Int, name: String) = update { s ->
+        val old = s.playlists.firstOrNull { it.kind == kind && it.id == local } ?: return@update s
+        s.copy(
+            playlists = s.playlists.filterNot { it.key == old.key } +
+                old.copy(id = real, ids = emptyList(), name = name.ifEmpty { old.name }),
+        )
+    }
+
+    /**
+     * A song into, or out of, a playlist that lives on this phone.
+     *
+     * The collection's list is the baseline the next reconcile diffs against,
+     * so an edit made offline has to be written into it: once the queued write
+     * reaches the server, the server holds the same list, and the sync then
+     * has nothing to do - which is the correct answer.
+     */
+    fun addToCollection(playlistId: Int, trackId: Int, name: String = "") = update { s ->
+        val old = s.playlists.firstOrNull { it.kind == "playlist" && it.id == playlistId }
+        val next = (old ?: OfflineCollection(kind = "playlist", id = playlistId, name = name))
+            .let { it.copy(trackIds = it.trackIds.filterNot { id -> id == trackId } + trackId) }
+        s.copy(playlists = s.playlists.filterNot { it.key == next.key } + next)
+    }
+
+    fun removeFromCollection(playlistId: Int, trackId: Int) = update { s ->
+        val old = s.playlists.firstOrNull { it.kind == "playlist" && it.id == playlistId }
+            ?: return@update s
+        s.copy(
+            playlists = s.playlists.filterNot { it.key == old.key } +
+                old.copy(trackIds = old.trackIds.filterNot { it == trackId }),
+        )
+    }
+
+    /**
+     * The playlist tree as this phone last saw it, changed by hand.
+     *
+     * Offline this is what the sidebar draws, so a list renamed or deleted
+     * without a server has to be changed here too - otherwise the app would
+     * accept the edit and go on showing the old name until the next bootstrap.
+     */
+    fun updateTree(block: (PlaylistTree) -> PlaylistTree) {
+        synchronized(lock) {
+            val account = state.account ?: return
+            val next = account.copy(playlists = block(account.playlists))
+            writeAccount(next)
+            publish(state.copy(account = next))
+        }
+    }
+
+    /** Asking for these songs again takes back the exclusion. */
+    fun unexclude(trackIds: List<Int>) = update { s ->
+        if (trackIds.none { it in s.excluded }) s
+        else s.copy(excluded = s.excluded.filterNot { it in trackIds })
     }
 
     fun rememberGenres(genres: List<Genre>) = update { s -> s.copy(genres = genres) }
@@ -150,14 +267,34 @@ class DownloadStore(private val root: File) {
         }
     }
 
-    /** Drops one song and its file. The artwork stays - other songs share it. */
+    /**
+     * Drops one song and its file. The artwork stays - other songs share it.
+     *
+     * **The collections keep their track lists**, which is the opposite of what
+     * this used to do. They are the baseline the next reconcile diffs against,
+     * and a baseline edited from this side would read as "the server dropped
+     * this song" - so the sync would delete it a second time, or fetch it back
+     * because the server still has it. A collection is only forgotten once
+     * nothing of it is left on the phone at all.
+     */
     fun remove(trackId: Int) = update { s ->
         s.tracks.firstOrNull { it.track.id == trackId }?.let { File(audioDir, it.file).delete() }
+        val kept = s.tracks.filterNot { it.track.id == trackId }
+        val have = kept.map { it.track.id }.toSet()
         s.copy(
-            tracks = s.tracks.filterNot { it.track.id == trackId },
-            playlists = s.playlists.map { c -> c.copy(trackIds = c.trackIds.filterNot { it == trackId }) }
-                .filter { it.trackIds.isNotEmpty() },
+            tracks = kept,
+            manual = s.manual.filterNot { it == trackId },
+            playlists = s.playlists.filter { c -> c.trackIds.any { it in have } },
         )
+    }
+
+    /** The rating somebody gave offline, written onto the row this phone holds. */
+    fun applyRating(trackId: Int, stars: Int) = update { s ->
+        val entry = s.tracks.firstOrNull { it.track.id == trackId } ?: return@update s
+        if (entry.track.stars == stars) return@update s
+        s.copy(tracks = s.tracks.map {
+            if (it.track.id == trackId) it.copy(track = it.track.copy(stars = stars)) else it
+        })
     }
 
     /**

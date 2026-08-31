@@ -63,6 +63,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
@@ -264,6 +266,7 @@ fun SharedTransitionScope.FullPlayer(
     var showOffset by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
+    var showStreamQuality by remember { mutableStateOf(false) }
     var confirmingCancel by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
     // What this phone has of the song. Read here rather than passed in, so the
@@ -887,7 +890,14 @@ fun SharedTransitionScope.FullPlayer(
                 QualityChip(
                     label = vm.formatOf(track),
                     modifier = Modifier.align(Alignment.Center),
-                    onClick = { vm.toggleStreamQuality() },
+                    // A sheet with the choices, not a switch. Tapping used to
+                    // flip to the other quality, which only works while there
+                    // are exactly two of them - and reads as a slip of the
+                    // finger when there is no way to see what will happen.
+                    onClick = {
+                        val blocked = vm.qualityPickerBlocked()
+                        if (blocked != null) vm.say(blocked) else showStreamQuality = true
+                    },
                 )
                 Row(
                     Modifier.fillMaxWidth(),
@@ -947,6 +957,10 @@ fun SharedTransitionScope.FullPlayer(
             onQuality = { showQuality = true },
             onGo = onGo,
         )
+    }
+
+    if (showStreamQuality) {
+        StreamQualitySheet(vm, onDismiss = { showStreamQuality = false })
     }
 
     if (showQuality) {
@@ -1230,6 +1244,7 @@ private fun QualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
     val stream by vm.streamQuality.collectAsState()
     val download by vm.downloadQuality.collectAsState()
     val ready by vm.qualityReady.collectAsState()
+    val allowed by vm.losslessAllowed.collectAsState()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = colors.surface) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
@@ -1249,6 +1264,7 @@ private fun QualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
                 label = "Streamen",
                 hint = "Gilt sofort, auch für den Song, der gerade läuft.",
                 selected = stream,
+                losslessAllowed = allowed,
                 onPick = { vm.setStreamQuality(it) },
             )
             Spacer(Modifier.height(18.dp))
@@ -1262,11 +1278,97 @@ private fun QualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * The picker behind the chip under the transport.
+ *
+ * Only the streaming quality: that is what the chip is about, and what a
+ * download was fetched at was decided when it was fetched. The list is the
+ * shape this has to be in, not a toggle - a third profile would break a toggle,
+ * and a tap that silently changes something is a tap nobody can aim.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@UnstableApi
+@Composable
+private fun StreamQualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
+    val colors = SonorusTheme.colors
+    val sheet = rememberModalBottomSheetState()
+    val stream by vm.streamQuality.collectAsState()
+    val allowed by vm.losslessAllowed.collectAsState()
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = colors.surface) {
+        Column(Modifier.padding(bottom = 28.dp)) {
+            RackLabelText("Streamen", Modifier.padding(horizontal = 20.dp))
+            Spacer(Modifier.height(10.dp))
+            QualityOptions(
+                selected = stream,
+                losslessAllowed = allowed,
+                onPick = {
+                    vm.setStreamQuality(it)
+                    onDismiss()
+                },
+            )
+        }
+    }
+}
+
+/**
+ * The qualities as a list, **best at the top**.
+ *
+ * That order is [Quality.entries] itself and not a sort: the enum is written
+ * from the largest to the smallest, and a third profile added in the middle
+ * would land in the right place by being declared there.
+ */
+@Composable
+private fun QualityOptions(
+    selected: Quality,
+    losslessAllowed: Boolean,
+    onPick: (Quality) -> Unit,
+) {
+    val colors = SonorusTheme.colors
+    for (quality in Quality.entries) {
+        val blocked = quality == Quality.ORIGINAL && !losslessAllowed
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .pressable(onClick = { onPick(quality) })
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(
+                if (quality == selected) Icons.Filled.RadioButtonChecked else Icons.Filled.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = when {
+                    blocked -> colors.textFaint
+                    quality == selected -> colors.accent
+                    else -> colors.textDim
+                },
+                modifier = Modifier.size(20.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    quality.label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (blocked) colors.textFaint else colors.text,
+                )
+                if (blocked) {
+                    Text(
+                        "Nur über WLAN",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textFaint,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun QualityRow(
     label: String,
     hint: String,
     selected: Quality,
+    losslessAllowed: Boolean = true,
     onPick: (Quality) -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -1277,7 +1379,10 @@ private fun QualityRow(
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (quality in Quality.entries) {
-                Chip(quality.label, selected == quality) { onPick(quality) }
+                val blocked = quality == Quality.ORIGINAL && !losslessAllowed
+                Chip(if (blocked) "${quality.label} (WLAN)" else quality.label, selected == quality) {
+                    onPick(quality)
+                }
             }
         }
     }

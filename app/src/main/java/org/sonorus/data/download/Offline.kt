@@ -56,18 +56,43 @@ data class DownloadedTrack(
 )
 
 /**
- * A collection that was downloaded as a whole. Only playlists are read back -
- * an album, an artist or a genre is derived from the songs themselves, but a
- * playlist is an order somebody chose and nothing in a track says it.
+ * A collection that was downloaded as a whole.
+ *
+ * Two jobs, and the second one is why albums, genres and star lists are in here
+ * as well since 2026-08-31, where it used to hold playlists only:
+ *
+ *  - **A playlist's order**, which nothing in a track says, so offline it would
+ *    be lost. Only playlists are read back for this.
+ *  - **What the collection held the last time the server was asked**, which is
+ *    the baseline every later reconcile is a diff against: songs that appeared
+ *    are fetched, songs that went are deleted unless something else still holds
+ *    them. See `DownloadSync`.
+ *
+ * The baseline is deliberately the last *server* answer and not what lies on
+ * disk. A song the user deleted by hand is in neither half of the diff, so it
+ * stays deleted instead of being fetched again on the next sync.
  */
 @Serializable
 data class OfflineCollection(
+    /** `playlist`, `album`, `genre` or `stars`. */
     val kind: String = "playlist",
     val id: Int = 0,
     val name: String = "",
     /** In playlist order, including songs that are no longer downloaded. */
     val trackIds: List<Int> = emptyList(),
-)
+    /**
+     * The whole selection behind a genre or a star page, which can be several
+     * at once (`/genres/3,7`, `/stars/4,5`). Empty means the single [id], which
+     * is what a playlist and an album always are.
+     */
+    val ids: List<Int> = emptyList(),
+) {
+    /** The one string that names this collection - `playlist:12`, `stars:4,5`. */
+    val key: String get() = "$kind:${selection.joinToString(",")}"
+
+    /** The ids this collection really stands for. */
+    val selection: List<Int> get() = ids.ifEmpty { listOf(id) }
+}
 
 /**
  * Everything the app knows without a server: the songs on this phone, the
@@ -90,6 +115,28 @@ data class OfflineSnapshot(
     /** Server paths like `/covers/album-3.jpg` whose picture lies on this phone. */
     val covers: List<String> = emptyList(),
     val playlists: List<OfflineCollection> = emptyList(),
+    /**
+     * Songs that were asked for on their own rather than as part of a
+     * collection - one track's download from its menu, or an artist page, which
+     * is deliberately not kept in sync.
+     *
+     * They are what keeps reference counting honest: a song is deleted when the
+     * last collection lets go of it, and one somebody fetched by hand is held
+     * by nothing else. Without this list, taking a song out of a playlist would
+     * quietly delete a download nobody asked to lose.
+     */
+    val manual: List<Int> = emptyList(),
+    /**
+     * Songs the user deleted by hand although a collection they belong to is
+     * still downloaded.
+     *
+     * Without this, "Download entfernen" on a single song of a downloaded
+     * playlist would be a button that undoes itself: the next reconcile sees a
+     * song the collection holds and the phone does not, and fetches it back.
+     * Tapping download on the collection again clears the exclusions of its
+     * songs, which is the one way to say "no, do fetch them after all".
+     */
+    val excluded: List<Int> = emptyList(),
     /** The server's genre list as it was, so an offline genre keeps its real id. */
     val genres: List<Genre> = emptyList(),
     /**
@@ -172,7 +219,11 @@ object Offline {
     private fun tree(s: OfflineSnapshot): PlaylistTree {
         val have = s.tracks.map { it.track.id }.toSet()
         val usable = s.playlists
-            .filter { it.kind == "playlist" && it.trackIds.any { id -> id in have } }
+            // A list made on this phone shows even while it is empty. It has a
+            // negative id, it exists nowhere else yet, and hiding it until it
+            // has a song in it would hide the list somebody just made in order
+            // to put songs in it.
+            .filter { it.kind == "playlist" && (it.id < 0 || it.trackIds.any { id -> id in have }) }
             .associateBy { it.id }
         if (usable.isEmpty()) return PlaylistTree()
 

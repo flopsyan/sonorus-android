@@ -25,6 +25,21 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_WIFI_ONLY, false)
         set(value) = prefs.edit().putBoolean(KEY_WIFI_ONLY, value).apply()
 
+    /**
+     * Hold the original back until the phone is on Wi-Fi.
+     *
+     * A flow, unlike [wifiOnly], because it is read while a track is being
+     * opened and drawn in two places at once - see [QualityPolicy], which is
+     * where the rule itself lives.
+     */
+    private val _losslessWifiOnly = MutableStateFlow(prefs.getBoolean(KEY_LOSSLESS_WIFI, false))
+    val losslessWifiOnly: StateFlow<Boolean> = _losslessWifiOnly.asStateFlow()
+
+    fun setLosslessWifiOnly(on: Boolean) {
+        prefs.edit().putBoolean(KEY_LOSSLESS_WIFI, on).apply()
+        _losslessWifiOnly.value = on
+    }
+
     /** The user's own offline switch, the way Spotify has one. */
     var offlineMode: Boolean
         get() = prefs.getBoolean(KEY_OFFLINE, false)
@@ -83,6 +98,7 @@ class Settings(context: Context) {
 
     private companion object {
         const val KEY_WIFI_ONLY = "wifiOnly"
+        const val KEY_LOSSLESS_WIFI = "losslessWifiOnly"
         const val KEY_OFFLINE = "offlineMode"
         const val KEY_QUEUE = "playerQueue"
         const val KEY_STREAM_QUALITY = "streamQuality"

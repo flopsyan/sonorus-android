@@ -17,6 +17,7 @@ import org.sonorus.data.Library
 import org.sonorus.data.PlayLog
 import org.sonorus.data.model.Chapter
 import org.sonorus.data.Quality
+import org.sonorus.data.QualityPolicy
 import org.sonorus.data.Settings
 import org.sonorus.data.Shuffle
 import org.sonorus.data.SonorusApi
@@ -106,6 +107,8 @@ class PlayerController(
     private val api: SonorusApi,
     private val library: Library,
     private val settings: Settings,
+    /** Whether the original may be asked for on this connection - see [QualityPolicy]. */
+    private val quality: QualityPolicy,
     private val playLog: PlayLog,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
 ) {
@@ -929,7 +932,10 @@ class PlayerController(
                     // Streamed at whatever this phone is set to. A download is
                     // never re-fetched for it: what is here is here, and the
                     // point of a download is that nothing is fetched twice.
-                    ?: api.streamUrl(track.id, settings.streamQuality.value).toUri()
+                    // The policy, not the plain setting: on mobile data with
+                    // "Lossless nur über WLAN" on, this is Opus even though the
+                    // setting says original.
+                    ?: api.streamUrl(track.id, quality.qualityNow()).toUri()
             )
             .setMediaId(track.id.toString())
             .setMediaMetadata(
@@ -959,7 +965,7 @@ class PlayerController(
      */
     fun servedQuality(track: Track): Quality {
         library.store.entryOf(track.id)?.let { return Quality.of(it.quality) }
-        return Quality.served(track, settings.streamQuality.value)
+        return Quality.served(track, quality.qualityNow())
     }
 
     private fun pushPlaylist(tracks: List<Track>, index: Int, positionMs: Long) {

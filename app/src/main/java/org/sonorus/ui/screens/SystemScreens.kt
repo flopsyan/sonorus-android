@@ -145,6 +145,7 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val theme by vm.theme.collectAsState()
     val offline by vm.offline.collectAsState()
+    val waiting by vm.waitingWrites.collectAsState()
     val downloads by vm.downloads.state.collectAsState()
     var scan by remember { mutableStateOf<ScanState?>(null) }
     var lastScan by remember { mutableStateOf<String?>(null) }
@@ -199,6 +200,24 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
         Panel("Downloads") {
             Readout("Songs auf dem Gerät", Fmt.number(downloads.done.size))
             Readout("Belegt", Fmt.bytes(downloads.bytes))
+            val downloadsWifiOnly by vm.downloads.wifiOnly.collectAsState()
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Nur über WLAN", downloadsWifiOnly) {
+                    vm.setDownloadsWifiOnly(!downloadsWifiOnly)
+                }
+            }
+            Text(
+                "Mit mobilen Daten wartet die Warteschlange, statt zu laden.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textFaint,
+            )
+            waiting.takeIf { it > 0 }?.let {
+                Text(
+                    "${Fmt.plural(it, "Änderung wartet", "Änderungen warten")} auf den Server.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textDim,
+                )
+            }
             LinkRow(
                 "Downloads verwalten",
                 "Was ohne Verbindung spielt, und wie geladen wird",
@@ -286,9 +305,14 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     color = colors.textDim,
                 )
                 Text("Streamen", style = MaterialTheme.typography.bodyLarge, color = colors.text)
+                val losslessAllowed by vm.losslessAllowed.collectAsState()
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (quality in Quality.entries) {
-                        Chip(quality.label, streamQuality == quality) { vm.setStreamQuality(quality) }
+                        val blocked = quality == Quality.ORIGINAL && !losslessAllowed
+                        Chip(
+                            if (blocked) "${quality.label} (WLAN)" else quality.label,
+                            streamQuality == quality,
+                        ) { vm.setStreamQuality(quality) }
                     }
                 }
                 Text("Herunterladen", style = MaterialTheme.typography.bodyLarge, color = colors.text)
@@ -297,6 +321,18 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                         Chip(quality.label, downloadQuality == quality) { vm.setDownloadQuality(quality) }
                     }
                 }
+                Text("Lossless", style = MaterialTheme.typography.bodyLarge, color = colors.text)
+                val losslessWifiOnly by vm.losslessWifiOnly.collectAsState()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("Nur über WLAN", losslessWifiOnly) {
+                        vm.setLosslessWifiOnly(!losslessWifiOnly)
+                    }
+                }
+                Text(
+                    "Mit mobilen Daten läuft dann Opus 128, bis wieder WLAN da ist.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textFaint,
+                )
                 // The promise worth writing down: this decides what the *next*
                 // download asks for and nothing else. A song fetched as FLAC
                 // stays a FLAC, and switching here never deletes anything.

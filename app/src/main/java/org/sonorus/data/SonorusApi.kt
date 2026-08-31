@@ -307,6 +307,13 @@ class SonorusApi(private val session: Session) {
      * heard offline and is going out late: without it the server stamps the play
      * on arrival, and a fortnight away would land on one day. An ordinary play
      * leaves it empty and is stamped when it happens, as it always was.
+     *
+     * **It has to carry its zone**, which `Instant.toString()` does. Measured
+     * 2026-08-31: `recordPlay` parses the value with `new Date(...)`, and Node
+     * reads a space-separated `2026-08-30 23:54:37` as the *server's* local
+     * time - the same play came back two hours early on a CEST server, which is
+     * enough to file a late evening under the day before. With the `Z` there is
+     * nothing left to interpret.
      */
     suspend fun startPlay(trackId: Int, seconds: Double, playedAt: String = ""): PlayResponse =
         post("/api/plays", buildJsonObject {
