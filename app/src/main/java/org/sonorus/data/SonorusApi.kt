@@ -36,13 +36,22 @@ class ApiException(val code: String, override val message: String) : IOException
  * deliberately lets such requests through ("CSRF is strictly a browser
  * problem"). So the app speaks the same API the web client does.
  */
+/**
+ * How every answer from the server is read.
+ *
+ * Out here rather than inside [SonorusApi] so a test can decode a recorded body
+ * with the *real* settings. A body that decodes here and not in a test with a
+ * hand-written `Json { }` teaches nothing about the app.
+ */
+internal val ApiJson = Json {
+    ignoreUnknownKeys = true
+    coerceInputValues = true
+    explicitNulls = false
+}
+
 class SonorusApi(private val session: Session) {
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        coerceInputValues = true
-        explicitNulls = false
-    }
+    private val json = ApiJson
 
     val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(session.cookieJar)

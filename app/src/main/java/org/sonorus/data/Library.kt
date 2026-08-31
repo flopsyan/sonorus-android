@@ -21,12 +21,41 @@ import org.sonorus.data.model.SpokenAuthorResponse
 import org.sonorus.data.model.SpokenResponse
 import org.sonorus.data.model.StarsResponse
 import org.sonorus.data.model.TracksResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerializationException
+
+/**
+ * What a thrown error says about **the server**, which is a different question
+ * from what it says about the request.
+ *
+ * Pure and out here so it can be tested: it is the rule the whole offline mode
+ * turns on, and getting it wrong is not a wrong error message, it is an app that
+ * silently stops using the network. Three kinds of failure, and only one of them
+ * is a server that is gone:
+ *
+ *  - **The server said no.** A 404 for a track that has since been deleted, a
+ *    403 for an admin route - it answered, so it is there. Dropping the app
+ *    offline over one bad id would be absurd.
+ *  - **The server answered and the app could not read the answer.** A field the
+ *    server renamed, a type it changed. That is a contract that has drifted, and
+ *    the one thing it is *not* is a network that is gone. Counting it as one is
+ *    what put the entire app - music, podcasts, everything - into offline mode
+ *    the moment Hörspiele was tapped; see `SpokenWireTest`.
+ *  - **Nothing answered at all**, or something that is not Sonorus did
+ *    (`not_json` is a captive portal or a proxy). Only this one is offline.
+ */
+internal fun serverAnswered(error: Throwable): Boolean = when (error) {
+    is ApiException -> error.code != "not_json" && error.code != "bad_url"
+    is SerializationException -> true
+    else -> false
+}
 
 /**
  * Where a screen gets its data - the server while there is one, the downloads
@@ -52,11 +81,14 @@ class Library(
     val store: DownloadStore,
     private val connectivity: Connectivity,
     private val settings: Settings,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
 ) {
 
     private val _manual = MutableStateFlow(settings.offlineMode)
     private val _unreachable = MutableStateFlow(false)
+
+    /** The probe that decides whether a failed read was really the server. */
+    private var confirming: Job? = null
 
     /**
      * Written by hand rather than combined out of the three sources, and that is
@@ -87,8 +119,62 @@ class Library(
     fun setManualOffline(on: Boolean) {
         settings.offlineMode = on
         _manual.value = on
+        // A phone switched offline by hand makes no requests at all, so a probe
+        // that is still waiting to run is called off rather than left to fire.
+        if (on) confirming?.cancel()
         if (!on) _unreachable.value = false
         recompute()
+    }
+
+    /**
+     * One read failed on the transport - and one failure is not a dead server.
+     *
+     * This is the difference between the app Florian had and the one he asked
+     * for: any single hiccup - a handover between Wi-Fi and mobile, a DNS lookup
+     * that lost a second, a hotspot going quiet - flipped the whole library over
+     * to the downloads at once, and it did so while the phone plainly had
+     * signal. Spotify does not do that, and neither does this now: the failure
+     * is a *suspicion*, and it has to be confirmed by a request of the app's
+     * own before anything changes on screen.
+     *
+     * The one case that stays instant is the one that matters most: **no radio
+     * at all needs no confirming.** A phone in a plane must not spend seconds
+     * pretending it might still get through, and Android already knows the
+     * answer. The cold start is instant for the same reason ([_offline] reads
+     * the radio before the first request), and so is a boot whose own bootstrap
+     * failed - [org.sonorus.ui.AppViewModel] calls [markUnreachable] outright
+     * there, because that read *was* the confirmation.
+     */
+    private fun reportUnreachable() {
+        if (_unreachable.value || _manual.value) return
+        if (!connectivity.online.value) {
+            markUnreachable()
+            return
+        }
+        if (confirming?.isActive == true) return
+        confirming = scope.launch {
+            // A moment for a handover or a stalled lookup to pass, and then a
+            // second opinion. It is a second strike rather than a second wait:
+            // the read that failed has already spent its own timeout.
+            delay(CONFIRM_DELAY_MS)
+            if (_manual.value || _unreachable.value) return@launch
+            if (!connectivity.online.value) {
+                markUnreachable()
+                return@launch
+            }
+            val alive = try {
+                // A bootstrap, the same as [watchServer]: it is the request the
+                // app wants next anyway, so a probe that works leaves the
+                // account snapshot fresh instead of only clearing a flag.
+                store.rememberAccount(api.bootstrap())
+                true
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Throwable) {
+                serverAnswered(error)
+            }
+            if (alive) markReachable() else markUnreachable()
+        }
     }
 
     /**
@@ -142,25 +228,27 @@ class Library(
 
     /**
      * Runs an online read and keeps the reachability flag honest out of ordinary
-     * traffic, so no caller has to remember to.
+     * traffic, so no caller has to remember to. [serverAnswered] is the rule it
+     * applies; a failure that rule cannot vouch for is a suspicion and goes to
+     * [reportUnreachable] rather than straight to the banner.
      *
-     * The distinction that matters: **an error the server itself produced proves
-     * the server is there.** A 404 for a track that has since been deleted is
-     * not a dead server, and treating it as one would drop the whole app into
-     * offline mode over one bad id. A transport failure - no DNS, no route, a
-     * timeout - is the opposite, and so is an answer that did not come from
-     * Sonorus at all (`not_json`, which is a captive portal or a proxy having
-     * answered instead).
+     * **A cancelled read is not a failure at all.** Every screen fetches inside
+     * a `LaunchedEffect` (see `rememberLoad`), so leaving a page while its
+     * request is in flight cancels it - which is to say that scrolling through
+     * the app fast enough throws `CancellationException` in here several times a
+     * minute. Counting those as a dead server is what produced the offline
+     * banner that appeared out of nowhere on a phone with full signal and only
+     * went away when the app was restarted.
      */
     private suspend fun <T> reachableAfter(block: suspend () -> T): T {
         try {
             val result = block()
             markReachable()
             return result
+        } catch (cancel: CancellationException) {
+            throw cancel
         } catch (error: Throwable) {
-            val fromServer =
-                error is ApiException && error.code != "not_json" && error.code != "bad_url"
-            if (fromServer) markReachable() else markUnreachable()
+            if (serverAnswered(error)) markReachable() else reportUnreachable()
             throw error
         }
     }
@@ -272,5 +360,13 @@ class Library(
          * than needing the app restarted.
          */
         const val PROBE_INTERVAL_MS = 20_000L
+
+        /**
+         * How long a failed read is only a suspicion. Long enough for a handover
+         * or a stalled lookup to right itself, short enough that a server that
+         * really is gone is admitted to before the user has read the error and
+         * reached for the retry button.
+         */
+        const val CONFIRM_DELAY_MS = 2_000L
     }
 }

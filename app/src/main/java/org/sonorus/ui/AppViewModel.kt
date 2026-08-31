@@ -25,6 +25,7 @@ import org.sonorus.data.model.Track
 import org.sonorus.data.model.TreeResponse
 import org.sonorus.player.PlayerController
 import org.sonorus.ui.theme.ThemeMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -193,20 +194,25 @@ class AppViewModel : ViewModel() {
             // shell is already up and playing, and tearing it down for a moment
             // would throw the navigation away and blink the player bar.
             if (_phase.value !is AppPhase.Ready) _phase.value = AppPhase.Starting
-            runCatching { lib.bootstrap() }
-                .onSuccess {
-                    applyBootstrap(it)
-                    syncWithServer()
-                }
-                .onFailure { error ->
-                    // `markUnreachable` is what makes the next read take the
-                    // downloads instead of the server, and it has to have taken
-                    // effect before it runs - see [Library.offline]. `Library`
-                    // has usually set it already; a login that has not stored a
-                    // snapshot yet is the case where it has not.
-                    lib.markUnreachable()
-                    fallBackToDownloads(reason = message(error))
-                }
+            val account = try {
+                lib.bootstrap()
+            } catch (cancel: CancellationException) {
+                // Not a failure and not a dead server - the scope went away. It
+                // has to be rethrown rather than caught, or a `runCatching` here
+                // would report the app's own teardown as a server that is gone.
+                throw cancel
+            } catch (error: Throwable) {
+                // `markUnreachable` is what makes the next read take the
+                // downloads instead of the server, and it has to have taken
+                // effect before it runs - see [Library.offline]. It is the blunt
+                // one on purpose: the read that just failed is the app's own
+                // first request, so there is nothing left to confirm.
+                lib.markUnreachable()
+                fallBackToDownloads(reason = message(error))
+                return@launch
+            }
+            applyBootstrap(account)
+            syncWithServer()
         }
     }
 

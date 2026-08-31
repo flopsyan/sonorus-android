@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.CancellationException
 import org.sonorus.ui.components.ErrorNote
 import org.sonorus.ui.components.Loading
 
@@ -55,9 +56,17 @@ fun <T> rememberLoad(vararg key: Any?, fetch: suspend () -> T): Load<T> {
     LaunchedEffect(*keys, attempt) {
         loading = true
         error = null
-        runCatching { fetch() }
-            .onSuccess { value = it }
-            .onFailure { error = it.message ?: "Der Server ist nicht erreichbar." }
+        try {
+            value = fetch()
+        } catch (cancel: CancellationException) {
+            // The screen was left, or a key changed under it. The effect that
+            // replaces this one owns the state now, so writing a failure into it
+            // here would flash an error the user never had - and `runCatching`,
+            // which this used to be, could not tell the two apart.
+            throw cancel
+        } catch (failure: Throwable) {
+            error = failure.message ?: "Der Server ist nicht erreichbar."
+        }
         loading = false
     }
     return Load(value, error, loading) { attempt++ }

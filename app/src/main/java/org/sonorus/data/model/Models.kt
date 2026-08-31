@@ -1,7 +1,14 @@
 package org.sonorus.data.model
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 
 /**
  * Exact mirrors of what the Sonorus server returns.
@@ -508,6 +515,36 @@ data class SpokenAuthor(
 )
 
 /**
+ * `parts`, which the server writes in two shapes under one name.
+ *
+ * `GET /api/<base>/books/:id` sends the files a title is made of. Everywhere
+ * else a book appears - the "weiterhören" row, an author's page, a search hit -
+ * `shapeBook` in the server's `src/models/audiobooks.js` sends
+ * `parts: row.partCount`, a plain number, because that is what lets it drop a
+ * book with no playable file. The web client never noticed: JavaScript does not
+ * type what it is handed.
+ *
+ * So anything that is not an array reads as **no files were sent**, which is the
+ * truth: only the book page ever gets them, and it is the only screen that wants
+ * them. Decoding it as a failure instead is what used to throw a
+ * `SerializationException` here - and [org.sonorus.data.Library] could read that
+ * only as a server that had not answered, so one tap on Hörspiele put the whole
+ * app offline. See `SpokenWireTest`.
+ */
+private object BookParts : KSerializer<List<Track>> {
+    private val files = ListSerializer(Track.serializer())
+    override val descriptor: SerialDescriptor = files.descriptor
+
+    override fun serialize(encoder: Encoder, value: List<Track>) = files.serialize(encoder, value)
+
+    override fun deserialize(decoder: Decoder): List<Track> {
+        val json = decoder as? JsonDecoder ?: return files.deserialize(decoder)
+        val element = json.decodeJsonElement()
+        return if (element is JsonArray) json.json.decodeFromJsonElement(files, element) else emptyList()
+    }
+}
+
+/**
  * A book or a radio play - one thing to the listener, however many files it is
  * made of. `kind` is 'book' or 'drama' and decides which library it belongs to
  * and whether it has a narrator: a play has a cast, and Florian asked for the
@@ -536,7 +573,11 @@ data class Book(
      * The files. **Never drawn** - they are what the play button hands to the
      * queue, and that is the whole of their job. A book is one thing to the
      * listener and the parts only decide the order it plays in.
+     *
+     * Empty everywhere but the book page, and that is the wire's doing rather
+     * than an omission - see [BookParts].
      */
+    @Serializable(with = BookParts::class)
     val parts: List<Track> = emptyList(),
 ) {
     val isDrama: Boolean get() = kind == "drama"
