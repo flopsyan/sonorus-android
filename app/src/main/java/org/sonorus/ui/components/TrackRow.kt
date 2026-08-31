@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.sonorus.data.model.Track
@@ -40,6 +41,28 @@ import org.sonorus.ui.Motion
 import org.sonorus.ui.pressable
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.theme.num
+
+/** The number column of a list whose numbers stay short: an album, a single artist. */
+val INDEX_WIDTH_SHORT = 26.dp
+
+/**
+ * How wide the number column has to be for a list of [rows] rows.
+ *
+ * The numbers are monospace at 12 sp, where a digit is ungefähr 7.2 dp, and the
+ * column used to be a flat 26 dp - enough for three digits and one short of
+ * four. So song 1340 of a big playlist was drawn as "134" with the "0" on a
+ * second line. It is measured off the list's own length rather than made wide
+ * for everyone, because an album of twelve songs should not carry a column
+ * sized for "Alle Songs".
+ *
+ * Five digits is where it stops: 99999 songs is far past any library this is
+ * built for, and the row has other things to show.
+ */
+fun indexColumnWidth(rows: Int): Dp = when (rows.toString().length) {
+    in 0..3 -> INDEX_WIDTH_SHORT
+    4 -> 34.dp
+    else -> 42.dp
+}
 
 /**
  * One row of a track list.
@@ -62,6 +85,12 @@ fun TrackRow(
     modifier: Modifier = Modifier,
     /** The running number, or null to show artwork instead. */
     index: Int? = null,
+    /**
+     * How wide the number column is. It grows with the longest number the list
+     * can reach - see [indexColumnWidth] - because a fixed 26 dp broke the
+     * four-digit numbers of a big playlist over two lines.
+     */
+    indexWidth: Dp = INDEX_WIDTH_SHORT,
     isCurrent: Boolean = false,
     /**
      * The song is the one playing, but the queue was started somewhere else -
@@ -123,7 +152,7 @@ fun TrackRow(
     ) {
         // The number column, or the artwork where a list has no numbering.
         if (index != null) {
-            Box(Modifier.width(26.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.width(indexWidth), contentAlignment = Alignment.Center) {
                 // The number gives way to the speaker rather than being replaced
                 // by it, so the change reads as the same row changing state.
                 AnimatedContent(
@@ -146,6 +175,12 @@ fun TrackRow(
                             index.toString(),
                             style = num(12.sp),
                             color = if (dim) colors.textFaint else colors.textDim,
+                            // Belt and braces next to [indexColumnWidth]: a
+                            // number that still does not fit is clipped, never
+                            // broken over two lines. "1340" reading as "134"
+                            // above a lonely "0" is the bug this prevents.
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
                 }

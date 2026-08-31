@@ -112,6 +112,9 @@ fun TrackList(
     // The header is item 0 where there is one, so a row's place in the list and
     // its place in `tracks` are one apart.
     val offset = if (header != null) 1 else 0
+    // Measured off this list, so an album keeps the narrow column and "Alle
+    // Songs" gets one wide enough for its four- and five-digit numbers.
+    val indexWidth = indexColumnWidth(tracks.size)
 
     Box(Modifier.fillMaxWidth()) {
     LazyColumn(modifier.fillMaxWidth(), state = listState, contentPadding = contentPadding) {
@@ -123,6 +126,7 @@ fun TrackList(
             TrackRow(
                 track = track,
                 index = if (numbered) index + 1 else null,
+                indexWidth = indexWidth,
                 isCurrent = track.id == currentTrackId,
                 elsewhere = !currentFromHere,
                 showAlbum = showAlbum,
