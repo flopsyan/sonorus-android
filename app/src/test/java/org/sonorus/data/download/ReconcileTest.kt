@@ -66,6 +66,21 @@ class ReconcileTest {
     }
 
     @Test
+    fun `an empty answer takes the whole collection with it`() {
+        // Not a wish, a warning. This is what "the server says the collection
+        // is empty" has to mean, and it is why DownloadSync.fetch answers null
+        // rather than an empty list for a kind it does not know: a kind a screen
+        // registers but the sync has never heard of would arrive here and wipe
+        // every song it holds.
+        val plan = Reconcile.plan(
+            previous = listOf(1, 2, 3),
+            current = emptyList(),
+            downloaded = setOf(1, 2, 3),
+        )
+        assertEquals(listOf(1, 2, 3), plan.delete)
+    }
+
+    @Test
     fun `a song that is not on the phone is nothing to delete`() {
         val plan = Reconcile.plan(
             previous = listOf(1, 2),

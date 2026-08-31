@@ -532,7 +532,17 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         shuffle = player.shuffle,
                         onToggleShuffle = { vm.toggleShuffle() },
                         onEdit = { editing = true },
-                        download = { CollectionDownload(vm, tracks) },
+                        // Kept in step like an album: a song that appears under
+                        // this artist after a scan is fetched, one that goes is
+                        // let go. The list is the same one the button gets, so
+                        // the baseline and the page can never disagree.
+                        download = {
+                            CollectionDownload(
+                                vm,
+                                tracks,
+                                OfflineCollection(kind = "artist", id = artist.id, name = artist.name),
+                            )
+                        },
                     )
 
                     // Only the ratings this artist actually has get a switch -

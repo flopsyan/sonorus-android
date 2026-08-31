@@ -108,12 +108,24 @@ class DownloadSync(
         return Change(added = plan.add.size, removed = plan.delete.size)
     }
 
-    private suspend fun fetch(collection: OfflineCollection): List<Track> = when (collection.kind) {
+    /**
+     * What the server says the collection holds now, or `null` for a kind this
+     * sync does not know.
+     *
+     * **Null and not an empty list**, and the difference is the whole
+     * collection: [apply] reads its argument as the complete current contents,
+     * so an empty list means "the server dropped every song" and deletes them
+     * all. A kind that is registered by a screen but forgotten here would land
+     * exactly there. Null is the only answer that means "no idea", and
+     * [reconcileOne] leaves the collection alone on it.
+     */
+    private suspend fun fetch(collection: OfflineCollection): List<Track>? = when (collection.kind) {
         "playlist" -> lib.playlist(collection.id).tracks
         "album" -> lib.album(collection.id).album.tracks
+        "artist" -> lib.artist(collection.id).artist.tracks
         "genre" -> lib.genre(collection.selection).genre.tracks
         "stars" -> lib.stars(collection.selection).tracks
-        else -> emptyList()
+        else -> null
     }
 }
 

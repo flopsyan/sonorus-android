@@ -58,8 +58,8 @@ data class DownloadedTrack(
 /**
  * A collection that was downloaded as a whole.
  *
- * Two jobs, and the second one is why albums, genres and star lists are in here
- * as well since 2026-08-31, where it used to hold playlists only:
+ * Two jobs, and the second one is why albums, artists, genres and star lists are
+ * in here as well since 2026-08-31, where it used to hold playlists only:
  *
  *  - **A playlist's order**, which nothing in a track says, so offline it would
  *    be lost. Only playlists are read back for this.
@@ -74,7 +74,7 @@ data class DownloadedTrack(
  */
 @Serializable
 data class OfflineCollection(
-    /** `playlist`, `album`, `genre` or `stars`. */
+    /** `playlist`, `album`, `artist`, `genre` or `stars`. */
     val kind: String = "playlist",
     val id: Int = 0,
     val name: String = "",
