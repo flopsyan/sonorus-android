@@ -238,8 +238,7 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 
             if (offline) {
                 Text(
-                    "Offline. Die Zahlen sind die deiner Downloads; scannen und " +
-                        "importieren gehen erst wieder mit Verbindung.",
+                    "Offline - die Zahlen sind die deiner Downloads.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textFaint,
                 )
@@ -268,8 +267,7 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 
         if (!offline) Panel("Playlists importieren") {
             Text(
-                "Eine CSV mit den Spalten playlist, title, artists und album. " +
-                    "Die Exporte der üblichen Streamingdienste werden auch erkannt.",
+                "Eine CSV mit den Spalten playlist, title, artists und album.",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textDim,
             )
@@ -291,16 +289,13 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 
             if (!qualityReady) {
                 Text(
-                    "Dieser Server liefert nur das Original aus - dort ist kein ffmpeg " +
-                        "installiert. Es gibt also nichts umzustellen.",
+                    "Dieser Server liefert nur das Original aus - dort ist kein ffmpeg installiert.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textFaint,
                 )
             } else {
                 Text(
-                    "Gilt nur für dieses Gerät, nicht fürs Konto. Streamen und " +
-                        "Herunterladen getrennt: unterwegs die kleine Kopie hören und " +
-                        "trotzdem das Original aufs Gerät legen ist eine ganz normale Antwort.",
+                    "Gilt nur für dieses Gerät, nicht fürs Konto.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textDim,
                 )
