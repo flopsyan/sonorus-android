@@ -378,7 +378,7 @@ class AppViewModel : ViewModel() {
      * fetched twice, and a missing file is never queued - it cannot be played
      * online either.
      */
-    fun download(tracks: List<Track>) {
+    fun download(tracks: List<Track>, words: DownloadWords = DownloadWords.SONGS) {
         if (needsServer()) return
         val fresh = tracks.filter { !it.missing && !downloads.store.isDownloaded(it.id) }
         if (fresh.isEmpty()) {
@@ -390,7 +390,7 @@ class AppViewModel : ViewModel() {
             when {
                 !downloads.allowedNow -> "In die Warteschlange - es wartet auf WLAN."
                 fresh.size == 1 -> "Wird heruntergeladen."
-                else -> "${fresh.size} Songs werden heruntergeladen."
+                else -> "${Fmt.plural(fresh.size, words.one, words.many)} werden heruntergeladen."
             }
         )
     }
@@ -411,7 +411,11 @@ class AppViewModel : ViewModel() {
     }
 
     /** A whole collection onto the phone, and kept in step with the server. */
-    fun downloadCollection(collection: OfflineCollection, tracks: List<Track>) {
+    fun downloadCollection(
+        collection: OfflineCollection,
+        tracks: List<Track>,
+        words: DownloadWords = DownloadWords.SONGS,
+    ) {
         if (needsServer()) return
         val fresh = tracks.filterNot { it.missing }
         downloads.addCollection(collection, fresh)
@@ -421,7 +425,7 @@ class AppViewModel : ViewModel() {
                 !downloads.allowedNow -> "In die Warteschlange - es wartet auf WLAN."
                 missing == 0 -> "Ist schon heruntergeladen."
                 missing == 1 -> "Wird heruntergeladen."
-                else -> "$missing Songs werden heruntergeladen."
+                else -> "${Fmt.plural(missing, words.one, words.many)} werden heruntergeladen."
             }
         )
     }
@@ -430,11 +434,11 @@ class AppViewModel : ViewModel() {
      * Gives a collection back. Only the songs nothing else holds really go -
      * one that also sits in a downloaded album or playlist stays.
      */
-    fun removeCollection(collection: OfflineCollection) {
+    fun removeCollection(collection: OfflineCollection, words: DownloadWords = DownloadWords.SONGS) {
         val kept = collection.trackIds.size - downloads.removeCollection(collection)
         say(
             when {
-                kept > 0 -> "Download entfernt. ${Fmt.plural(kept, "Song bleibt", "Songs bleiben")} - " +
+                kept > 0 -> "Download entfernt. ${Fmt.plural(kept, words.stays, words.stay)} - " +
                     "sie hängen noch woanders drin."
                 else -> "Download entfernt."
             }

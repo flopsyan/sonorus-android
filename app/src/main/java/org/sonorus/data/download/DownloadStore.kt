@@ -298,6 +298,37 @@ class DownloadStore(private val root: File) {
     }
 
     /**
+     * How far into an episode or a book part the listener got, written onto the
+     * row this phone holds.
+     *
+     * The counterpart of [applyRating], and it is what makes a downloaded book
+     * worth downloading: the position lives on the server, so without this a
+     * book heard in a plane would come back to the shelf at second zero. The
+     * write also runs while online - the row has to be right the moment the
+     * network goes, not from the next sync onwards.
+     *
+     * A song is not written: it has no position, and asking every ten seconds
+     * whether it does would rewrite the index for nothing.
+     */
+    fun applyProgress(trackId: Int, position: Double, completed: Boolean) = update { s ->
+        val entry = s.tracks.firstOrNull { it.track.id == trackId } ?: return@update s
+        if (!entry.track.isSpoken) return@update s
+        if (entry.track.position == position && entry.track.completed == completed) return@update s
+        s.copy(tracks = s.tracks.map {
+            if (it.track.id != trackId) it
+            else it.copy(
+                track = it.track.copy(
+                    position = position,
+                    completed = completed,
+                    // What the player picks up at, which is zero once it is
+                    // done with - the same rule the server's `partsOf` applies.
+                    resumeAt = if (completed) 0.0 else position,
+                )
+            )
+        })
+    }
+
+    /**
      * Every downloaded file goes, and the index with it.
      *
      * The account snapshot deliberately **stays**. Throwing away the songs on

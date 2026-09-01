@@ -106,6 +106,8 @@ fun TrackList(
      * by artist would be worse than no bar at all.
      */
     labelOf: (Track) -> String = { scrollLabel(it.title) },
+    /** What an empty list says, or null to let the caller say it. */
+    emptyNote: String? = "Hier ist noch nichts.",
 ) {
     var menuFor by remember { mutableStateOf<Pair<Int, Track>?>(null) }
     val listState = rememberLazyListState()
@@ -119,8 +121,11 @@ fun TrackList(
     Box(Modifier.fillMaxWidth()) {
     LazyColumn(modifier.fillMaxWidth(), state = listState, contentPadding = contentPadding) {
         if (header != null) item { header() }
-        if (tracks.isEmpty()) {
-            item { EmptyNote("Hier ist noch nichts.") }
+        // Null where the caller says its own words instead. The Downloads
+        // screen does: an empty song list there is not an empty page, it is a
+        // page whose Hörbücher and Podcasts stand above this one.
+        if (tracks.isEmpty() && emptyNote != null) {
+            item { EmptyNote(emptyNote) }
         }
         itemsIndexed(tracks, key = { i, t -> t.itemId ?: (t.id.toLong() * 100000 + i) }) { index, track ->
             TrackRow(

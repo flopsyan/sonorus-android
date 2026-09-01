@@ -9,6 +9,31 @@ import kotlin.math.floor
 import kotlin.math.roundToLong
 
 /**
+ * What a download is counted in.
+ *
+ * The library counts in songs, and every message about a download said so -
+ * which was right for as long as only music could be put on the phone. A
+ * Hörbuch is not made of songs, it is made of parts nobody but the player ever
+ * sees, and a podcast is made of Folgen; a dialog that offered to delete
+ * "12 Songs" of a Hörbuch would be the app naming something the listener cannot
+ * find on the page.
+ *
+ * [stays] and [stay] exist because German makes the verb agree as well as the
+ * noun, and the sentence they belong to counts ("1 Teil bleibt", "3 Teile
+ * bleiben").
+ */
+data class DownloadWords(val one: String, val many: String) {
+    val stays: String get() = "$one bleibt"
+    val stay: String get() = "$many bleiben"
+
+    companion object {
+        val SONGS = DownloadWords("Song", "Songs")
+        val EPISODES = DownloadWords("Folge", "Folgen")
+        val PARTS = DownloadWords("Teil", "Teile")
+    }
+}
+
+/**
  * The German output rules, mirrored from `public/js/format.js`.
  *
  * The one rule worth stating: **durations always round down, never up.** An

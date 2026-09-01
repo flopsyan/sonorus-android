@@ -315,33 +315,37 @@ class Library(
         else reachableAfter { api.tracksByIds(ids) }
 
     // --- Spoken word ----------------------------------------------------------
-    // Deliberately without an offline path. The downloads hold songs, and
-    // nothing on the phone can answer "which episodes does this show have" - so
-    // rather than a screen that is empty and does not say why, these say the
-    // one true thing: the server is not there. If spoken word ever becomes
-    // downloadable, this is the line that changes.
-
-    private fun onlyOnline(what: String): Nothing =
-        throw ApiException("offline", "$what gibt es nur online - offline hörst du deine Downloads.")
+    // These used to say "gibt es nur online", which was the honest answer for as
+    // long as a book could not be put on the phone. Since it can, they are the
+    // same three libraries narrowed to what is here - exactly the rule the music
+    // pages follow, and the reason a downloaded book is findable in a plane
+    // rather than only in the Downloads list.
+    //
+    // A list read answers an empty library rather than throwing: nothing
+    // downloaded is a true and drawable answer, and the screens say so. A read
+    // that names one thing throws, because "this book" that is not here is a
+    // question with no answer.
 
     suspend fun podcasts(): PodcastsResponse =
-        if (offline.value) onlyOnline("Podcasts") else reachableAfter { api.podcasts() }
+        if (offline.value) Offline.podcasts(store.snapshot) else reachableAfter { api.podcasts() }
 
     suspend fun podcast(id: Int, sort: String? = null): PodcastResponse =
-        if (offline.value) onlyOnline("Podcasts") else reachableAfter { api.podcast(id, sort) }
+        if (offline.value) Offline.podcast(store.snapshot, id, sort) ?: gone("Diese Sendung")
+        else reachableAfter { api.podcast(id, sort) }
 
     suspend fun spoken(base: String): SpokenResponse =
-        if (offline.value) onlyOnline(spokenName(base)) else reachableAfter { api.spoken(base) }
+        if (offline.value) Offline.spoken(store.snapshot, base) else reachableAfter { api.spoken(base) }
 
     suspend fun spokenAuthor(base: String, id: Int): SpokenAuthorResponse =
-        if (offline.value) onlyOnline(spokenName(base))
+        if (offline.value) Offline.spokenAuthor(store.snapshot, base, id) ?: gone("Dieser Autor")
         else reachableAfter { api.spokenAuthor(base, id) }
 
     suspend fun book(base: String, id: Int): BookResponse =
-        if (offline.value) onlyOnline(spokenName(base)) else reachableAfter { api.book(base, id) }
+        if (offline.value) Offline.book(store.snapshot, id) ?: gone(spokenLabel(base))
+        else reachableAfter { api.book(base, id) }
 
-    private fun spokenName(base: String) =
-        if (base == "audiodramas") "Hörspiele" else "Hörbücher"
+    private fun spokenLabel(base: String) =
+        if (base == "audiodramas") "Dieses Hörspiel" else "Dieses Hörbuch"
 
     // --- Artwork --------------------------------------------------------------
 

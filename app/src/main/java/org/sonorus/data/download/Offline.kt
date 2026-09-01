@@ -2,6 +2,10 @@ package org.sonorus.data.download
 
 import org.sonorus.data.Shuffle
 import org.sonorus.data.model.Album
+import org.sonorus.data.model.Book
+import org.sonorus.data.model.BookResponse
+import org.sonorus.data.model.BookResume
+import org.sonorus.data.model.Chapter
 import org.sonorus.data.model.Artist
 import org.sonorus.data.model.ArtistResponse
 import org.sonorus.data.model.ArtistSummary
@@ -21,8 +25,18 @@ import org.sonorus.data.model.Playlist
 import org.sonorus.data.model.PlaylistResponse
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.PlaylistsResponse
+import org.sonorus.data.model.Podcast
+import org.sonorus.data.model.PodcastResponse
+import org.sonorus.data.model.PodcastStats
+import org.sonorus.data.model.PodcastSummary
+import org.sonorus.data.model.PodcastsResponse
 import org.sonorus.data.model.SearchResponse
 import org.sonorus.data.model.ShuffleResponse
+import org.sonorus.data.model.SpokenAuthor
+import org.sonorus.data.model.SpokenAuthorResponse
+import org.sonorus.data.model.SpokenAuthorSummary
+import org.sonorus.data.model.SpokenResponse
+import org.sonorus.data.model.SpokenStats
 import org.sonorus.data.model.StarsResponse
 import org.sonorus.data.model.Track
 import org.sonorus.data.model.TrackResponse
@@ -74,7 +88,14 @@ data class DownloadedTrack(
  */
 @Serializable
 data class OfflineCollection(
-    /** `playlist`, `album`, `artist`, `genre` or `stars`. */
+    /**
+     * `playlist`, `album`, `artist`, `genre`, `stars`, or one of the two
+     * spoken-word kinds: `book` for an audiobook and `drama` for a radio play.
+     * The two are told apart because the kind is also what names the server's
+     * path - `/api/audiobooks/books/:id` against `/api/audiodramas/books/:id` -
+     * and the id alone cannot say which, although the ids are unique across
+     * both (one `audiobooks` table with a `kind` column).
+     */
     val kind: String = "playlist",
     val id: Int = 0,
     val name: String = "",
@@ -86,6 +107,13 @@ data class OfflineCollection(
      * is what a playlist and an album always are.
      */
     val ids: List<Int> = emptyList(),
+    /**
+     * A book's chapter marks, and the one thing about a book that cannot be
+     * derived from its files: a [org.sonorus.data.model.Track] carries no marks,
+     * so without keeping them here the offline book page would lose the chapter
+     * list a downloaded book had online. Empty for every other kind.
+     */
+    val chapters: List<Chapter> = emptyList(),
 ) {
     /** The one string that names this collection - `playlist:12`, `stars:4,5`. */
     val key: String get() = "$kind:${selection.joinToString(",")}"
@@ -172,6 +200,23 @@ data class OfflineSnapshot(
  */
 object Offline {
 
+    /**
+     * The downloaded songs, without the spoken word among them.
+     *
+     * The server draws exactly this line - `MUSIC` in `src/models/library.js` is
+     * `podcast_id IS NULL AND audiobook_id IS NULL`, and every music endpoint
+     * carries it - so the offline library has to draw it too. Without it a
+     * downloaded audiobook would arrive in Alle Songs as forty untitled parts,
+     * its author would stand among the Interpreten, and the star pages would
+     * offer to rate something the server has no rating for.
+     *
+     * Two reads deliberately do **not** use it: [track] and [tracksByIds] answer
+     * for named ids, and the ids a restored queue names are as often a book's
+     * parts as they are songs.
+     */
+    private fun music(s: OfflineSnapshot): List<Track> =
+        s.tracks.map { it.track }.filterNot { it.isSpoken }
+
     // --- Bootstrap ------------------------------------------------------------
 
     /**
@@ -181,7 +226,7 @@ object Offline {
      */
     fun bootstrap(s: OfflineSnapshot): Bootstrap {
         val account = s.account
-        val tracks = s.tracks.map { it.track }
+        val tracks = music(s)
         return Bootstrap(
             user = account?.user ?: User(id = 0, username = "offline", displayName = "Offline"),
             siteName = account?.siteName ?: "Sonorus",
@@ -194,7 +239,8 @@ object Offline {
     }
 
     fun stats(s: OfflineSnapshot): LibraryStats {
-        val tracks = s.tracks.map { it.track }
+        val tracks = music(s)
+        val ids = tracks.map { it.id }.toSet()
         return LibraryStats(
             tracks = tracks.size,
             artists = tracks.mapNotNull { it.artistId }.distinct().size,
@@ -203,8 +249,10 @@ object Offline {
             genres = genres(s).genres.size,
             missing = 0,
             duration = tracks.sumOf { it.duration },
-            // What the downloads take up, which is the number that matters here.
-            size = s.tracks.sumOf { it.bytes },
+            // What the downloads take up, which is the number that matters
+            // here - of the music, because that is what this whole record
+            // counts. The Downloads screen has the true total of the phone.
+            size = s.tracks.filter { it.track.id in ids }.sumOf { it.bytes },
         )
     }
 
@@ -260,7 +308,7 @@ object Offline {
     // --- Tracks ---------------------------------------------------------------
 
     fun tracks(s: OfflineSnapshot, q: String = "", sort: String = "title", dir: String = "asc"): TracksResponse {
-        val hits = s.tracks.map { it.track }.filter { matches(it, q) }
+        val hits = music(s).filter { matches(it, q) }
         return TracksResponse(total = hits.size, tracks = sortTracks(hits, sort, dir))
     }
 
@@ -350,7 +398,7 @@ object Offline {
 
     /** Every album at least one of whose songs is on this phone. */
     private fun albumList(s: OfflineSnapshot): List<Album> =
-        s.tracks.map { it.track }
+        music(s)
             .filter { it.albumId != null }
             .groupBy { it.albumId!! }
             .map { (id, songs) ->
@@ -374,7 +422,7 @@ object Offline {
     // --- Artists --------------------------------------------------------------
 
     fun artists(s: OfflineSnapshot, q: String = ""): ArtistsResponse {
-        val artists = s.tracks.map { it.track }
+        val artists = music(s)
             .filter { it.artistId != null }
             .groupBy { it.artistId!! }
             .map { (id, songs) ->
@@ -395,7 +443,7 @@ object Offline {
     }
 
     fun artist(s: OfflineSnapshot, id: Int): ArtistResponse? {
-        val songs = s.tracks.map { it.track }.filter { it.artistId == id }
+        val songs = music(s).filter { it.artistId == id }
         if (songs.isEmpty()) return null
         val albums = albumList(s)
             .filter { it.artistId == id }
@@ -424,7 +472,7 @@ object Offline {
      * in order, which is self-consistent for as long as the phone stays offline.
      */
     fun genres(s: OfflineSnapshot): GenresResponse {
-        val tracks = s.tracks.map { it.track }
+        val tracks = music(s)
         val present = tracks.flatMap { it.genres }.distinct()
         val known = s.genres.associateBy({ it.name }, { it.id })
         var next = 1
@@ -446,7 +494,7 @@ object Offline {
     fun genre(s: OfflineSnapshot, ids: List<Int>): GenreResponse {
         val all = genres(s).genres.filter { it.id in ids }
         val names = all.map { it.name }
-        val hits = s.tracks.map { it.track }.filter { track -> track.genres.any { it in names } }
+        val hits = music(s).filter { track -> track.genres.any { it in names } }
         return GenreResponse(
             GenreSelection(
                 ids = all.map { it.id },
@@ -463,7 +511,7 @@ object Offline {
     fun stars(s: OfflineSnapshot, values: List<Int>): StarsResponse =
         StarsResponse(
             stars = values,
-            tracks = sortTracks(s.tracks.map { it.track }.filter { it.stars in values }, "artist", "asc"),
+            tracks = sortTracks(music(s).filter { it.stars in values }, "artist", "asc"),
         )
 
     fun playlists(s: OfflineSnapshot): PlaylistsResponse {
@@ -485,7 +533,8 @@ object Offline {
      * and a shelf filled with a guess would be a lie about the library.
      */
     fun home(s: OfflineSnapshot): HomeResponse {
-        val tracks = s.tracks
+        val ids = music(s).map { it.id }.toSet()
+        val tracks = s.tracks.filter { it.track.id in ids }
         return HomeResponse(
             stats = stats(s),
             unrated = 0,
@@ -501,7 +550,7 @@ object Offline {
      * the same interpret stops following itself. See [Shuffle].
      */
     fun shuffle(s: OfflineSnapshot, limit: Int = 300, unrated: Boolean = false): ShuffleResponse {
-        val pool = s.tracks.map { it.track }.filter { !unrated || it.stars == 0 }
+        val pool = music(s).filter { !unrated || it.stars == 0 }
         val drawn = pool.shuffled().take(limit)
         return ShuffleResponse(Shuffle.spread(drawn) { Shuffle.artistOf(it) })
     }
@@ -513,7 +562,7 @@ object Offline {
      */
     fun search(s: OfflineSnapshot, q: String): SearchResponse {
         if (q.isBlank()) return SearchResponse(q = q)
-        val tracks = s.tracks.map { it.track }.filter { matches(it, q) }
+        val tracks = music(s).filter { matches(it, q) }
         return SearchResponse(
             q = q,
             tracks = sortTracks(tracks, "title", "asc"),
@@ -521,6 +570,253 @@ object Offline {
             albums = albums(s, q).albums,
         )
     }
+
+    // --- Spoken word ----------------------------------------------------------
+    //
+    // The five reads behind the three spoken-word libraries, answered out of
+    // what is on the phone. They exist for the same reason the music ones do -
+    // a downloaded thing has to be findable without a server - and they are
+    // rebuilt rather than stored, because a book part already carries the whole
+    // of what a book is: `audiobookId`, `book`, `bookKind`, `author`,
+    // `bookAuthorId` and `partNo`.
+    //
+    // Two things a server sends cannot be rebuilt and are honestly left out
+    // rather than guessed: a **narrator**, which lives on the book row and on no
+    // file, and a podcast's **description**. The chapters would be the third,
+    // and they are the reason [OfflineCollection.chapters] exists.
+
+    /** The `kind` column behind a path: `audiodramas` is the radio plays. */
+    fun bookKindOf(base: String): String = if (base == "audiodramas") "drama" else "book"
+
+    /** The path behind a kind - the other direction, for a stored collection. */
+    fun baseOfKind(kind: String): String = if (kind == "drama") "audiodramas" else "audiobooks"
+
+    fun podcasts(s: OfflineSnapshot): PodcastsResponse {
+        val shows = episodes(s).groupBy { it.podcastId!! }.map { (id, list) -> summary(id, list) }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        return PodcastsResponse(
+            podcasts = shows,
+            carryOn = carryOnEpisodes(s),
+            stats = PodcastStats(
+                shows = shows.size,
+                episodes = episodes(s).size,
+                duration = episodes(s).sumOf { it.duration },
+                unplayed = episodes(s).count { !it.completed },
+            ),
+        )
+    }
+
+    /**
+     * One show. [sort] is what the screen asked for; offline there is no account
+     * to remember it on, so what was asked for is also what is answered.
+     */
+    fun podcast(s: OfflineSnapshot, id: Int, sort: String? = null): PodcastResponse? {
+        val list = episodes(s).filter { it.podcastId == id }
+        if (list.isEmpty()) return null
+        val order = if (sort == "old") "old" else "new"
+        val ordered = inEpisodeOrder(list, newestFirst = order == "new")
+        val summary = summary(id, list)
+        return PodcastResponse(
+            Podcast(
+                id = id,
+                name = summary.name,
+                cover = summary.cover,
+                episodeCount = summary.episodeCount,
+                unplayedCount = summary.unplayedCount,
+                duration = summary.duration,
+                latest = summary.latest,
+                sort = order,
+                resume = list.firstOrNull { started(it) },
+                episodes = ordered,
+            )
+        )
+    }
+
+    fun spoken(s: OfflineSnapshot, base: String): SpokenResponse {
+        val kind = bookKindOf(base)
+        val books = books(s, kind)
+        val authors = books
+            .filter { it.authorId != null }
+            .groupBy { it.authorId!! }
+            .map { (id, theirs) ->
+                SpokenAuthorSummary(
+                    id = id,
+                    name = theirs.first().author,
+                    cover = theirs.firstNotNullOfOrNull { it.cover },
+                    bookCount = theirs.size,
+                    duration = theirs.sumOf { it.duration },
+                )
+            }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        return SpokenResponse(
+            kind = kind,
+            authors = authors,
+            carryOn = books.filter { it.started && !it.finished }.sortedBy { it.title },
+            stats = SpokenStats(
+                books = books.size,
+                authors = authors.size,
+                duration = books.sumOf { it.duration },
+                open = books.count { !it.finished },
+            ),
+        )
+    }
+
+    fun spokenAuthor(s: OfflineSnapshot, base: String, id: Int): SpokenAuthorResponse? {
+        val theirs = books(s, bookKindOf(base)).filter { it.authorId == id }
+        if (theirs.isEmpty()) return null
+        return SpokenAuthorResponse(
+            SpokenAuthor(
+                id = id,
+                name = theirs.first().author,
+                cover = theirs.firstNotNullOfOrNull { it.cover },
+                // An author picture of their own is never downloaded, so the
+                // shelf borrows a cover exactly as the server lets it.
+                hasOwnCover = false,
+                books = theirs.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title }),
+            )
+        )
+    }
+
+    /**
+     * One book or one play, **with** its parts - this is the read the play
+     * button is fed from, so the files are the point of it.
+     */
+    fun book(s: OfflineSnapshot, id: Int): BookResponse? {
+        val parts = partsOf(s, id)
+        if (parts.isEmpty()) return null
+        return BookResponse(bookOf(s, id, parts, withParts = true))
+    }
+
+    // --- Spoken word, the pieces ----------------------------------------------
+
+    private fun episodes(s: OfflineSnapshot): List<Track> =
+        s.tracks.map { it.track }.filter { it.podcastId != null }
+
+    /** The parts of one title, in the order the server plays them. */
+    private fun partsOf(s: OfflineSnapshot, id: Int): List<Track> =
+        s.tracks.map { it.track }
+            .filter { it.audiobookId == id }
+            // `part_no IS NULL, part_no, path` on the server. A downloaded row
+            // carries no path, so the title stands in for it - which is the same
+            // order for a rip that numbers its files and stable for one that
+            // does not.
+            .sortedWith(
+                compareBy<Track> { it.partNo == null }
+                    .thenBy { it.partNo ?: 0 }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+            )
+
+    /** Every title of one kind with at least one part on this phone. */
+    fun books(s: OfflineSnapshot, kind: String): List<Book> =
+        s.tracks.map { it.track }
+            .filter { it.audiobookId != null && kindOf(it) == kind }
+            .map { it.audiobookId!! }
+            .distinct()
+            .map { id -> bookOf(s, id, partsOf(s, id), withParts = false) }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+
+    /** A part with no kind on it is a book, the same default the server has. */
+    private fun kindOf(track: Track): String = track.bookKind.ifEmpty { "book" }
+
+    /**
+     * A whole title, put back together out of its files.
+     *
+     * Where the listener stands is [placeInBook]'s answer. [withParts] is what
+     * separates the book page from every other place a book appears, and it
+     * mirrors the wire: `shapeBook` sends a count everywhere but `getBook`, and
+     * the client's `BookParts` reads that as no files at all.
+     */
+    private fun bookOf(s: OfflineSnapshot, id: Int, parts: List<Track>, withParts: Boolean): Book {
+        val first = parts.firstOrNull()
+        val place = placeInBook(parts)
+        return Book(
+            id = id,
+            title = first?.book.orEmpty(),
+            author = first?.author.orEmpty(),
+            authorId = first?.bookAuthorId,
+            cover = parts.firstNotNullOfOrNull { it.cover },
+            kind = first?.let { kindOf(it) } ?: "book",
+            // Nobody on this phone knows who reads it: the narrator sits on the
+            // book row and never on a file. An empty line is left out, which is
+            // what the page does for a radio play anyway.
+            narrator = "",
+            releaseDate = parts.firstOrNull { it.releaseDate.isNotEmpty() }?.releaseDate.orEmpty(),
+            year = parts.firstNotNullOfOrNull { it.year },
+            duration = place.total,
+            elapsed = place.elapsed,
+            remaining = (place.total - place.elapsed).coerceAtLeast(0.0),
+            started = place.started,
+            finished = place.finished,
+            resume = BookResume(index = place.index, offset = place.offset),
+            chapters = chaptersOf(s, id),
+            parts = if (withParts) parts else emptyList(),
+        )
+    }
+
+    private data class Place(
+        val total: Double,
+        val elapsed: Double,
+        val started: Boolean,
+        val finished: Boolean,
+        val index: Int,
+        val offset: Double,
+    )
+
+    /**
+     * Where the listener stands in one title, as one number - the client's half
+     * of the server's `placeInBook`.
+     *
+     * It is deliberately **not** the same arithmetic. The server picks the
+     * current part by `touchedAt`, "where I am" rather than "the furthest I ever
+     * got", so that jumping back moves the position back with it. A downloaded
+     * row carries no such timestamp, so this reads the first unfinished part
+     * instead. The two agree on everything but a book somebody jumped backwards
+     * in, and there the offline answer is the *earlier* of the two, which is the
+     * one that loses no listening.
+     */
+    private fun placeInBook(parts: List<Track>): Place {
+        val total = parts.sumOf { it.duration }
+        if (parts.isEmpty()) return Place(0.0, 0.0, started = false, finished = false, index = 0, offset = 0.0)
+        if (parts.all { it.completed }) {
+            return Place(total, total, started = true, finished = true, index = 0, offset = 0.0)
+        }
+        val index = parts.indexOfFirst { !it.completed }.coerceAtLeast(0)
+        val offset = parts[index].position.coerceIn(0.0, parts[index].duration)
+        val before = parts.take(index).sumOf { it.duration }
+        val elapsed = before + offset
+        return Place(total, elapsed, started = elapsed > 0.0, finished = false, index, offset)
+    }
+
+    /** The marks kept with the download, and nothing when it was never a whole. */
+    private fun chaptersOf(s: OfflineSnapshot, id: Int): List<Chapter> =
+        s.playlists.firstOrNull { (it.kind == "book" || it.kind == "drama") && it.id == id }
+            ?.chapters.orEmpty()
+
+    private fun summary(id: Int, list: List<Track>): PodcastSummary = PodcastSummary(
+        id = id,
+        name = list.first().podcast,
+        cover = list.firstNotNullOfOrNull { it.cover },
+        episodeCount = list.size,
+        unplayedCount = list.count { !it.completed },
+        duration = list.sumOf { it.duration },
+        latest = list.maxOfOrNull { it.releaseDate }.orEmpty(),
+    )
+
+    /** Newest first is what a podcast list means by "in order". */
+    private fun inEpisodeOrder(list: List<Track>, newestFirst: Boolean): List<Track> {
+        val sorted = list.sortedWith(
+            compareBy<Track> { it.releaseDate }
+                .thenBy { it.episodeNo ?: 0 }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+        )
+        return if (newestFirst) sorted.reversed() else sorted
+    }
+
+    /** Begun and not done with - the row at the top of the podcast page. */
+    private fun carryOnEpisodes(s: OfflineSnapshot): List<Track> =
+        episodes(s).filter { started(it) }.sortedByDescending { it.releaseDate }.take(12)
+
+    private fun started(episode: Track): Boolean = episode.position > 0.0 && !episode.completed
 
     // --- Helpers --------------------------------------------------------------
 

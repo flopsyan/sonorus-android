@@ -77,8 +77,8 @@ class DownloadSync(
     }
 
     private suspend fun reconcileOne(collection: OfflineCollection): Change {
-        val current = runCatching { fetch(collection) }.getOrNull() ?: return Change()
-        return apply(collection, current)
+        val fresh = runCatching { fetch(collection) }.getOrNull() ?: return Change()
+        return apply(fresh.collection, fresh.tracks)
     }
 
     /**
@@ -108,6 +108,9 @@ class DownloadSync(
         return Change(added = plan.add.size, removed = plan.delete.size)
     }
 
+    /** What one fetch brought back: the contents, and the collection itself. */
+    private data class Fetched(val collection: OfflineCollection, val tracks: List<Track>)
+
     /**
      * What the server says the collection holds now, or `null` for a kind this
      * sync does not know.
@@ -118,14 +121,29 @@ class DownloadSync(
      * all. A kind that is registered by a screen but forgotten here would land
      * exactly there. Null is the only answer that means "no idea", and
      * [reconcileOne] leaves the collection alone on it.
+     *
+     * A book hands back a changed collection as well as its parts, which is why
+     * this answers a pair rather than a list: its chapter marks are the one
+     * thing about it that no file carries, so a book re-scanned on the server
+     * would otherwise keep the marks it was downloaded with for good.
      */
-    private suspend fun fetch(collection: OfflineCollection): List<Track>? = when (collection.kind) {
-        "playlist" -> lib.playlist(collection.id).tracks
-        "album" -> lib.album(collection.id).album.tracks
-        "artist" -> lib.artist(collection.id).artist.tracks
-        "genre" -> lib.genre(collection.selection).genre.tracks
-        "stars" -> lib.stars(collection.selection).tracks
-        else -> null
+    private suspend fun fetch(collection: OfflineCollection): Fetched? {
+        if (collection.kind == "book" || collection.kind == "drama") {
+            val book = lib.book(Offline.baseOfKind(collection.kind), collection.id).book
+            return Fetched(
+                collection.copy(chapters = book.chapters, name = book.title.ifEmpty { collection.name }),
+                book.parts,
+            )
+        }
+        val tracks = when (collection.kind) {
+            "playlist" -> lib.playlist(collection.id).tracks
+            "album" -> lib.album(collection.id).album.tracks
+            "artist" -> lib.artist(collection.id).artist.tracks
+            "genre" -> lib.genre(collection.selection).genre.tracks
+            "stars" -> lib.stars(collection.selection).tracks
+            else -> return null
+        }
+        return Fetched(collection, tracks)
     }
 }
 

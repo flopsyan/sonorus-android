@@ -20,6 +20,7 @@ import org.sonorus.data.Quality
 import org.sonorus.data.QualityPolicy
 import org.sonorus.data.Settings
 import org.sonorus.data.Shuffle
+import org.sonorus.data.sync.PendingWrites
 import org.sonorus.data.SonorusApi
 import org.sonorus.data.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -110,6 +111,8 @@ class PlayerController(
     /** Whether the original may be asked for on this connection - see [QualityPolicy]. */
     private val quality: QualityPolicy,
     private val playLog: PlayLog,
+    /** Where a position written without a server waits for one. */
+    private val pending: PendingWrites,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
 ) {
 
@@ -284,6 +287,16 @@ class PlayerController(
         progressSent = position
         val tail = minOf(30.0, duration * 0.05)
         val done = position >= duration - tail
+
+        // Written onto the download first, and while online as well as offline.
+        // A downloaded book that forgets its place the moment the network goes
+        // is the whole reason to download one undone, and the row has to be
+        // right *before* the connection is lost rather than from the next sync.
+        library.store.applyProgress(track.id, position, done)
+        if (library.offline.value) {
+            pending.progress(track.id, position, done)
+            return
+        }
         scope.launch { runCatching { api.setProgress(track.id, position, done) } }
     }
     private var listened = 0.0

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.download.Offline
+import org.sonorus.data.model.Book
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.Routes
@@ -61,9 +62,19 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 
     // The index is not a flow, but the download state is republished on every
     // change to it - so it is what says when this list has to be built again.
-    val tracks = remember(state.done) {
-        Offline.sortTracks(vm.downloads.store.snapshot.tracks.map { it.track }, "artist", "asc")
+    //
+    // Songs only. Since a Hörbuch can be downloaded, the index holds things that
+    // are not songs, and a book's forty untitled parts strewn through the song
+    // list would bury it - so the spoken word gets its own section above, in the
+    // shape its own pages use.
+    val snapshot = remember(state.done) { vm.downloads.store.snapshot }
+    val tracks = remember(snapshot) {
+        Offline.sortTracks(snapshot.tracks.map { it.track }.filterNot { it.isSpoken }, "artist", "asc")
     }
+    val audiobooks = remember(snapshot) { Offline.books(snapshot, "book") }
+    val dramas = remember(snapshot) { Offline.books(snapshot, "drama") }
+    val shows = remember(snapshot) { Offline.podcasts(snapshot).podcasts }
+    val spokenTotal = remember(snapshot) { snapshot.tracks.count { it.track.isSpoken } }
 
     Column(Modifier.fillMaxSize()) {
         TrackList(
@@ -75,6 +86,8 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             numbered = false,
             coverUrl = { vm.coverUrl(it.cover) },
             modifier = Modifier.weight(1f),
+            // The header below says it in its own words, and says it once.
+            emptyNote = null,
             header = {
                 Column {
                     Row(
@@ -82,20 +95,32 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Column {
+                        // Weighted, or the line runs on under the button: it
+                        // names up to four kinds now and no longer fits on one.
+                        Column(Modifier.weight(1f).padding(end = 12.dp)) {
                             RackLabelText("Auf diesem Gerät")
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                listOf(
-                                    Fmt.plural(tracks.size, "Song", "Songs"),
+                                listOfNotNull(
+                                    // Left out only when something else is
+                                    // here to count - "0 Songs" is the right
+                                    // thing to say on an empty page.
+                                    Fmt.plural(tracks.size, "Song", "Songs")
+                                        .takeIf { tracks.isNotEmpty() || spokenTotal == 0 },
+                                    Fmt.plural(audiobooks.size, "Hörbuch", "Hörbücher")
+                                        .takeIf { audiobooks.isNotEmpty() },
+                                    Fmt.plural(dramas.size, "Hörspiel", "Hörspiele")
+                                        .takeIf { dramas.isNotEmpty() },
+                                    Fmt.plural(shows.sumOf { it.episodeCount }, "Folge", "Folgen")
+                                        .takeIf { shows.isNotEmpty() },
                                     Fmt.bytes(state.bytes),
-                                    Fmt.durationLong(tracks.sumOf { it.duration }),
+                                    Fmt.durationLong(snapshot.tracks.sumOf { it.track.duration }),
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textDim,
                             )
                         }
-                        if (tracks.isNotEmpty()) {
+                        if (tracks.isNotEmpty() || spokenTotal > 0) {
                             SonorusButton("Alle entfernen", danger = true) { clearing = true }
                         }
                     }
@@ -171,15 +196,30 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                         }
                     }
 
+                    SpokenSection("Hörbücher", audiobooks, vm) { onGo(Routes.book("audiobooks", it)) }
+                    SpokenSection("Hörspiele", dramas, vm) { onGo(Routes.book("audiodramas", it)) }
+                    if (shows.isNotEmpty()) {
+                        RackLabelText("Podcasts", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                        for (show in shows) {
+                            SpokenRow(
+                                title = show.name,
+                                subtitle = Fmt.plural(show.episodeCount, "Folge", "Folgen"),
+                                meta = Fmt.durationRack(show.duration),
+                                coverUrl = vm.coverUrl(show.cover),
+                            ) { onGo(Routes.podcast(show.id)) }
+                        }
+                    }
+
                     if (tracks.isNotEmpty()) {
                         RackLabelText(
                             "Songs",
                             Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         )
-                    } else {
+                    } else if (spokenTotal == 0) {
                         Text(
-                            "Noch nichts heruntergeladen. Auf einem Album, einer Playlist oder " +
-                                "im Menü eines Songs steht \"Herunterladen\".",
+                            "Noch nichts heruntergeladen. Auf einem Album, einer Playlist, einem " +
+                                "Hörbuch oder im Menü eines Songs steht \"Herunterladen\"; bei einem " +
+                                "Podcast steht der Pfeil neben der einzelnen Folge.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textDim,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
@@ -193,7 +233,8 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     if (clearing) {
         ConfirmDialog(
             title = "Alle Downloads entfernen",
-            message = "${Fmt.plural(tracks.size, "Song", "Songs")} (${Fmt.bytes(state.bytes)}) " +
+            message = "${Fmt.plural(tracks.size + spokenTotal, "Titel", "Titel")} " +
+                "(${Fmt.bytes(state.bytes)}) " +
                 "werden von diesem Gerät gelöscht. Auf dem Server bleibt alles, wie es ist - " +
                 "ohne Verbindung ist danach aber nichts mehr abspielbar.",
             confirmLabel = "Entfernen",
@@ -203,5 +244,27 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 vm.clearDownloads()
             },
         )
+    }
+}
+
+/**
+ * One shelf of downloaded titles, or nothing at all when there are none.
+ *
+ * A book is one row however many files it is made of, exactly as it is on its
+ * own page - the parts are the player's business and were never drawn anywhere
+ * else, and listing them here would be the one place the app broke that rule.
+ */
+@UnstableApi
+@Composable
+private fun SpokenSection(label: String, books: List<Book>, vm: AppViewModel, onOpen: (Int) -> Unit) {
+    if (books.isEmpty()) return
+    RackLabelText(label, Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+    for (book in books) {
+        SpokenRow(
+            title = book.title,
+            subtitle = book.author,
+            meta = Fmt.durationRack(book.duration),
+            coverUrl = vm.coverUrl(book.cover),
+        ) { onOpen(book.id) }
     }
 }

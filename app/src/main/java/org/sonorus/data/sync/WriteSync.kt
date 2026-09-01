@@ -68,6 +68,7 @@ class WriteSync(
     private suspend fun send(write: PendingWrite) {
         when (write.kind) {
             "rating" -> api.rate(write.trackId, write.stars)
+            "progress" -> api.setProgress(write.trackId, write.position, write.completed)
 
             "playlistCreate" -> {
                 val tree = api.createPlaylist(write.name, realFolder(write.folderId))

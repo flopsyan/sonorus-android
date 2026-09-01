@@ -97,7 +97,7 @@ class SonorusApp : Application() {
         pending = PendingWrites(File(filesDir, "offline/pending.json"))
         writeSync = WriteSync(api, pending, store)
         downloadSync = DownloadSync(library, downloads, store)
-        player = PlayerController(this, api, library, settings, quality, playLog)
+        player = PlayerController(this, api, library, settings, quality, playLog, pending)
     }
 
     companion object {

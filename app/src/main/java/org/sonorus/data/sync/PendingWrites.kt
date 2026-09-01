@@ -21,13 +21,16 @@ import java.io.File
 data class PendingWrite(
     val seq: Long = 0,
     /**
-     * `rating`, `playlistCreate`, `playlistRename`, `playlistDelete`,
-     * `playlistMove`, `playlistAdd`, `playlistRemove`, `folderCreate`,
-     * `folderRename`, `folderDelete`.
+     * `rating`, `progress`, `playlistCreate`, `playlistRename`,
+     * `playlistDelete`, `playlistMove`, `playlistAdd`, `playlistRemove`,
+     * `folderCreate`, `folderRename`, `folderDelete`.
      */
     val kind: String = "",
     val trackId: Int = 0,
     val stars: Int = 0,
+    /** `progress` only: seconds into the episode or part, and whether it is done. */
+    val position: Double = 0.0,
+    val completed: Boolean = false,
     /** Negative while the playlist exists on this phone only. */
     val playlistId: Int = 0,
     /** The playlist *row* a track sits in, which only the server can name. */
@@ -115,6 +118,18 @@ class PendingWrites(private val file: File) {
         PendingWrite(kind = "rating", trackId = trackId, stars = stars),
         // Only the last value is worth sending.
         replaces = { it.kind == "rating" && it.trackId == trackId },
+    )
+
+    /**
+     * Where the listener got to in one episode or book part.
+     *
+     * Replaced rather than appended, exactly as a rating is: only the last
+     * position means anything, and a book heard for two hours in a plane would
+     * otherwise leave seven hundred writes to send.
+     */
+    fun progress(trackId: Int, position: Double, completed: Boolean) = add(
+        PendingWrite(kind = "progress", trackId = trackId, position = position, completed = completed),
+        replaces = { it.kind == "progress" && it.trackId == trackId },
     )
 
     fun createPlaylist(localId: Int, name: String, folderId: Int?) =

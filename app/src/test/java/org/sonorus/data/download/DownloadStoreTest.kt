@@ -309,6 +309,33 @@ class DownloadStoreTest {
     }
 
     @Test
+    fun `the place in a book is written onto the download and survives a restart`() {
+        val part = Track(id = 1, title = "Teil 1", audiobookId = 100, bookKind = "book", duration = 600.0)
+        store.put(DownloadedTrack(track = part, file = "1.mp3", bytes = 32))
+
+        store.applyProgress(1, position = 120.0, completed = false)
+
+        assertEquals(120.0, store.entryOf(1)?.track?.position ?: 0.0, 0.001)
+        assertEquals(120.0, store.entryOf(1)?.track?.resumeAt ?: 0.0, 0.001)
+        assertEquals(120.0, DownloadStore(root).entryOf(1)?.track?.position ?: 0.0, 0.001)
+
+        // Once it is done with, playback picks up at the front of it again -
+        // the same rule the server's `partsOf` applies.
+        store.applyProgress(1, position = 599.0, completed = true)
+        assertEquals(0.0, store.entryOf(1)?.track?.resumeAt ?: -1.0, 0.001)
+        assertTrue(store.entryOf(1)?.track?.completed == true)
+    }
+
+    @Test
+    fun `a song has no place to remember, so none is written`() {
+        store.put(store(1))
+
+        store.applyProgress(1, position = 45.0, completed = false)
+
+        assertEquals(0.0, store.entryOf(1)?.track?.position ?: -1.0, 0.001)
+    }
+
+    @Test
     fun `the file extension comes from the server, then from the codec, then a default`() {
         assertEquals("flac", DownloadStore.extensionFor(track(1, codec = "mp3"), "audio/flac"))
         // The header may carry parameters; they are not part of the type.

@@ -51,6 +51,7 @@ import org.sonorus.data.download.OfflineCollection
 import org.sonorus.data.model.Playlist
 import org.sonorus.data.model.Track
 import org.sonorus.ui.AppViewModel
+import org.sonorus.ui.DownloadWords
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
 import org.sonorus.ui.LocalOffline
@@ -242,10 +243,18 @@ fun DetailHead(
  * [playlist] is passed for a playlist and for nothing else. A playlist's order
  * exists nowhere but on the server, so it is stored along with the songs; every
  * other collection can be rebuilt from the songs themselves.
+ *
+ * [words] is what the confirmations count in. A Hörbuch is downloaded through
+ * this same control and is not made of songs - see [DownloadWords].
  */
 @UnstableApi
 @Composable
-fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, collection: OfflineCollection? = null) {
+fun CollectionDownload(
+    vm: AppViewModel,
+    tracks: List<Track>,
+    collection: OfflineCollection? = null,
+    words: DownloadWords = DownloadWords.SONGS,
+) {
     val colors = SonorusTheme.colors
     val state by vm.downloads.state.collectAsState()
     val offline = LocalOffline.current
@@ -275,7 +284,8 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, collection: Offlin
     val done = ids.count { it in state.done }
     val busy = ids.count { it == state.active || it in state.queued }
     val start = {
-        if (collection != null) vm.downloadCollection(collection, here) else vm.download(here)
+        if (collection != null) vm.downloadCollection(collection, here, words)
+        else vm.download(here, words)
     }
 
     // A collection that is kept in step is reconciled the moment its page is
@@ -352,14 +362,14 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, collection: Offlin
     if (confirmingRemove) {
         ConfirmDialog(
             title = "Download entfernen",
-            message = removeMessage(vm, remembered, done),
+            message = removeMessage(vm, remembered, done, words),
             confirmLabel = "Entfernen",
             onDismiss = { confirmingRemove = false },
             onConfirm = {
                 confirmingRemove = false
                 // Through the collection where there is one: only the songs
                 // nothing else holds are really deleted.
-                if (remembered != null) vm.removeCollection(remembered)
+                if (remembered != null) vm.removeCollection(remembered, words)
                 else vm.removeDownloads(here)
             },
         )
@@ -371,7 +381,7 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, collection: Offlin
             title = "Download abbrechen",
             message = if (fetched > 0) {
                 "Der laufende Download wird abgebrochen. Die " +
-                    "${Fmt.plural(fetched, "Song", "Songs")}, die dabei schon geladen " +
+                    "${Fmt.plural(fetched, words.one, words.many)}, die dabei schon geladen " +
                     "wurden, werden wieder gelöscht - alles, was vorher schon auf dem " +
                     "Gerät war, bleibt."
             } else {
@@ -398,20 +408,25 @@ fun CollectionDownload(vm: AppViewModel, tracks: List<Track>, collection: Offlin
  * and a dialog that promised to delete it would be lying about the thing it is
  * asking permission for.
  */
-private fun removeMessage(vm: AppViewModel, collection: OfflineCollection?, done: Int): String {
+private fun removeMessage(
+    vm: AppViewModel,
+    collection: OfflineCollection?,
+    done: Int,
+    words: DownloadWords,
+): String {
     val store = vm.downloads.store
     if (collection == null) {
-        return "${Fmt.plural(done, "Song", "Songs")} werden von diesem Gerät gelöscht. " +
+        return "${Fmt.plural(done, words.one, words.many)} werden von diesem Gerät gelöscht. " +
             "Auf dem Server bleibt alles, wie es ist."
     }
     val going = collection.trackIds.count {
         store.isDownloaded(it) && !store.isHeld(it, exceptKey = collection.key)
     }
     val kept = collection.trackIds.count { store.isDownloaded(it) } - going
-    val first = "${Fmt.plural(going, "Song", "Songs")} werden von diesem Gerät gelöscht. " +
+    val first = "${Fmt.plural(going, words.one, words.many)} werden von diesem Gerät gelöscht. " +
         "Auf dem Server bleibt alles, wie es ist."
     return if (kept > 0) {
-        "$first ${Fmt.plural(kept, "Song bleibt", "Songs bleiben")} da - " +
+        "$first ${Fmt.plural(kept, words.stays, words.stay)} da - " +
             "sie hängen noch in anderen Downloads."
     } else {
         first

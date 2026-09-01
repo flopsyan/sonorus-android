@@ -15,6 +15,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
@@ -43,6 +46,7 @@ import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.components.Cover
 import org.sonorus.ui.components.SeekRail
+import org.sonorus.ui.components.Stars
 import org.sonorus.ui.components.TransportGlyph
 import org.sonorus.ui.components.rememberPlayhead
 import org.sonorus.ui.pressable
@@ -84,6 +88,51 @@ private val COMPACT_MAX_HEIGHT = 320.dp
  */
 private val STRIP_MIN_HEIGHT = 175.dp
 
+/** How big the five stars are drawn in the strip - see [STARS_MIN_HEIGHT]. */
+private const val STAR_SIZE = 24
+
+/**
+ * From here up the strip has room for the rating as well.
+ *
+ * Florian, on the split he actually uses - roughly a third of the screen: "da
+ * hast du platz. ist sehr viel platz". He is right, and the arithmetic says by
+ * how much: the strip is 154 dp of content in a band that runs to 320 dp, so it
+ * was spreading three blocks over well over half again the height they need.
+ *
+ * **The number was measured on the device rather than derived** (2026-09-01),
+ * and the measurement is the interesting part, because it contradicts what this
+ * note used to say about the two halves. Android snaps the divider to fixed
+ * ratios; the "one third" snap hands out a **255 dp window** either way, and what
+ * `systemBarsPadding` then takes off is not the same on both sides:
+ *
+ * | half | inset it pays | content height |
+ * |---|---|---|
+ * | top | the status bar, 52 dp | ungefähr 202 dp |
+ * | bottom | the gesture bar, 24 dp | ungefähr 231 dp |
+ *
+ * So the **bottom half is the roomier one**, not the tighter one. The stars are
+ * 24 dp, which puts the four blocks at 195 dp including the padding, and 200 dp
+ * is the smallest line that clears the tighter of the two halves - so the rating
+ * appears at a third whichever half Sonorus is in. Being 3 dp above the floor is
+ * the point rather than an oversight: a threshold set for comfort would clear
+ * only one half, and the same split would then draw two different screens.
+ *
+ * **Shuffle and repeat are deliberately not behind this.** They cost no height
+ * at all: they went into the transport row, which is 64 dp tall whether it holds
+ * three controls or five, and which had the width to spare.
+ */
+private val STARS_MIN_HEIGHT = 200.dp
+
+/**
+ * Under this width the two mode buttons are left out again.
+ *
+ * Five controls are 272 dp of button. A split screen on a phone is the full
+ * width and has 411 dp of it, but a freeform window or a foldable's cover screen
+ * need not - and the one thing that must never happen here is the transport
+ * being squeezed, which is the failure of 2026-08-25 in the other direction.
+ */
+private val MODES_MIN_WIDTH = 330.dp
+
 /**
  * Whether the app has been squeezed into a strip of a split screen.
  *
@@ -123,9 +172,10 @@ fun isCompactWindow(height: Dp): Boolean = height < COMPACT_MAX_HEIGHT
  * as the bar and the full screen are. Nothing here can drift out of step, and
  * dragging the divider back restores the shell where it was.
  *
- * Deliberately still: no marquee, no rating, no artwork animation. This is the
- * one screen that is read while driving, so nothing on it moves that does not
- * have to.
+ * Deliberately still: no marquee, no artwork animation, no travelling tints.
+ * This is the one screen that is read while driving, so nothing on it moves that
+ * does not have to. The stars are the one exception and they earn it - what
+ * moves there is the answer to a tap, not something happening by itself.
  */
 @UnstableApi
 @Composable
@@ -155,16 +205,40 @@ fun MapsMode(vm: AppViewModel) {
         // The height here is what is really left after the system bars, which is
         // the only number worth deciding on - the window height still counts the
         // status bar the top half of a split has to live under.
-        if (maxHeight >= STRIP_MIN_HEIGHT) Strip(vm, state, track) else Panel(vm, state, track)
+        if (maxHeight >= STRIP_MIN_HEIGHT) {
+            Strip(
+                vm = vm,
+                state = state,
+                track = track,
+                // A rating a spoken track cannot have is left out rather than
+                // drawn dead: the server keeps no rating for an episode or a
+                // book part, and five stars that do nothing are worse than none.
+                stars = maxHeight >= STARS_MIN_HEIGHT && !track.isSpoken,
+                modes = maxWidth >= MODES_MIN_WIDTH,
+            )
+        } else {
+            Panel(vm, state, track)
+        }
     }
 }
 
 /**
- * The roomier of the two: artwork over a seek rail over the transport.
+ * The roomier of the two: artwork over the rating over a seek rail over the
+ * transport.
+ *
+ * [stars] and [modes] are what the box it is being drawn in can afford, decided
+ * in [MapsMode] and not here - so this composable never has to ask how big it
+ * is, and the two thresholds sit next to each other where they can be compared.
  */
 @UnstableApi
 @Composable
-private fun Strip(vm: AppViewModel, state: PlayerState, track: Track) {
+private fun Strip(
+    vm: AppViewModel,
+    state: PlayerState,
+    track: Track,
+    stars: Boolean,
+    modes: Boolean,
+) {
     val colors = SonorusTheme.colors
     val haptics = LocalHapticFeedback.current
     var scrub by remember { mutableStateOf<Float?>(null) }
@@ -200,6 +274,18 @@ private fun Strip(vm: AppViewModel, state: PlayerState, track: Track) {
             }
         }
 
+        if (stars) {
+            // The rating the view model knows, not the one the queue was filled
+            // with: the queue holds the row as it was when it was added, so its
+            // own stars go stale the moment one is given anywhere else.
+            val given = vm.starsOf(track)
+            Stars(
+                given,
+                Modifier.align(Alignment.CenterHorizontally),
+                size = STAR_SIZE,
+            ) { value -> vm.rate(track.id, value, given) }
+        }
+
         val reported = scrub
             ?: if (state.durationMs > 0) {
                 (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
@@ -231,13 +317,35 @@ private fun Strip(vm: AppViewModel, state: PlayerState, track: Track) {
             }
         }
 
-        // The same three the Maps panel offers, at the sizes the full player
-        // settled on - this is the one place they are hit without looking.
+        // The three the Maps panel offers, at the sizes the full player settled
+        // on - this is the one place they are hit without looking - with the two
+        // modes outside them where the full player puts them too.
+        //
+        // Shuffle and repeat cost nothing here: the row is as tall as its
+        // tallest child either way, and the width was going spare. That is why
+        // they have no threshold of their own while the stars do.
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
+            if (modes) {
+                IconButton(
+                    onClick = {
+                        haptics.toggled(!state.shuffle)
+                        vm.player.setShuffle(!state.shuffle)
+                        vm.savePlayerPrefs()
+                    },
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Shuffle,
+                        "Zufall",
+                        tint = if (state.shuffle) colors.accent else colors.textDim,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
             IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(60.dp)) {
                 Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(46.dp))
             }
@@ -256,6 +364,26 @@ private fun Strip(vm: AppViewModel, state: PlayerState, track: Track) {
             }
             IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(60.dp)) {
                 Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(46.dp))
+            }
+            if (modes) {
+                IconButton(
+                    onClick = {
+                        haptics.toggled(state.repeat == "off")
+                        vm.player.cycleRepeat()
+                        vm.savePlayerPrefs()
+                    },
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    // Off and all wear the same glyph and only the tint tells
+                    // them apart; one is a symbol of its own. No crossfade
+                    // between them here - see the note on this file.
+                    Icon(
+                        if (state.repeat == "one") Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                        "Wiederholen",
+                        tint = if (state.repeat != "off") colors.accent else colors.textDim,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
             }
         }
     }
@@ -277,6 +405,12 @@ private fun Strip(vm: AppViewModel, state: PlayerState, track: Track) {
  * It stays legible down to ungefähr 56 dp, which is below anything Android will
  * actually hand out for a split - so this is the floor and there is no third
  * layout under it.
+ *
+ * **Shuffle, repeat and the rating deliberately stop at the strip.** Two more
+ * 34 dp buttons on this row leave ungefähr 100 dp for the title and the artist,
+ * which is ten characters - and what this layout exists to protect is exactly
+ * the row not being squeezed. Anything worth having at this size is already on
+ * it.
  */
 @UnstableApi
 @Composable

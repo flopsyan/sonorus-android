@@ -23,6 +23,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,11 +46,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.launch
+import org.sonorus.data.download.DownloadStatus
+import org.sonorus.data.download.OfflineCollection
 import org.sonorus.data.model.Book
 import org.sonorus.data.model.Track
 import org.sonorus.ui.AppViewModel
+import org.sonorus.ui.DownloadWords
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
+import org.sonorus.ui.LocalOffline
 import org.sonorus.ui.Routes
 import org.sonorus.ui.components.CardGridSkeleton
 import org.sonorus.ui.components.Chip
@@ -69,6 +80,13 @@ import org.sonorus.ui.theme.SonorusTheme
  * `base` - "audiobooks" or "audiodramas", the same word the server's paths use.
  * The one real difference is the narrator: a play has a cast, so it carries no
  * "Gesprochen von" line.
+ *
+ * All three can be put on the phone since 2026-09-01, and the two controls that
+ * do it are deliberately not the same shape. A **book or a play is downloaded
+ * whole**, through the same [CollectionDownload] an album uses, because it is
+ * one thing to the listener however many files it is made of. A **podcast is
+ * downloaded by the episode**, because a show is not one thing: it is a shelf
+ * that grows, and some of them are hundreds of hours.
  */
 
 /** The words that differ between the two book-shaped libraries. */
@@ -95,11 +113,20 @@ fun spokenWords(base: String): SpokenWords =
 fun PodcastsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val load = rememberLoad("podcasts") { vm.lib.podcasts() }
 
+    val offline = LocalOffline.current
+
     LoadBox(load, skeleton = { CardGridSkeleton() }) { data ->
         if (data.podcasts.isEmpty()) {
+            // Offline this page is the downloads and nothing else, so an empty
+            // one is not a server without podcasts - it is a phone without any.
             return@LoadBox EmptyNote(
-                "Noch keine Podcasts. Sonorus liest sie aus dem Ordner, den der Server " +
-                    "unter PODCAST_DIR eingehängt hat - ein Unterordner je Sendung."
+                if (offline) {
+                    "Offline stehen hier nur heruntergeladene Folgen, und es ist noch " +
+                        "keine da. Online steht neben jeder Folge ein Download-Pfeil."
+                } else {
+                    "Noch keine Podcasts. Sonorus liest sie aus dem Ordner, den der Server " +
+                        "unter PODCAST_DIR eingehängt hat - ein Unterordner je Sendung."
+                }
             )
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -177,6 +204,7 @@ fun PodcastScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
             }
             itemsIndexed(show.episodes, key = { _, e -> e.id }) { index, episode ->
                 EpisodeRow(
+                    vm = vm,
                     episode = episode,
                     running = player.current?.id == episode.id,
                 ) { vm.player.playTracks(show.episodes, index, source, key) }
@@ -193,12 +221,18 @@ fun PodcastScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 fun SpokenScreen(vm: AppViewModel, base: String, onGo: (String) -> Unit) {
     val words = spokenWords(base)
     val load = rememberLoad("spoken", base) { vm.lib.spoken(base) }
+    val offline = LocalOffline.current
 
     LoadBox(load, skeleton = { CardGridSkeleton() }) { data ->
         if (data.authors.isEmpty()) {
             return@LoadBox EmptyNote(
-                "Noch keine ${words.plural}. Sonorus liest sie aus dem Ordner, den der Server " +
-                    "eingehängt hat - ein Ordner je Autor, darin ein Ordner je ${words.label}."
+                if (offline) {
+                    "Offline stehen hier nur heruntergeladene ${words.plural}, und es ist " +
+                        "noch keins da. Online steht auf jeder Seite ein Download-Pfeil."
+                } else {
+                    "Noch keine ${words.plural}. Sonorus liest sie aus dem Ordner, den der Server " +
+                        "eingehängt hat - ein Ordner je Autor, darin ein Ordner je ${words.label}."
+                }
             )
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -326,6 +360,24 @@ fun BookScreen(vm: AppViewModel, base: String, id: Int, onGo: (String) -> Unit) 
                         )
                     },
                     onEdit = { editing = true },
+                    // The same control an album has, and the same standing
+                    // order behind it: a part added to the title on the server
+                    // is fetched, one that goes is let go. The chapters ride
+                    // along in the collection because no file carries them -
+                    // see [org.sonorus.data.download.OfflineCollection].
+                    download = {
+                        CollectionDownload(
+                            vm,
+                            book.parts,
+                            OfflineCollection(
+                                kind = book.kind,
+                                id = book.id,
+                                name = book.title,
+                                chapters = book.chapters,
+                            ),
+                            DownloadWords.PARTS,
+                        )
+                    },
                 )
             }
             if (book.started && !book.finished) {
@@ -387,9 +439,12 @@ private fun SectionLabel(text: String) {
  * A row with a picture, a name and two facts. The list shape the spoken-word
  * pages use throughout - a shelf reads better as a list than as a grid, because
  * the count and the length are worth as much as the name.
+ *
+ * Not private, because the Downloads screen lists what is on the phone in the
+ * same shape it is listed everywhere else.
  */
 @Composable
-private fun SpokenRow(
+fun SpokenRow(
     title: String,
     subtitle: String,
     meta: String,
@@ -437,49 +492,132 @@ private fun SpokenRow(
 }
 
 /** One episode: what it is called, when it came out, and how far in you are. */
+@UnstableApi
 @Composable
-private fun EpisodeRow(episode: Track, running: Boolean, onClick: () -> Unit) {
+private fun EpisodeRow(vm: AppViewModel, episode: Track, running: Boolean, onClick: () -> Unit) {
     val colors = SonorusTheme.colors
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 9.dp)
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            episode.title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (running) colors.accent else colors.text,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            listOfNotNull(
-                Fmt.date(episode.releaseDate).takeIf { it.isNotEmpty() },
-                Fmt.durationRack(episode.duration),
-            ).joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textDim,
-        )
-        // The absence of a bar is what says "not started" - a badge on 360 of
-        // 361 rows would be ink rather than information.
-        val done = episode.position / episode.duration
-        if (episode.duration > 0 && done > 0.001) {
-            Spacer(Modifier.height(6.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(colors.line)
-            ) {
+        Column(
+            Modifier
+                .weight(1f)
+                .clickable(onClick = onClick)
+                .padding(start = 20.dp, end = 4.dp, top = 9.dp, bottom = 9.dp)
+        ) {
+            Text(
+                episode.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (running) colors.accent else colors.text,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                listOfNotNull(
+                    Fmt.date(episode.releaseDate).takeIf { it.isNotEmpty() },
+                    Fmt.durationRack(episode.duration),
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textDim,
+            )
+            // The absence of a bar is what says "not started" - a badge on 360 of
+            // 361 rows would be ink rather than information.
+            val done = episode.position / episode.duration
+            if (episode.duration > 0 && done > 0.001) {
+                Spacer(Modifier.height(6.dp))
                 Box(
                     Modifier
-                        .fillMaxWidth(done.coerceIn(0.0, 1.0).toFloat())
+                        .fillMaxWidth()
                         .height(3.dp)
-                        .background(if (episode.completed) colors.textFaint else colors.accent)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(colors.line)
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(done.coerceIn(0.0, 1.0).toFloat())
+                            .height(3.dp)
+                            .background(if (episode.completed) colors.textFaint else colors.accent)
+                    )
+                }
+            }
+        }
+        EpisodeDownload(vm, episode)
+        Spacer(Modifier.width(8.dp))
+    }
+}
+
+/**
+ * One episode onto the phone, or off it again.
+ *
+ * A show is not downloaded as a whole and this is why the control sits per row:
+ * some of Florian's have hundreds of episodes, and a button that fetched all of
+ * them would be a gigabyte behind one tap. A book has the opposite shape - it is
+ * one thing - and gets [CollectionDownload] on its page instead.
+ *
+ * No confirmation on either side, unlike a collection's: one episode is a short
+ * wait to lose and a short wait to redo, which is the same reasoning the full
+ * player's single-track button follows.
+ */
+@UnstableApi
+@Composable
+private fun EpisodeDownload(vm: AppViewModel, episode: Track) {
+    val colors = SonorusTheme.colors
+    val state by vm.downloads.state.collectAsState()
+    val status = state.statusOf(episode.id)
+    val fetching = status == DownloadStatus.RUNNING || status == DownloadStatus.QUEUED
+
+    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        if (fetching) {
+            // Queued, or running but not yet weighed: there is nothing honest
+            // to draw, so it sweeps rather than claiming zero.
+            val progress = state.progress.takeIf { status == DownloadStatus.RUNNING && it > 0f }
+            if (progress == null) {
+                CircularProgressIndicator(
+                    Modifier.size(36.dp),
+                    color = colors.accent,
+                    trackColor = colors.surface2,
+                    strokeWidth = 2.5.dp,
+                )
+            } else {
+                CircularProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.size(36.dp),
+                    color = colors.accent,
+                    trackColor = colors.surface2,
+                    strokeWidth = 2.5.dp,
                 )
             }
+        }
+        IconButton(
+            onClick = {
+                when {
+                    fetching -> vm.cancelDownload(episode)
+                    status == DownloadStatus.DONE -> vm.removeDownloads(listOf(episode))
+                    else -> vm.download(listOf(episode), DownloadWords.EPISODES)
+                }
+            },
+            modifier = Modifier.size(36.dp),
+        ) {
+            Icon(
+                when {
+                    fetching -> Icons.Filled.Stop
+                    status == DownloadStatus.DONE -> Icons.Filled.DownloadDone
+                    else -> Icons.Filled.Download
+                },
+                when {
+                    fetching -> "Download abbrechen"
+                    status == DownloadStatus.DONE -> "Heruntergeladen - antippen zum Entfernen"
+                    status == DownloadStatus.FAILED -> "Fehlgeschlagen - noch einmal versuchen"
+                    else -> "Folge herunterladen"
+                },
+                tint = when (status) {
+                    DownloadStatus.DONE, DownloadStatus.RUNNING, DownloadStatus.QUEUED -> colors.accent
+                    DownloadStatus.FAILED -> colors.danger
+                    else -> colors.textDim
+                },
+                modifier = Modifier.size(if (fetching) 16.dp else 22.dp),
+            )
         }
     }
 }
