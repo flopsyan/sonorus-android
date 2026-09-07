@@ -445,6 +445,33 @@ class AppViewModel : ViewModel() {
         )
     }
 
+    /**
+     * The download of what is playing, given back as a whole.
+     *
+     * A part of a book is never taken alone: the listener means the book, and
+     * one part missing out of forty is a download nobody can use. A song and a
+     * podcast episode are each one thing and go on their own.
+     */
+    fun removeWork(track: Track) {
+        val bookId = track.audiobookId
+        if (bookId == null) {
+            removeDownloads(listOf(track))
+            return
+        }
+        val kind = track.bookKind.ifEmpty { "book" }
+        val collection = downloads.store.collectionOf(kind, listOf(bookId))
+        if (collection != null) {
+            removeCollection(collection, DownloadWords.PARTS)
+            return
+        }
+        // Fetched part by part rather than as a whole - then what lies on the
+        // phone is all there is to give back.
+        val parts = downloads.store.snapshot.tracks
+            .map { it.track }
+            .filter { it.audiobookId == bookId }
+        if (parts.isNotEmpty()) removeDownloads(parts)
+    }
+
     fun clearDownloads() {
         downloads.clear()
         say("Alle Downloads entfernt.")

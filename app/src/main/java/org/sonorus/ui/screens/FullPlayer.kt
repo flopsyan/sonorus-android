@@ -268,6 +268,7 @@ fun SharedTransitionScope.FullPlayer(
     var showQuality by remember { mutableStateOf(false) }
     var showStreamQuality by remember { mutableStateOf(false) }
     var confirmingCancel by remember { mutableStateOf(false) }
+    var confirmingRemove by remember { mutableStateOf(false) }
     var scrub by remember { mutableStateOf<Float?>(null) }
     // What this phone has of the song. Read here rather than passed in, so the
     // button below redraws the moment the download finishes.
@@ -697,7 +698,7 @@ fun SharedTransitionScope.FullPlayer(
                                         when {
                                             fetching -> confirmingCancel = true
                                             downloadStatus == DownloadStatus.DONE ->
-                                                vm.removeDownloads(listOf(track))
+                                                confirmingRemove = true
                                             else -> vm.download(listOf(track))
                                         }
                                     },
@@ -965,6 +966,28 @@ fun SharedTransitionScope.FullPlayer(
 
     if (showQuality) {
         QualitySheet(vm, onDismiss = { showQuality = false })
+    }
+
+    // Asked before anything is deleted, the same as everywhere else a download
+    // can be given back. A part of a book takes the whole book with it - see
+    // [AppViewModel.removeWork].
+    if (confirmingRemove) {
+        val whole = track.audiobookId != null
+        ConfirmDialog(
+            title = "Download entfernen",
+            message = if (whole) {
+                "\"${track.book.ifEmpty { track.title }}\" wird komplett von diesem Gerät " +
+                    "gelöscht. Auf dem Server bleibt alles."
+            } else {
+                "\"${track.title}\" wird von diesem Gerät gelöscht. Auf dem Server bleibt alles."
+            },
+            confirmLabel = "Entfernen",
+            onDismiss = { confirmingRemove = false },
+            onConfirm = {
+                confirmingRemove = false
+                vm.removeWork(track)
+            },
+        )
     }
 
     // Asked rather than done, the way a whole collection's cancel is - a mistap
