@@ -268,6 +268,9 @@ private fun SortRow(
     sort: String,
     dir: String,
     total: Int,
+    /** What is being counted. Shared by three tabs, and each counts its own. */
+    one: String = "Song",
+    many: String = "Songs",
     onPick: (String, String) -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -277,7 +280,7 @@ private fun SortRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        RackLabelText(Fmt.plural(total, "Song", "Songs"))
+        RackLabelText(Fmt.plural(total, one, many))
         Box {
             SonorusButton(
                 text = (options.firstOrNull { it.first == sort }?.second ?: "Titel") +
@@ -362,7 +365,7 @@ fun AlbumsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 
     LoadBox(load, skeleton = { CardGridSkeleton() }) { data ->
         Column(Modifier.fillMaxSize()) {
-            SortRow(ALBUM_SORTS, sort, dir, data.albums.size) { key, direction ->
+            SortRow(ALBUM_SORTS, sort, dir, data.albums.size, "Album", "Alben") { key, direction ->
                 sort = key
                 dir = direction
                 vm.saveSort("albumSort", SortPref(key, direction))
