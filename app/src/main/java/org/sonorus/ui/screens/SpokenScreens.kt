@@ -58,6 +58,7 @@ import org.sonorus.ui.LocalOffline
 import org.sonorus.ui.Routes
 import org.sonorus.ui.components.CardGridSkeleton
 import org.sonorus.ui.components.Chip
+import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.Cover
 import org.sonorus.ui.components.DetailSkeleton
 import org.sonorus.ui.components.EmptyNote
@@ -566,6 +567,18 @@ private fun EpisodeDownload(vm: AppViewModel, episode: Track) {
     val state by vm.downloads.state.collectAsState()
     val status = state.statusOf(episode.id)
     val fetching = status == DownloadStatus.RUNNING || status == DownloadStatus.QUEUED
+    var removing by remember { mutableStateOf(false) }
+
+    if (removing) {
+        ConfirmDialog(
+            title = "Download entfernen",
+            message = "\"${episode.title}\" wird vom Gerät gelöscht und ist ohne " +
+                "Verbindung nicht mehr da.",
+            confirmLabel = "Entfernen",
+            onDismiss = { removing = false },
+            onConfirm = { removing = false; vm.removeDownloads(listOf(episode)) },
+        )
+    }
 
     Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
         if (fetching) {
@@ -593,7 +606,7 @@ private fun EpisodeDownload(vm: AppViewModel, episode: Track) {
             onClick = {
                 when {
                     fetching -> vm.cancelDownload(episode)
-                    status == DownloadStatus.DONE -> vm.removeDownloads(listOf(episode))
+                    status == DownloadStatus.DONE -> removing = true
                     else -> vm.download(listOf(episode), DownloadWords.EPISODES)
                 }
             },

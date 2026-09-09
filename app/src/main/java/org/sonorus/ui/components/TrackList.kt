@@ -110,6 +110,9 @@ fun TrackList(
     emptyNote: String? = "Hier ist noch nichts.",
 ) {
     var menuFor by remember { mutableStateOf<Pair<Int, Track>?>(null) }
+    // Giving a download back is asked about wherever it is offered, and here is
+    // where every list's row menu lives - so one dialog covers all of them.
+    var removing by remember { mutableStateOf<Track?>(null) }
     val listState = rememberLazyListState()
     // The header is item 0 where there is one, so a row's place in the list and
     // its place in `tracks` are one apart.
@@ -165,6 +168,18 @@ fun TrackList(
             index = index,
             actions = actions,
             onDismiss = { menuFor = null },
+            onAskRemoveDownload = { removing = it },
+        )
+    }
+
+    removing?.let { track ->
+        ConfirmDialog(
+            title = "Download entfernen",
+            message = "\"${track.title}\" wird vom Gerät gelöscht und ist ohne " +
+                "Verbindung nicht mehr da.",
+            confirmLabel = "Entfernen",
+            onDismiss = { removing = null },
+            onConfirm = { removing = null; actions.onRemoveDownload(track) },
         )
     }
 }
@@ -176,7 +191,14 @@ fun TrackList(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TrackMenu(track: Track, index: Int, actions: TrackActions, onDismiss: () -> Unit) {
+fun TrackMenu(
+    track: Track,
+    index: Int,
+    actions: TrackActions,
+    onDismiss: () -> Unit,
+    /** Asked rather than done: the list owns the confirmation. */
+    onAskRemoveDownload: (Track) -> Unit = { actions.onRemoveDownload(it) },
+) {
     val colors = SonorusTheme.colors
     val sheet = rememberModalBottomSheetState()
 
@@ -250,7 +272,7 @@ fun TrackMenu(track: Track, index: Int, actions: TrackActions, onDismiss: () -> 
             if (!track.missing) {
                 when (actions.statusOf(track)) {
                     DownloadStatus.DONE -> MenuItem(Icons.Filled.DownloadDone, "Download entfernen") {
-                        onDismiss(); actions.onRemoveDownload(track)
+                        onDismiss(); onAskRemoveDownload(track)
                     }
                     DownloadStatus.RUNNING -> MenuItem(Icons.Filled.Close, "Download abbrechen") {
                         onDismiss(); actions.onCancelDownload(track)
