@@ -12,6 +12,7 @@ import org.sonorus.data.SonorusApi
 import org.sonorus.data.download.DownloadStore
 import org.sonorus.data.download.DownloadSync
 import org.sonorus.data.download.Downloads
+import org.sonorus.data.download.EbookDownloads
 import org.sonorus.data.sync.PendingWrites
 import org.sonorus.data.sync.WriteSync
 import org.sonorus.player.PlayerController
@@ -63,6 +64,10 @@ class SonorusApp : Application() {
     lateinit var writeSync: WriteSync
         private set
 
+    /** Books taken along, which are downloaded on their own terms. */
+    lateinit var ebookDownloads: EbookDownloads
+        private set
+
     /** Keeps a downloaded collection in step with the collection it came from. */
     lateinit var downloadSync: DownloadSync
         private set
@@ -81,9 +86,15 @@ class SonorusApp : Application() {
         // the app, are removed with it, and need no storage permission - which
         // is also what keeps a cold start free of a permission dialog.
         store = DownloadStore(File(filesDir, "offline"))
-        library = Library(api, store, connectivity, settings, scope)
+        // Before the library: a reading position saved without a server is
+        // queued here, so the library has to be handed the queue.
+        pending = PendingWrites(File(filesDir, "offline/pending.json"))
+        library = Library(api, store, connectivity, settings, scope, pending)
         quality = QualityPolicy(settings, connectivity, scope)
         downloads = Downloads(this, api, store, connectivity, settings)
+        // Its own downloader: a book is one file and none of the queue's
+        // questions - quality, bitrate, one song at a time - apply to it.
+        ebookDownloads = EbookDownloads(api, store)
         // Beside the downloads rather than inside them: what was heard offline
         // is not a file, and it has to survive "Alle Downloads entfernen".
         playLog = PlayLog(
@@ -92,9 +103,8 @@ class SonorusApp : Application() {
             send = { trackId, seconds, playedAt -> api.startPlay(trackId, seconds, playedAt) },
             scope = scope,
         )
-        // The plays have their own log; this one carries the edits - ratings and
-        // everything that happens to a playlist.
-        pending = PendingWrites(File(filesDir, "offline/pending.json"))
+        // The plays have their own log; the queue above carries the edits -
+        // ratings, reading positions and everything that happens to a playlist.
         writeSync = WriteSync(api, pending, store)
         downloadSync = DownloadSync(library, downloads, store)
         player = PlayerController(this, api, library, settings, quality, playLog, pending)

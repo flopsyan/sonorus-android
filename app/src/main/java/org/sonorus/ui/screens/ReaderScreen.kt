@@ -71,6 +71,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import org.sonorus.data.ReaderFont
 import org.sonorus.data.ReaderStyle
+import org.sonorus.data.download.LocalBook
 import org.sonorus.data.model.Ebook
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.LoadBox
@@ -80,6 +81,7 @@ import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.theme.SonorusColors
 import org.sonorus.ui.theme.SonorusTheme
 import java.io.ByteArrayInputStream
+import java.net.URLDecoder
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.math.max
@@ -292,7 +294,7 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
                     )
                     readerDefaults(colors)
                     addJavascriptInterface(bridge, "SonorusReader")
-                    webViewClient = ReaderClient(vm) {
+                    webViewClient = ReaderClient(vm, book) {
                         applyStyle(this, latestStyle, colors)
                         shown.style = latestStyle
                         shown.footer = null
@@ -626,7 +628,7 @@ private suspend fun measureChapter(
     style: ReaderStyle,
     colors: SonorusColors,
 ): Int = suspendCancellableCoroutine { cont ->
-    web.webViewClient = ReaderClient(vm) {
+    web.webViewClient = ReaderClient(vm, book) {
         applyStyle(this, style, colors)
         countPages(this, 0) { pages -> if (cont.isActive) cont.resume(pages) }
     }
@@ -700,6 +702,7 @@ private fun WebView.readerDefaults(colors: SonorusColors) {
  */
 private class ReaderClient(
     private val vm: AppViewModel,
+    private val book: Ebook,
     private val onReady: WebView.() -> Unit,
 ) : WebViewClient() {
 
@@ -710,6 +713,10 @@ private class ReaderClient(
         val url = request.url.toString()
         if (!url.startsWith(vm.api.serverUrl)) return null
         if (!request.method.equals("GET", ignoreCase = true)) return null
+        // A downloaded book is read off the phone even with the server right
+        // there: it is already here, and it is the only way the same screen
+        // works on a train.
+        fromDisk(url)?.let { return it }
         return runCatching {
             val response = vm.api.client.newCall(Request.Builder().url(url).build()).execute()
             val type = response.header("Content-Type").orEmpty()
@@ -727,6 +734,32 @@ private class ReaderClient(
 
     override fun onPageFinished(view: WebView, url: String) {
         view.onReady()
+    }
+
+    /** The book and the reader's own files, out of the downloads. */
+    private fun fromDisk(url: String): WebResourceResponse? {
+        val path = url.removePrefix(vm.api.serverUrl).substringBefore('?')
+        val piece = when {
+            path.startsWith(READER_ASSETS) || path.startsWith(FONT_ASSETS) ->
+                LocalBook.asset(vm.lib.store, path)
+
+            path.startsWith(readPrefix) ->
+                LocalBook.entry(vm.lib.store, book, decode(path.removePrefix(readPrefix)))
+
+            else -> null
+        } ?: return null
+        return WebResourceResponse(piece.mime, "utf-8", 200, "OK", emptyMap(),
+            ByteArrayInputStream(piece.bytes))
+    }
+
+    private val readPrefix get() = "/api/ebooks/books/${book.id}/read/"
+
+    private fun decode(name: String): String =
+        runCatching { URLDecoder.decode(name, "UTF-8") }.getOrDefault(name)
+
+    private companion object {
+        const val READER_ASSETS = "/static/reader/"
+        const val FONT_ASSETS = "/static/fonts/"
     }
 }
 

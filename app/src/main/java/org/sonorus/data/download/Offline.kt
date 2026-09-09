@@ -13,6 +13,13 @@ import org.sonorus.data.model.ArtistsResponse
 import org.sonorus.data.model.AlbumResponse
 import org.sonorus.data.model.AlbumsResponse
 import org.sonorus.data.model.Bootstrap
+import org.sonorus.data.model.Ebook
+import org.sonorus.data.model.EbookAuthorSummary
+import org.sonorus.data.model.EbookResponse
+import org.sonorus.data.model.EbooksResponse
+import org.sonorus.data.model.EbookAuthor
+import org.sonorus.data.model.EbookAuthorResponse
+import org.sonorus.data.model.EbookStats
 import org.sonorus.data.model.Genre
 import org.sonorus.data.model.GenreResponse
 import org.sonorus.data.model.GenreSelection
@@ -45,6 +52,21 @@ import org.sonorus.data.model.User
 import kotlinx.serialization.Serializable
 
 /** One downloaded song: the row as it was, and where its file lies. */
+/**
+ * A book that lives on this phone.
+ *
+ * The EPUB itself and everything the shelf needs to draw it - the metadata is
+ * kept whole rather than rebuilt from the file, because the spine, the chapter
+ * list and the character counts are the server's reading of the book and the
+ * reader needs all three before it can open a single page.
+ */
+@Serializable
+data class DownloadedEbook(
+    val book: Ebook,
+    /** The name inside `ebooks/`, which is `<id>.epub`. */
+    val file: String = "",
+)
+
 @Serializable
 data class DownloadedTrack(
     val track: Track,
@@ -140,6 +162,8 @@ data class OfflineSnapshot(
      */
     val version: Int = 0,
     val tracks: List<DownloadedTrack> = emptyList(),
+    /** Books that were taken along. Read rather than played, so a list of their own. */
+    val ebooks: List<DownloadedEbook> = emptyList(),
     /** Server paths like `/covers/album-3.jpg` whose picture lies on this phone. */
     val covers: List<String> = emptyList(),
     val playlists: List<OfflineCollection> = emptyList(),
@@ -688,6 +712,51 @@ object Offline {
     }
 
     // --- Spoken word, the pieces ----------------------------------------------
+
+    // --- Books that are read ---------------------------------------------------
+
+    /**
+     * The shelf, out of what was taken along.
+     *
+     * The same rule as everywhere else here: offline you see what you
+     * downloaded. An author appears because a book of theirs is on the phone,
+     * and their picture is the one their book carries.
+     */
+    fun ebooks(s: OfflineSnapshot): EbooksResponse {
+        val books = s.ebooks.map { it.book }
+        val authors = books
+            .groupBy { it.authorId ?: 0 }
+            .map { (id, theirs) ->
+                EbookAuthorSummary(
+                    id = id,
+                    name = theirs.first().author,
+                    cover = theirs.firstNotNullOfOrNull { it.cover },
+                    bookCount = theirs.size,
+                )
+            }
+            .sortedBy { it.name.lowercase() }
+        return EbooksResponse(
+            authors = authors,
+            carryOn = books.filter { it.progress.started && !it.progress.finished },
+            stats = EbookStats(books = books.size, authors = authors.size),
+        )
+    }
+
+    fun ebookAuthor(s: OfflineSnapshot, id: Int): EbookAuthorResponse? {
+        val theirs = s.ebooks.map { it.book }.filter { (it.authorId ?: 0) == id }
+        if (theirs.isEmpty()) return null
+        return EbookAuthorResponse(
+            EbookAuthor(
+                id = id,
+                name = theirs.first().author,
+                cover = theirs.firstNotNullOfOrNull { it.cover },
+                books = theirs.sortedBy { it.title.lowercase() },
+            )
+        )
+    }
+
+    fun ebook(s: OfflineSnapshot, id: Int): EbookResponse? =
+        s.ebooks.firstOrNull { it.book.id == id }?.let { EbookResponse(it.book) }
 
     private fun episodes(s: OfflineSnapshot): List<Track> =
         s.tracks.map { it.track }.filter { it.podcastId != null }

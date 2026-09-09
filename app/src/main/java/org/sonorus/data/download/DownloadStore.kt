@@ -1,6 +1,7 @@
 package org.sonorus.data.download
 
 import org.sonorus.data.model.Bootstrap
+import org.sonorus.data.model.Ebook
 import org.sonorus.data.model.Genre
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Track
@@ -38,6 +39,19 @@ class DownloadStore(private val root: File) {
 
     val audioDir = File(root, "audio")
     val coverDir = File(root, "covers")
+
+    /** The EPUBs, and beside them the reader's own files - see [readerDir]. */
+    val ebookDir = File(root, "ebooks")
+
+    /**
+     * The stylesheet, the script and the four faces the reading view is made of.
+     *
+     * They are the server's files and are fetched with the book rather than
+     * built into the app, for the reason the whole reader lives on the server:
+     * one copy, and a change to it reaches every client. Cached here so that a
+     * downloaded book opens with no server at all.
+     */
+    val readerDir = File(ebookDir, "reader")
     private val indexFile = File(root, "library.json")
     private val tempFile = File(root, "library.json.tmp")
 
@@ -114,6 +128,58 @@ class DownloadStore(private val root: File) {
             ?.takeIf { it.file != entry.file }
             ?.let { File(audioDir, it.file).delete() }
         s.copy(tracks = s.tracks.filter { it.track.id != entry.track.id } + entry)
+    }
+
+    // --- Books that are read ----------------------------------------------------
+
+    fun isEbookDownloaded(id: Int): Boolean = snapshot.ebooks.any { it.book.id == id }
+
+    fun ebookOf(id: Int): Ebook? = snapshot.ebooks.firstOrNull { it.book.id == id }?.book
+
+    /** The EPUB on disk, or null when the entry is there and the file is not. */
+    fun ebookFileOf(id: Int): File? {
+        val entry = snapshot.ebooks.firstOrNull { it.book.id == id } ?: return null
+        return File(ebookDir, entry.file).takeIf { it.isFile && it.length() > 0 }
+    }
+
+    fun ebookTarget(id: Int): File = File(ebookDir, "$id.epub")
+
+    /** One of the reader's own files, by the name it has on the server. */
+    fun readerAsset(name: String): File? =
+        File(readerDir, name).takeIf { it.isFile && it.length() > 0 }
+
+    fun putEbook(book: Ebook) = update { s ->
+        s.copy(ebooks = s.ebooks.filterNot { it.book.id == book.id } +
+            DownloadedEbook(book = book, file = "${book.id}.epub"))
+    }
+
+    /** The book's own metadata, refreshed without touching the file. */
+    fun refreshEbook(book: Ebook) = update { s ->
+        if (s.ebooks.none { it.book.id == book.id }) s
+        else s.copy(ebooks = s.ebooks.map { if (it.book.id == book.id) it.copy(book = book) else it })
+    }
+
+    /** Where the reader got to, kept on the phone while the server cannot hear it. */
+    fun applyEbookProgress(id: Int, doc: Int, ratio: Double, finished: Boolean) = update { s ->
+        s.copy(ebooks = s.ebooks.map { entry ->
+            if (entry.book.id != id) entry
+            else entry.copy(
+                book = entry.book.copy(
+                    progress = entry.book.progress.copy(
+                        doc = doc,
+                        ratio = ratio,
+                        finished = finished,
+                        started = true,
+                        read = if (finished) 1.0 else entry.book.progress.read,
+                    )
+                )
+            )
+        })
+    }
+
+    fun removeEbook(id: Int) = update { s ->
+        s.ebooks.firstOrNull { it.book.id == id }?.let { File(ebookDir, it.file).delete() }
+        s.copy(ebooks = s.ebooks.filterNot { it.book.id == id })
     }
 
     fun rememberCover(path: String) = update { s ->
@@ -340,6 +406,7 @@ class DownloadStore(private val root: File) {
         synchronized(lock) {
             audioDir.deleteRecursively()
             coverDir.deleteRecursively()
+            ebookDir.deleteRecursively()
             audioDir.mkdirs()
             coverDir.mkdirs()
             write(OfflineSnapshot(account = state.account))
@@ -358,8 +425,12 @@ class DownloadStore(private val root: File) {
             val kept = s.tracks.filter { File(audioDir, it.file).let { f -> f.isFile && f.length() > 0 } }
             dropped = s.tracks.size - kept.size
             val covers = s.covers.filter { File(coverDir, coverName(it)).isFile }
-            if (kept.size == s.tracks.size && covers.size == s.covers.size) s
-            else s.copy(tracks = kept, covers = covers)
+            val books = s.ebooks.filter { File(ebookDir, it.file).let { f -> f.isFile && f.length() > 0 } }
+            dropped += s.ebooks.size - books.size
+            if (kept.size == s.tracks.size && covers.size == s.covers.size &&
+                books.size == s.ebooks.size
+            ) s
+            else s.copy(tracks = kept, covers = covers, ebooks = books)
         }
         return dropped
     }

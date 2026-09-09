@@ -412,6 +412,9 @@ class SonorusApi(private val session: Session) {
     fun ebookReadUrl(id: Int, href: String): String =
         "${session.serverUrl}/api/ebooks/books/$id/read/$href"
 
+    /** The EPUB itself, for taking the book along. */
+    fun ebookFileUrl(id: Int): String = "${session.serverUrl}/api/ebooks/books/$id/file"
+
     // --- Playlists ------------------------------------------------------------
 
     suspend fun playlists(): PlaylistsResponse = get("/api/playlists")

@@ -21,7 +21,7 @@ import java.io.File
 data class PendingWrite(
     val seq: Long = 0,
     /**
-     * `rating`, `progress`, `playlistCreate`, `playlistRename`,
+     * `rating`, `progress`, `ebookProgress`, `playlistCreate`, `playlistRename`,
      * `playlistDelete`, `playlistMove`, `playlistAdd`, `playlistRemove`,
      * `folderCreate`, `folderRename`, `folderDelete`.
      */
@@ -31,6 +31,10 @@ data class PendingWrite(
     /** `progress` only: seconds into the episode or part, and whether it is done. */
     val position: Double = 0.0,
     val completed: Boolean = false,
+    /** `ebookProgress` only: the book, which spine document, and how far into it. */
+    val ebookId: Int = 0,
+    val doc: Int = 0,
+    val ratio: Double = 0.0,
     /** Negative while the playlist exists on this phone only. */
     val playlistId: Int = 0,
     /** The playlist *row* a track sits in, which only the server can name. */
@@ -113,6 +117,24 @@ class PendingWrites(private val file: File) {
         write(state.copy(nextLocal = id - 1))
         id
     }
+
+    /**
+     * Where a book was read to.
+     *
+     * One entry per book, last value wins: the reader saves on every page turn,
+     * and a queue that kept each of them would send a hundred writes to arrive
+     * at the one that matters.
+     */
+    fun ebookProgress(id: Int, doc: Int, ratio: Double, finished: Boolean) = add(
+        PendingWrite(
+            kind = "ebookProgress",
+            ebookId = id,
+            doc = doc,
+            ratio = ratio,
+            completed = finished,
+        ),
+        replaces = { it.kind == "ebookProgress" && it.ebookId == id },
+    )
 
     fun rate(trackId: Int, stars: Int) = add(
         PendingWrite(kind = "rating", trackId = trackId, stars = stars),

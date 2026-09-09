@@ -2,6 +2,7 @@ package org.sonorus.data
 
 import org.sonorus.data.download.DownloadStore
 import org.sonorus.data.download.Offline
+import org.sonorus.data.sync.PendingWrites
 import org.sonorus.data.model.AlbumResponse
 import org.sonorus.data.model.AlbumsResponse
 import org.sonorus.data.model.ArtistResponse
@@ -85,6 +86,12 @@ class Library(
     private val connectivity: Connectivity,
     private val settings: Settings,
     private val scope: CoroutineScope,
+    /**
+     * Where a write goes that the server cannot hear yet. Only reading
+     * positions travel this way from here; everything else the library does is
+     * a read.
+     */
+    private val pending: PendingWrites? = null,
 ) {
 
     private val _manual = MutableStateFlow(settings.offlineMode)
@@ -357,17 +364,46 @@ class Library(
         throw ApiException("offline", "$what geht nur mit Verbindung zum Server.")
 
     suspend fun ebooks(): EbooksResponse =
-        if (offline.value) needsServer("Lesen") else reachableAfter { api.ebooks() }
+        if (offline.value) Offline.ebooks(store.snapshot) else reachableAfter { api.ebooks() }
 
     suspend fun ebookAuthor(id: Int): EbookAuthorResponse =
-        if (offline.value) needsServer("Lesen") else reachableAfter { api.ebookAuthor(id) }
+        if (offline.value) {
+            Offline.ebookAuthor(store.snapshot, id) ?: gone("Dieser Autor")
+        } else {
+            reachableAfter { api.ebookAuthor(id) }
+        }
 
+    /**
+     * One book.
+     *
+     * A downloaded book is answered out of the store the moment the server is
+     * not there, and the answer is complete: the spine, the chapters and the
+     * character counts were taken along with the file precisely so that it can
+     * be opened without asking anybody.
+     */
     suspend fun ebook(id: Int): EbookResponse =
-        if (offline.value) needsServer("Lesen") else reachableAfter { api.ebook(id) }
+        if (offline.value) {
+            Offline.ebook(store.snapshot, id) ?: gone("Dieses Buch")
+        } else {
+            reachableAfter { api.ebook(id) }.also { store.refreshEbook(it.book) }
+        }
 
+    /**
+     * Where the reader got to.
+     *
+     * Written to the phone first and to the server after, and queued when the
+     * server is not listening. Losing the place in a book is the one failure a
+     * reading view must not have, and it used to be exactly what happened
+     * offline - the write was dropped on the floor.
+     */
     suspend fun setEbookProgress(id: Int, doc: Int, ratio: Double, finished: Boolean) {
-        if (offline.value) return
-        reachableAfter { api.setEbookProgress(id, doc, ratio, finished) }
+        store.applyEbookProgress(id, doc, ratio, finished)
+        if (offline.value) {
+            pending?.ebookProgress(id, doc, ratio, finished)
+            return
+        }
+        runCatching { reachableAfter { api.setEbookProgress(id, doc, ratio, finished) } }
+            .onFailure { pending?.ebookProgress(id, doc, ratio, finished) }
     }
 
     // --- Artwork --------------------------------------------------------------

@@ -1,5 +1,6 @@
 package org.sonorus.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -7,28 +8,41 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.launch
+import org.sonorus.data.download.EbookDownloadStatus
 import org.sonorus.data.model.Ebook
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
 import org.sonorus.ui.Routes
 import org.sonorus.ui.components.CardGridSkeleton
+import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.DetailSkeleton
 import org.sonorus.ui.components.EmptyNote
 import org.sonorus.ui.components.MediaCard
@@ -140,6 +154,7 @@ fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     // could sensibly do, and a reader expects the cover to open
                     // the book rather than a second control below it.
                     onPlay = { onGo(Routes.reader(book.id)) },
+                    download = { EbookDownload(vm, book) },
                 )
             }
             if (book.progress.started) {
@@ -189,6 +204,82 @@ fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Taking the book along, or giving it back.
+ *
+ * The same control the albums and the spoken word have, in its simplest form:
+ * a book is one file, so there is no "3 of 12" to report and no collection to
+ * keep in step. What travels with the EPUB is the reading view itself - see
+ * [org.sonorus.data.download.EbookDownloads].
+ */
+@Composable
+private fun EbookDownload(vm: AppViewModel, book: Ebook) {
+    val colors = SonorusTheme.colors
+    val state by vm.ebookDownloads.state.collectAsState()
+    var confirmingRemove by remember { mutableStateOf(false) }
+
+    val progress = state.running[book.id]
+    val here = remember(state) { vm.ebookDownloads.statusOf(book.id) == EbookDownloadStatus.DONE }
+
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        if (progress != null) {
+            val shown by animateFloatAsState(progress, label = "ebookRing")
+            CircularProgressIndicator(
+                progress = { shown },
+                modifier = Modifier.size(44.dp),
+                color = colors.accent,
+                trackColor = colors.surface2,
+                strokeWidth = 3.dp,
+            )
+        }
+        IconButton(
+            onClick = {
+                when {
+                    progress != null -> vm.ebookDownloads.cancel(book.id)
+                    here -> confirmingRemove = true
+                    else -> vm.downloadEbook(book)
+                }
+            },
+            modifier = Modifier.size(44.dp),
+        ) {
+            when {
+                progress != null -> Icon(
+                    Icons.Filled.Stop,
+                    "Download abbrechen",
+                    tint = colors.accent,
+                    modifier = Modifier.size(20.dp),
+                )
+                here -> Icon(
+                    Icons.Filled.DownloadDone,
+                    "Heruntergeladen - antippen zum Entfernen",
+                    tint = colors.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+                else -> Icon(
+                    Icons.Filled.Download,
+                    "Herunterladen",
+                    tint = colors.textDim,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+    }
+
+    if (confirmingRemove) {
+        ConfirmDialog(
+            title = "Download entfernen",
+            message = "\"${book.title}\" wird vom Gerät gelöscht. Ohne Verbindung zum " +
+                "Server lässt sich das Buch dann nicht mehr lesen.",
+            confirmLabel = "Entfernen",
+            onDismiss = { confirmingRemove = false },
+            onConfirm = {
+                confirmingRemove = false
+                vm.removeEbookDownload(book)
+            },
+        )
     }
 }
 

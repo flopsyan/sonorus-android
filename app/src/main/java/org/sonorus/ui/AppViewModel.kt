@@ -572,6 +572,20 @@ class AppViewModel : ViewModel() {
      * write costs the position of one page. The reader saves again when it is
      * left, which is the one that really has to land.
      */
+    // --- Books that are taken along --------------------------------------------
+
+    val ebookDownloads get() = app.ebookDownloads
+
+    fun downloadEbook(book: org.sonorus.data.model.Ebook) {
+        app.ebookDownloads.download(book)
+        say("\"${book.title}\" wird heruntergeladen.")
+    }
+
+    fun removeEbookDownload(book: org.sonorus.data.model.Ebook) {
+        app.ebookDownloads.remove(book.id)
+        say("\"${book.title}\" ist nicht mehr auf dem Gerät.")
+    }
+
     /** The measured page counts of a book, if this phone still has them. */
     fun storedReaderPages(bookId: Int, key: String): List<Int>? =
         app.settings.readerPages(bookId, key)

@@ -69,6 +69,8 @@ class WriteSync(
         when (write.kind) {
             "rating" -> api.rate(write.trackId, write.stars)
             "progress" -> api.setProgress(write.trackId, write.position, write.completed)
+            "ebookProgress" ->
+                api.setEbookProgress(write.ebookId, write.doc, write.ratio, write.completed)
 
             "playlistCreate" -> {
                 val tree = api.createPlaylist(write.name, realFolder(write.folderId))
