@@ -58,6 +58,8 @@ fun LoginScreen(
     error: String,
     busy: Boolean,
     onLogin: (String, String, String) -> Unit,
+    /** Null when this phone has nothing downloaded, which hides the way in. */
+    onOpenDownloads: (() -> Unit)? = null,
 ) {
     val colors = SonorusTheme.colors
     var server by remember { mutableStateOf(initialServer) }
@@ -132,6 +134,23 @@ fun LoginScreen(
                     enabled = !busy && server.isNotBlank() && user.isNotBlank() && pass.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                     onClick = { onLogin(server.trim(), user.trim(), pass) },
+                )
+            }
+
+            // What is on the phone plays without a login. Under the card rather
+            // than in it: it is not part of signing in, it is the way past it.
+            if (onOpenDownloads != null) {
+                Spacer(Modifier.height(16.dp))
+                SonorusButton(
+                    text = "Downloads öffnen",
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOpenDownloads,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Heruntergeladenes geht auch ohne Anmeldung.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textDim,
                 )
             }
         }

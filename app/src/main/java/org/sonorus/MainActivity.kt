@@ -101,6 +101,7 @@ private fun SonorusRoot() {
                         error = current.message,
                         busy = false,
                         onLogin = { server, user, pass -> vm.login(server, user, pass) { } },
+                        onOpenDownloads = if (vm.hasDownloads) ({ vm.openDownloads() }) else null,
                     )
                     // Logged in, no server, nothing downloaded. Deliberately not
                     // the login form: nothing is wrong with the login, and asking

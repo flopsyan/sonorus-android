@@ -40,6 +40,17 @@ class Settings(context: Context) {
         _losslessWifiOnly.value = on
     }
 
+    /**
+     * This phone is being used without a login, on its downloads alone.
+     *
+     * Its own flag rather than a mood read off the offline switch: it is the
+     * only thing that may let the app past the login form, so it has to be
+     * something the user chose and nothing that can be inferred.
+     */
+    var downloadsOnly: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOADS_ONLY, false)
+        set(value) = prefs.edit().putBoolean(KEY_DOWNLOADS_ONLY, value).apply()
+
     /** The user's own offline switch, the way Spotify has one. */
     var offlineMode: Boolean
         get() = prefs.getBoolean(KEY_OFFLINE, false)
@@ -126,6 +137,7 @@ class Settings(context: Context) {
         const val KEY_WIFI_ONLY = "wifiOnly"
         const val KEY_LOSSLESS_WIFI = "losslessWifiOnly"
         const val KEY_OFFLINE = "offlineMode"
+        const val KEY_DOWNLOADS_ONLY = "downloadsOnly"
         const val KEY_QUEUE = "playerQueue"
         const val KEY_STREAM_QUALITY = "streamQuality"
         const val KEY_DOWNLOAD_QUALITY = "downloadQuality"

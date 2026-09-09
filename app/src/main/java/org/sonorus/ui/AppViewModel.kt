@@ -184,6 +184,13 @@ class AppViewModel : ViewModel() {
     fun start() {
         viewModelScope.launch {
             if (!app.session.isConfigured) {
+                // Nobody is logged in. The files on the phone are still the
+                // user's, so if that is how they last chose to use it, that is
+                // where they land - see [openDownloads].
+                if (app.settings.downloadsOnly && hasDownloads) {
+                    enterDownloads()
+                    return@launch
+                }
                 _phase.value = AppPhase.NeedsLogin()
                 return@launch
             }
@@ -240,6 +247,40 @@ class AppViewModel : ViewModel() {
             }
     }
 
+    /**
+     * Whether this phone has downloads to fall back on, login or no login.
+     *
+     * Read by the login screen, and the reason logging out does not take the
+     * files: what is on the device belongs to the device. See [openDownloads].
+     */
+    val hasDownloads: Boolean get() = lib.store.snapshot.tracks.isNotEmpty()
+
+    /**
+     * Into the downloads without a login, the way Jellyfin does it.
+     *
+     * Florian's rule, and he meant it absolutely: **music that is already on the
+     * phone plays, always.** A login is how the library is reached, not a lock
+     * on files that have already been paid for and fetched.
+     *
+     * It is the offline switch that carries it, so nothing new can leak a
+     * request: with no session stored there is nobody to ask anyway, and
+     * [org.sonorus.data.download.Offline.bootstrap] already answers without an
+     * account - a synthetic "Offline" user, the site's default name, and the
+     * library derived from what is on the disk. Turning the switch off in
+     * Einstellungen leads back to the login form by itself.
+     */
+    fun openDownloads() {
+        app.settings.downloadsOnly = true
+        viewModelScope.launch { enterDownloads() }
+    }
+
+    private suspend fun enterDownloads() {
+        lib.setManualOffline(true)
+        runCatching { lib.bootstrap() }
+            .onSuccess { applyBootstrap(it) }
+            .onFailure { _phase.value = AppPhase.OfflineEmpty(message(it)) }
+    }
+
     /** Tries the server once more from the offline screen or the banner. */
     fun retryConnection() {
         lib.markReachable()
@@ -250,6 +291,7 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             runCatching {
                 api.login(server, user, pass)
+                app.settings.downloadsOnly = false
                 lib.markReachable()
                 // Through the library, not the API: this is the answer that gets
                 // stored for the first offline start, and a phone that logged in
@@ -274,6 +316,7 @@ class AppViewModel : ViewModel() {
      */
     fun logout() {
         viewModelScope.launch {
+            app.settings.downloadsOnly = false
             player.clearQueue()
             api.logout()
             lib.store.forgetAccount()
@@ -628,8 +671,22 @@ class AppViewModel : ViewModel() {
      * the app fell offline by itself, so it re-reads the library either way.
      */
     fun setOfflineMode(on: Boolean) {
+        // Turning it off is a request for the server, and on a phone with no
+        // login that means the login form. Without this, `start` would put it
+        // straight back into the downloads and there would be no way out.
+        if (!on) app.settings.downloadsOnly = false
         lib.setManualOffline(on)
         start()
+    }
+
+    /** True while this phone is on its downloads with nobody logged in. */
+    val downloadsOnly: Boolean get() = app.settings.downloadsOnly && !app.session.isConfigured
+
+    /** Out of the downloads and back to the login form. */
+    fun signIn() {
+        app.settings.downloadsOnly = false
+        lib.setManualOffline(false)
+        _phase.value = AppPhase.NeedsLogin()
     }
 
     // --- Preferences ----------------------------------------------------------

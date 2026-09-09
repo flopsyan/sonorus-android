@@ -359,9 +359,10 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 }
                 LinkRow("Profil", "Name, Avatar und Passwort") { onGo(Routes.PROFILE) }
             }
-            // Logging out throws the session away, and with it the way back into
-            // the downloads without a server. So offline it is not offered.
             if (!offline) SonorusButton("Abmelden", danger = true) { vm.logout() }
+            // Nobody is logged in and the phone is on its downloads alone. The
+            // way out has to be here, or the offline switch is the only one.
+            if (vm.downloadsOnly) SonorusButton("Anmelden", primary = true) { vm.signIn() }
         }
     }
 }
