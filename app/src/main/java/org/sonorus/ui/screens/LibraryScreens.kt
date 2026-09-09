@@ -1,5 +1,6 @@
 package org.sonorus.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -14,8 +15,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,10 +26,13 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
@@ -52,6 +58,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
@@ -71,6 +78,7 @@ import org.sonorus.ui.components.CardGridSkeleton
 import org.sonorus.ui.components.DetailSkeleton
 import org.sonorus.ui.components.HomeSkeleton
 import org.sonorus.ui.components.TrackListSkeleton
+import org.sonorus.ui.components.CoverMosaic
 import org.sonorus.ui.components.EmptyNote
 import org.sonorus.ui.components.Loading
 import org.sonorus.ui.components.MediaCard
@@ -337,6 +345,130 @@ private fun fold(text: String): String =
         .replace(Regex("\\p{Mn}+"), "")
         .lowercase()
 
+/**
+ * Tiles or a list, the same pair the web app offers.
+ *
+ * Two icons rather than words: it sits in the sort row, and the row already
+ * carries a count on the left and a sort button on the right.
+ */
+@UnstableApi
+@Composable
+private fun AlbumRows(
+    albums: List<Album>,
+    vm: AppViewModel,
+    onGo: (String) -> Unit,
+    labelOf: (Album) -> String,
+) {
+    val rows = rememberLazyListState()
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = rows,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
+            items(albums, key = { it.id }) { album ->
+                CollectionRow(
+                    title = album.title,
+                    subtitle = listOfNotNull(
+                        album.artist.takeIf { it.isNotEmpty() },
+                        Fmt.year(album.releaseDate, album.year).takeIf { it.isNotEmpty() },
+                    ).joinToString(" · "),
+                    coverUrl = vm.coverUrl(album.cover),
+                ) { onGo(Routes.album(album.id)) }
+            }
+        }
+        ListScroller(rows, albums.size) { labelOf(albums[it]) }
+    }
+}
+
+/** The same bar the grids have, for a list. */
+@Composable
+private fun BoxScope.ListScroller(
+    state: LazyListState,
+    count: Int,
+    labelAt: (Int) -> String,
+) {
+    FastScroller(
+        itemCount = count,
+        firstVisible = state.firstVisibleItemIndex,
+        visibleCount = state.layoutInfo.visibleItemsInfo.size.coerceAtLeast(1),
+        labelAt = labelAt,
+        onScrollTo = { state.scrollToItem(it) },
+    )
+}
+
+@Composable
+private fun ViewSwitch(view: String, onPick: (String) -> Unit) {
+    val colors = SonorusTheme.colors
+    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        val options = listOf(
+            Triple("grid", Icons.Filled.GridView, "Kacheln"),
+            Triple("list", Icons.AutoMirrored.Filled.List, "Liste"),
+        )
+        for ((value, glyph, label) in options) {
+            IconButton(onClick = { onPick(value) }, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    glyph,
+                    label,
+                    tint = if (view == value) colors.accent else colors.textFaint,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One entry of a collection as a row.
+ *
+ * More per screenful than a tile and the name has room to be read - which is
+ * the whole reason to want it, on a phone even more than on the web.
+ */
+@Composable
+private fun CollectionRow(
+    title: String,
+    subtitle: String,
+    coverUrl: String?,
+    coverUrls: List<String> = emptyList(),
+    round: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CoverMosaic(
+            coverUrls.ifEmpty { listOfNotNull(coverUrl) },
+            Modifier.size(52.dp),
+            if (round) CircleShape else RoundedCornerShape(8.dp),
+            title,
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textDim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SortRow(
     options: List<Pair<String, String>>,
@@ -346,6 +478,8 @@ private fun SortRow(
     /** What is being counted. Shared by three tabs, and each counts its own. */
     one: String = "Song",
     many: String = "Songs",
+    /** Drawn between the count and the sort button, where there is one. */
+    trailing: (@Composable () -> Unit)? = null,
     onPick: (String, String) -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -356,7 +490,11 @@ private fun SortRow(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         RackLabelText(Fmt.plural(total, one, many))
-        Box {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+        trailing?.invoke()
+        // Interpreten have no sort of their own, so the row carries the count
+        // and the view switch and nothing that would open an empty menu.
+        if (options.isNotEmpty()) Box {
             SonorusButton(
                 text = (options.firstOrNull { it.first == sort }?.second ?: "Titel") +
                     if (dir == "desc") " ↓" else " ↑",
@@ -382,6 +520,7 @@ private fun SortRow(
                 }
             }
         }
+        }
     }
 }
 
@@ -398,10 +537,40 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             if (query.isBlank()) data.artists else data.artists.filter { matches(query, it.name) }
         }
         val grid = rememberLazyGridState()
+        val rows = rememberLazyListState()
+        // Local, seeded from the account. `vm.viewOf` reads the bootstrap,
+        // which is a flow nothing here collects - so the switch would save the
+        // choice and not redraw with it.
+        var view by remember { mutableStateOf(vm.viewOf("artists")) }
         Column(Modifier.fillMaxSize()) {
         TabSearch(query, "Interpreten durchsuchen") { query = it }
+        SortRow(
+            options = emptyList(),
+            sort = "",
+            dir = "asc",
+            total = artists.size,
+            one = "Interpret",
+            many = "Interpreten",
+            trailing = { ViewSwitch(view) { view = it; vm.saveView("artists", it) } },
+            onPick = { _, _ -> },
+        )
         if (artists.isEmpty()) return@Column EmptyNote("Nichts gefunden.")
         Box(Modifier.fillMaxSize()) {
+        if (view == "list") {
+            LazyColumn(state = rows, modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 24.dp)) {
+                items(artists, key = { it.id }) { artist ->
+                    CollectionRow(
+                        title = artist.name,
+                        subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
+                        coverUrl = vm.coverUrl(artist.cover),
+                        coverUrls = artist.covers.mapNotNull { vm.coverUrl(it) },
+                        round = true,
+                    ) { onGo(Routes.artist(artist.id)) }
+                }
+            }
+            ListScroller(rows, artists.size) { scrollLabel(artists[it].name) }
+        } else {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
             state = grid,
@@ -421,6 +590,7 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             }
         }
         GridScroller(grid, artists.size) { scrollLabel(artists[it].name) }
+        }
         }
         }
     }
@@ -454,19 +624,30 @@ fun AlbumsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
         }
         Column(Modifier.fillMaxSize()) {
             TabSearch(query, "Alben durchsuchen") { query = it }
-            SortRow(ALBUM_SORTS, sort, dir, albums.size, "Album", "Alben") { key, direction ->
+            var view by remember { mutableStateOf(vm.viewOf("albums")) }
+            SortRow(
+                options = ALBUM_SORTS,
+                sort = sort,
+                dir = dir,
+                total = albums.size,
+                one = "Album",
+                many = "Alben",
+                trailing = { ViewSwitch(view) { view = it; vm.saveView("albums", it) } },
+            ) { key, direction ->
                 sort = key
                 dir = direction
                 vm.saveSort("albumSort", SortPref(key, direction))
             }
             if (albums.isEmpty()) return@Column EmptyNote("Nichts gefunden.")
-            AlbumGrid(albums, vm, onGo) { album ->
+            val labelOf: (Album) -> String = { album ->
                 when (sort) {
                     "title" -> scrollLabel(album.title)
                     "artist" -> scrollLabel(album.artist)
                     else -> ""
                 }
             }
+            if (view == "list") AlbumRows(albums, vm, onGo, labelOf)
+            else AlbumGrid(albums, vm, onGo, labelOf)
         }
     }
 }

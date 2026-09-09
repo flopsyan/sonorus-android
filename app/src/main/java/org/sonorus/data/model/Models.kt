@@ -294,6 +294,14 @@ data class Prefs(
     val albumSort: SortPref = SortPref("title", "asc"),
     val trackSort: SortPref = SortPref("title", "asc"),
     val statsRange: String = "day",
+    /**
+     * Tiles or a list, per collection - `artists`, `albums`, `genres`.
+     *
+     * The same pref the web app writes, so the choice follows the account
+     * rather than the device: somebody who wants lists wants them everywhere.
+     * A key that is not there, or a value that is neither, means tiles.
+     */
+    val collectionView: Map<String, String> = emptyMap(),
 )
 
 @Serializable

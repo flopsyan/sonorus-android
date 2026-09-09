@@ -729,6 +729,20 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch { runCatching { api.setPref("player", value) } }
     }
 
+    /** Tiles or a list for one collection. Stored on the account, like the web. */
+    fun viewOf(collection: String): String =
+        prefs.collectionView[collection]?.takeIf { it == "list" || it == "grid" } ?: "grid"
+
+    fun saveView(collection: String, value: String) {
+        val next = prefs.collectionView + (collection to value)
+        viewModelScope.launch {
+            runCatching { api.setPref("collectionView", json.encodeToJsonElement(next)) }
+        }
+        bootstrap?.let { b ->
+            _phase.value = AppPhase.Ready(b.copy(prefs = b.prefs.copy(collectionView = next)))
+        }
+    }
+
     fun saveSort(key: String, sort: SortPref) {
         viewModelScope.launch { runCatching { api.setPref(key, json.encodeToJsonElement(sort)) } }
         // Keep the local copy in step so a screen reopened right away agrees.
