@@ -584,6 +584,9 @@ class AppViewModel : ViewModel() {
     /** Whether the original may be asked for at all on this connection. */
     val losslessAllowed: StateFlow<Boolean> get() = app.quality.losslessAllowed
 
+    /** The one song that has been granted the original this once, if any. */
+    val losslessException: StateFlow<Int?> get() = app.quality.exceptionFor
+
     val losslessWifiOnly: StateFlow<Boolean> get() = app.settings.losslessWifiOnly
 
     fun setLosslessWifiOnly(on: Boolean) {
@@ -657,6 +660,21 @@ class AppViewModel : ViewModel() {
      * what it is now - there are two of them today, and the moment there is a
      * third a toggle would have been the wrong shape all along.
      */
+    /**
+     * The original, for this one song, over mobile data.
+     *
+     * Deliberately not a setting and deliberately not sticky: it is bound to the
+     * track id and the player drops it the moment anything else starts, so a
+     * step forward and back means confirming again. The song is reopened at
+     * once, or the exception would only take effect on the next one.
+     */
+    fun allowLosslessOnce() {
+        val track = player.state.value.current ?: return
+        app.quality.allowOnce(track.id)
+        player.reopenAtCurrentQuality()
+        say("Einmalig in voller Qualität - nur für diesen Song.")
+    }
+
     fun qualityPickerBlocked(): String? {
         if (!_qualityReady.value) return "Dieser Server liefert nur das Original."
         val playing = player.state.value.current

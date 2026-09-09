@@ -948,7 +948,7 @@ class PlayerController(
                     // The policy, not the plain setting: on mobile data with
                     // "Lossless nur über WLAN" on, this is Opus even though the
                     // setting says original.
-                    ?: api.streamUrl(track.id, quality.qualityNow()).toUri()
+                    ?: api.streamUrl(track.id, quality.qualityFor(track.id)).toUri()
             )
             .setMediaId(track.id.toString())
             .setMediaMetadata(
@@ -978,7 +978,7 @@ class PlayerController(
      */
     fun servedQuality(track: Track): Quality {
         library.store.entryOf(track.id)?.let { return Quality.of(it.quality) }
-        return Quality.served(track, quality.qualityNow())
+        return Quality.served(track, quality.qualityFor(track.id))
     }
 
     private fun pushPlaylist(tracks: List<Track>, index: Int, positionMs: Long) {
@@ -1025,6 +1025,9 @@ class PlayerController(
             // advance would otherwise start it at zero - the one place a book of
             // several files could still lose where the listener was.
             val next = _state.value.let { it.queue.getOrNull(it.order.getOrNull(index) ?: -1) }
+            // A one-time lossless exception belongs to the song it was given
+            // for and to nothing that follows it.
+            quality.forgetExceptionUnless(next?.id)
             if (next != null && next.isSpoken && next.resumeAt > 1.0 && exoPlayer.currentPosition < 1000) {
                 exoPlayer.seekTo((next.resumeAt * 1000).toLong())
             }

@@ -31,6 +31,23 @@ class QualityPolicy(
     scope: CoroutineScope,
 ) {
 
+    /**
+     * The one song the user has bought an exception for.
+     *
+     * Florian's rule, and the shape follows from it: the exception has to be so
+     * narrow that a large file can never be fetched by accident. It is one
+     * track id, it is confirmed by hand, and it is gone the moment anything
+     * else starts playing - going one song on and back means asking again.
+     */
+    private val _exceptionFor = MutableStateFlow<Int?>(null)
+
+    /**
+     * A flow and not a plain field, because the format under the transport is
+     * drawn from it: granting the exception has to redraw that chip, and a
+     * value nothing observes redraws nothing.
+     */
+    val exceptionFor: StateFlow<Int?> = _exceptionFor.asStateFlow()
+
     private val _losslessAllowed = MutableStateFlow(allowedNow())
 
     /** Whether the original may be asked for at all, right now. */
@@ -53,9 +70,35 @@ class QualityPolicy(
     /** The synchronous answer, for callers that must not read a stale one. */
     fun allowedNow(): Boolean = !settings.losslessWifiOnly.value || connectivity.unmetered.value
 
+    /** The same question for one song, which may carry an exception. */
+    fun allowedFor(trackId: Int?): Boolean =
+        allowedNow() || (trackId != null && trackId == _exceptionFor.value)
+
     fun qualityNow(): Quality {
         val wanted = settings.streamQuality.value
         return if (wanted == Quality.ORIGINAL && !allowedNow()) Quality.OPUS128 else wanted
+    }
+
+    /** What to ask for when opening [trackId], exception included. */
+    fun qualityFor(trackId: Int?): Quality {
+        val wanted = settings.streamQuality.value
+        return if (wanted == Quality.ORIGINAL && !allowedFor(trackId)) Quality.OPUS128 else wanted
+    }
+
+    /** This one song, this once. Undone as soon as anything else plays. */
+    fun allowOnce(trackId: Int) {
+        _exceptionFor.value = trackId
+    }
+
+    /**
+     * The song has changed to [trackId] - drop an exception that was not for
+     * it. Compared rather than cleared outright: reopening the running track is
+     * itself a media-item change, and clearing there would undo the exception
+     * in the same breath it was granted.
+     */
+    fun forgetExceptionUnless(trackId: Int?) {
+        if (_exceptionFor.value == null || _exceptionFor.value == trackId) return
+        _exceptionFor.value = null
     }
 
     private fun recompute() {

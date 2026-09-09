@@ -119,6 +119,7 @@ import androidx.compose.ui.zIndex
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.download.DownloadStatus
 import org.sonorus.data.Quality
+import org.sonorus.data.shortCodec
 import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Track
 import org.sonorus.player.PlayerState
@@ -888,8 +889,12 @@ fun SharedTransitionScope.FullPlayer(
                 // the middle. It says what is *playing*, not what is set: a 128k
                 // MP3 asked for as Opus is handed over untouched, and a badge
                 // that claimed otherwise would be a lie you could measure.
+                // Both read so the chip redraws when either changes - the
+                // format it names follows the setting and the exception alike.
+                val exception by vm.losslessException.collectAsState()
+                val streamed by vm.servedStreamQuality.collectAsState()
                 QualityChip(
-                    label = vm.formatOf(track),
+                    label = remember(track.id, exception, streamed) { vm.formatOf(track) },
                     modifier = Modifier.align(Alignment.Center),
                     // A sheet with the choices, not a switch. Tapping used to
                     // flip to the other quality, which only works while there
@@ -961,7 +966,7 @@ fun SharedTransitionScope.FullPlayer(
     }
 
     if (showStreamQuality) {
-        StreamQualitySheet(vm, onDismiss = { showStreamQuality = false })
+        StreamQualitySheet(vm, track, onDismiss = { showStreamQuality = false })
     }
 
     if (showQuality) {
@@ -1312,24 +1317,66 @@ private fun QualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @UnstableApi
 @Composable
-private fun StreamQualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
+private fun StreamQualitySheet(vm: AppViewModel, track: Track, onDismiss: () -> Unit) {
     val colors = SonorusTheme.colors
     val sheet = rememberModalBottomSheetState()
     val stream by vm.streamQuality.collectAsState()
     val allowed by vm.losslessAllowed.collectAsState()
+    var asking by remember { mutableStateOf(false) }
+
+    // A file that is already lossy is handed over untouched whatever is asked
+    // for - ffmpeg goes down the ladder and never sideways. So there is nothing
+    // to choose here, and offering "Original" and "Opus 128" with a "nur über
+    // WLAN" under one of them described a decision that does not exist.
+    val onlyFormat = if (track.lossless) null else shortCodec(track.codec)
+
+    if (asking) {
+        ConfirmDialog(
+            title = "Einmalig in ${shortCodec(track.codec)}",
+            message = "\"${track.title}\" wird über mobile Daten in voller Größe geladen. " +
+                "Gilt nur für diesen Song - der nächste läuft wieder klein.",
+            confirmLabel = "Einmalig laden",
+            onDismiss = { asking = false },
+            onConfirm = {
+                asking = false
+                vm.allowLosslessOnce()
+                onDismiss()
+            },
+        )
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = colors.surface) {
         Column(Modifier.padding(bottom = 28.dp)) {
             RackLabelText("Streamen", Modifier.padding(horizontal = 20.dp))
             Spacer(Modifier.height(10.dp))
-            QualityOptions(
-                selected = stream,
-                losslessAllowed = allowed,
-                onPick = {
-                    vm.setStreamQuality(it)
-                    onDismiss()
-                },
-            )
+            if (onlyFormat != null) {
+                Text(
+                    "$onlyFormat - wird nicht umgewandelt.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.text,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                )
+            } else {
+                QualityOptions(
+                    selected = stream,
+                    losslessAllowed = allowed,
+                    // The original carries the format it really is here, where
+                    // one song is on screen. In the settings it stays
+                    // "Original", which has to hold for the whole library.
+                    originalLabel = shortCodec(track.codec),
+                    onPick = { quality ->
+                        if (quality == Quality.ORIGINAL && !allowed) {
+                            // The greyed row is still tappable, and this is why:
+                            // being told no with no way to say "yes, this once"
+                            // is the thing Florian asked to change.
+                            asking = true
+                        } else {
+                            vm.setStreamQuality(quality)
+                            onDismiss()
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -1345,6 +1392,8 @@ private fun StreamQualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
 private fun QualityOptions(
     selected: Quality,
     losslessAllowed: Boolean,
+    /** What to call the original here. Empty keeps the general word. */
+    originalLabel: String = "",
     onPick: (Quality) -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -1370,13 +1419,14 @@ private fun QualityOptions(
             )
             Column(Modifier.weight(1f)) {
                 Text(
-                    quality.label,
+                    if (quality == Quality.ORIGINAL && originalLabel.isNotEmpty()) originalLabel
+                    else quality.label,
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (blocked) colors.textFaint else colors.text,
                 )
                 if (blocked) {
                     Text(
-                        "Nur über WLAN",
+                        "Nur über WLAN - tippen für einmalig",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textFaint,
                     )
