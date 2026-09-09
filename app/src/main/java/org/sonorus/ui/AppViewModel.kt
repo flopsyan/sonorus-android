@@ -572,6 +572,17 @@ class AppViewModel : ViewModel() {
      * write costs the position of one page. The reader saves again when it is
      * left, which is the one that really has to land.
      */
+    /** The measured page counts of a book, if this phone still has them. */
+    fun storedReaderPages(bookId: Int, key: String): List<Int>? =
+        app.settings.readerPages(bookId, key)
+
+    fun storeReaderPages(bookId: Int, key: String, pages: List<Int>) =
+        app.settings.setReaderPages(bookId, key, pages)
+
+    /** Marks a book read, or unread, without moving the place it was left at. */
+    suspend fun setEbookFinished(book: org.sonorus.data.model.Ebook, finished: Boolean) =
+        lib.setEbookProgress(book.id, book.progress.doc, book.progress.ratio, finished)
+
     fun saveEbookProgress(id: Int, doc: Int, ratio: Double, finished: Boolean = false) {
         viewModelScope.launch {
             runCatching { lib.setEbookProgress(id, doc, ratio, finished) }

@@ -170,6 +170,10 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     SharedTransitionLayout(Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawer,
+        // A book takes the horizontal swipe for its own page turns, so the
+        // drawer must not listen for one while one is open: the gesture cannot
+        // belong to both, and in a reading view it belongs to the page.
+        gesturesEnabled = !reading,
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = colors.surface,

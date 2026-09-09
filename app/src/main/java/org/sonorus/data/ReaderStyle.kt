@@ -58,7 +58,7 @@ data class ReaderStyle(
 
     companion object {
         val DEFAULT = ReaderStyle()
-        const val MIN_SIZE = 12
+        const val MIN_SIZE = 6
         const val MAX_SIZE = 30
         const val MIN_LEADING = 1.2f
         const val MAX_LEADING = 2.2f

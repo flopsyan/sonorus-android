@@ -20,17 +20,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,15 +52,21 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Request
 import org.json.JSONObject
 import org.sonorus.data.ReaderFont
@@ -79,6 +80,10 @@ import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.theme.SonorusColors
 import org.sonorus.ui.theme.SonorusTheme
 import java.io.ByteArrayInputStream
+import java.util.Locale
+import kotlin.coroutines.resume
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * The reading view: the book's own document in a WebView, everything around it
@@ -102,6 +107,9 @@ import java.io.ByteArrayInputStream
  * engine can answer**, so paging lives in `reader.js` and this screen only asks.
  * It hears back through the `SonorusReader` bridge - a page turn, a tap in the
  * middle, and running off either end of a chapter.
+ *
+ * The page number of the *whole* book is that same question asked of every
+ * chapter, which is what [MeasuringView] is for.
  */
 @UnstableApi
 @Composable
@@ -112,6 +120,9 @@ fun ReaderScreen(vm: AppViewModel, id: Int, onBack: () -> Unit) {
 
 /** What the page is showing right now, as `reader.js` last reported it. */
 private data class PageState(val page: Int = 0, val pages: Int = 1, val ratio: Double = 0.0)
+
+/** A place in the book worth being able to come back to. */
+private data class Place(val doc: Int, val ratio: Double, val page: Int)
 
 @UnstableApi
 @Composable
@@ -133,12 +144,23 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
     var enterAt by remember { mutableStateOf(book.progress.ratio) }
     var enterFromEnd by remember { mutableStateOf(false) }
 
+    // The book's page numbers, and the place to come back to after a jump.
+    val paging = remember(book.id) { Paging(book) }
+    var jumpBack by remember { mutableStateOf<Place?>(null) }
+    // What the finger is pointing at while the bar is being dragged, as a share
+    // of the whole book. Nothing moves until the finger lifts.
+    var scrub by remember { mutableStateOf<Float?>(null) }
+
+    var web by remember { mutableStateOf<WebView?>(null) }
+
     val latestDoc by rememberUpdatedState(doc)
     val latestPage by rememberUpdatedState(page)
 
     fun save(finished: Boolean = false) {
         vm.saveEbookProgress(book.id, latestDoc, latestPage.ratio, finished)
     }
+
+    fun here(): Place = Place(latestDoc, latestPage.ratio, paging.pageOfBook(latestDoc, latestPage))
 
     fun goToDoc(next: Int, fromEnd: Boolean) {
         val target = next.coerceIn(0, lastDoc(book))
@@ -147,6 +169,29 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
         enterAt = if (fromEnd) 1.0 else 0.0
         enterFromEnd = fromEnd
         doc = target
+    }
+
+    /** A jump the reader can undo: anywhere in the book, from anywhere in it. */
+    fun jumpTo(target: Int, at: Double) {
+        val to = target.coerceIn(0, lastDoc(book))
+        jumpBack = here()
+        save()
+        if (to == doc) {
+            web?.evalReader("Reader.goToRatio($at)")
+            return
+        }
+        enterAt = at
+        enterFromEnd = false
+        doc = to
+    }
+
+    // The chip is a way back, not a fixture. Half a minute is long enough to
+    // look around after a jump and still find the way home.
+    LaunchedEffect(jumpBack) {
+        if (jumpBack != null) {
+            delay(30_000)
+            jumpBack = null
+        }
     }
 
     // The overlay is what the back button closes first; only with it closed does
@@ -171,11 +216,15 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
             @JavascriptInterface
             fun onState(json: String) {
                 val o = runCatching { JSONObject(json) }.getOrNull() ?: return
-                page = PageState(
+                val state = PageState(
                     page = o.optInt("page", 0),
                     pages = o.optInt("pages", 1).coerceAtLeast(1),
                     ratio = o.optDouble("ratio", 0.0),
                 )
+                page = state
+                // The chapter on screen is a measurement too, and the first one
+                // to arrive - the estimate for the rest is built on it.
+                paging.saw(latestDoc, state.pages)
                 if (o.optString("reason") == "turn") save()
             }
 
@@ -200,7 +249,7 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
             fun onLink(href: String) {
                 val clean = href.substringBefore('#')
                 val target = book.spine.indexOfFirst { it.endsWith(clean) }
-                if (target >= 0) goToDoc(target, fromEnd = false)
+                if (target >= 0) jumpTo(target, 0.0)
             }
         }
     }
@@ -209,15 +258,30 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
     // `update` runs on every recomposition, and the page reports its own state
     // through the bridge - so a plain `loadUrl` in there reloads the document
     // every time the reader turns a page, which is a reload loop and a blank
-    // screen. These two say what has really been done to the view.
+    // screen. These three say what has really been done to the view.
     val shown = remember { Loaded() }
     val url = vm.api.ebookReadUrl(book.id, hrefOf(book, doc))
     val latestStyle by rememberUpdatedState(style)
 
+    val footer = paging.footerText(doc, page)
+
     Box(Modifier.fillMaxSize().background(colors.bg)) {
+        // The tape measure, first in the box so the real page is drawn over it.
+        // It is laid out at exactly the size of the visible one, because a page
+        // count is a fact about a screen.
+        MeasuringView(
+            vm = vm,
+            book = book,
+            style = style,
+            colors = colors,
+            paging = paging,
+            modifier = Modifier.matchParentSize(),
+        )
+
         AndroidView(
             factory = {
                 WebView(context).apply {
+                    web = this
                     // Definite, not WRAP_CONTENT. A WebView told to wrap its
                     // content has no height to resolve `vh` and `%` against, so
                     // `height: calc(100vh - ...)` computes to 0 - and a column
@@ -226,24 +290,15 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    setBackgroundColor(colors.bg.toArgb())
-                    @SuppressLint("SetJavaScriptEnabled")
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = false
-                    // The text is laid out in columns of exactly one viewport,
-                    // so anything that rescales it breaks the page count.
-                    settings.useWideViewPort = false
-                    settings.loadWithOverviewMode = false
-                    settings.builtInZoomControls = false
-                    settings.textZoom = 100
-                    isVerticalScrollBarEnabled = false
-                    isHorizontalScrollBarEnabled = false
+                    readerDefaults(colors)
                     addJavascriptInterface(bridge, "SonorusReader")
                     webViewClient = ReaderClient(vm) {
                         applyStyle(this, latestStyle, colors)
                         shown.style = latestStyle
-                        // Land where the reader was, once the page has been
-                        // broken into columns - reader.js reports 'ready' then.
+                        shown.footer = null
+                        // Land where the reader was. reader.js holds on to the
+                        // share until it has broken the text into columns, so
+                        // this may be said before there is a page to say it of.
                         if (enterFromEnd) evalReader("Reader.goToEnd()")
                         else evalReader("Reader.goToRatio(${enterAt})")
                     }
@@ -260,6 +315,10 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
                 if (shown.style != style) {
                     shown.style = style
                     applyStyle(view, style, colors)
+                }
+                if (shown.footer != footer) {
+                    shown.footer = footer
+                    view.evalReader("Reader.footer(${JSONObject.quote(footer)})")
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -280,20 +339,56 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
             )
         }
 
-        AnimatedVisibility(
-            visible = overlay,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it },
-            modifier = Modifier.align(Alignment.BottomCenter),
-        ) {
-            ReaderBottomBar(book = book, doc = doc, page = page)
+        // The way back sits above the bar rather than in it, because it outlives
+        // the bar: the reader closes the menu and reads on, and the chip has to
+        // still be there.
+        Column(Modifier.align(Alignment.BottomCenter)) {
+            AnimatedVisibility(
+                visible = jumpBack != null && sheet == Sheet.NONE,
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it },
+            ) {
+                val target = jumpBack
+                JumpBackChip(
+                    label = "Zurück zu Seite ${target?.page ?: 1}",
+                    onClick = {
+                        val to = target ?: return@JumpBackChip
+                        jumpBack = null
+                        if (to.doc == doc) {
+                            web?.evalReader("Reader.goToRatio(${to.ratio})")
+                        } else {
+                            enterAt = to.ratio
+                            enterFromEnd = false
+                            doc = to.doc
+                        }
+                    },
+                )
+            }
+            AnimatedVisibility(
+                visible = overlay,
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it },
+            ) {
+                ReaderBottomBar(
+                    paging = paging,
+                    doc = doc,
+                    page = page,
+                    scrub = scrub,
+                    onScrub = { scrub = it },
+                    onSeek = { share ->
+                        scrub = null
+                        val (target, at) = paging.placeAt(share)
+                        jumpTo(target, at)
+                    },
+                )
+            }
         }
 
         when (sheet) {
             Sheet.CHAPTERS -> ChapterSheet(
                 book = book,
                 current = doc,
-                onPick = { goToDoc(it, fromEnd = false); sheet = Sheet.NONE; overlay = false },
+                onPick = { jumpTo(it, 0.0); sheet = Sheet.NONE; overlay = false },
                 onDismiss = { sheet = Sheet.NONE },
             )
             Sheet.STYLE -> StyleSheet(
@@ -309,9 +404,291 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
 private enum class Sheet { NONE, CHAPTERS, STYLE }
 
 /** What has really been pushed into the view, as opposed to what Compose holds. */
-private class Loaded(var url: String = "", var style: ReaderStyle? = null)
+private class Loaded(
+    var url: String = "",
+    var style: ReaderStyle? = null,
+    var footer: String? = null,
+)
+
+// --- Counting the pages of a whole book ---------------------------------------
+
+/**
+ * How many pages the book has, and which one is on screen.
+ *
+ * There is no such thing as *the* page count of an EPUB: a page is whatever
+ * fits on this screen at this font size, so the number changes with every one
+ * of the four settings and with turning the phone. It can only be measured, by
+ * laying every chapter out once - which is what [MeasuringView] does while the
+ * reader reads.
+ *
+ * Until that has finished the count is **estimated** from the character counts
+ * the server sent, calibrated against the chapters that have been laid out
+ * already. That way a book opens with a number instead of a wait, and the
+ * number it opens with is close enough that the exact one does not read as a
+ * correction.
+ */
+private class Paging(private val book: Ebook) {
+    /** Measured pages per document; null where nothing has been laid out yet. */
+    private val counts = mutableStateOf<List<Int?>>(List(book.documents.coerceAtLeast(1)) { null })
+
+    private val lengths: List<Int> =
+        if (book.lengths.size == book.documents) book.lengths else emptyList()
+
+    fun saw(doc: Int, pages: Int) {
+        if (doc !in counts.value.indices || pages < 1) return
+        if (counts.value[doc] == pages) return
+        counts.value = counts.value.toMutableList().also { it[doc] = pages }
+    }
+
+    fun seen(doc: Int): Int? = counts.value.getOrNull(doc)
+
+    /** Everything measured, in spine order, for the store. Null if incomplete. */
+    fun measured(): List<Int>? = counts.value.takeIf { l -> l.all { it != null } }?.map { it!! }
+
+    fun load(pages: List<Int>) {
+        if (pages.size == counts.value.size && pages.all { it >= 1 }) counts.value = pages
+    }
+
+    fun forget() {
+        counts.value = List(book.documents.coerceAtLeast(1)) { null }
+    }
+
+    /**
+     * Characters that fit on one page, taken from what has actually been laid
+     * out. Without a single measurement there is nothing to calibrate against,
+     * and the estimate falls back to a paperback page.
+     */
+    private fun charsPerPage(): Double {
+        if (lengths.isEmpty()) return FALLBACK_CHARS
+        var chars = 0L
+        var pages = 0L
+        counts.value.forEachIndexed { i, measured ->
+            if (measured != null) {
+                chars += lengths.getOrElse(i) { 0 }.toLong()
+                pages += measured.toLong()
+            }
+        }
+        return if (chars > 0 && pages > 0) max(1.0, chars.toDouble() / pages) else FALLBACK_CHARS
+    }
+
+    fun pagesOf(doc: Int): Int {
+        counts.value.getOrNull(doc)?.let { return it }
+        val chars = lengths.getOrNull(doc) ?: return 1
+        return max(1, (chars / charsPerPage()).roundToInt())
+    }
+
+    fun total(): Int = counts.value.indices.sumOf { pagesOf(it) }.coerceAtLeast(1)
+
+    fun before(doc: Int): Int = (0 until doc).sumOf { pagesOf(it) }
+
+    /** Which page of the whole book the reader is looking at, counted from 1. */
+    fun pageOfBook(doc: Int, page: PageState): Int =
+        (before(doc) + page.page + 1).coerceIn(1, total())
+
+    /**
+     * How far through the whole book the reader is.
+     *
+     * Weighted by how much text each document holds rather than by their count:
+     * a book that opens with eight one-line front-matter pages would otherwise
+     * be "18 % read" before the first sentence.
+     */
+    fun share(doc: Int, ratio: Double): Double {
+        if (lengths.isEmpty()) {
+            val total = book.documents.coerceAtLeast(1)
+            return ((doc + ratio) / total).coerceIn(0.0, 1.0)
+        }
+        val total = lengths.sumOf { it.toLong() }.coerceAtLeast(1L).toDouble()
+        val before = lengths.take(doc).sumOf { it.toLong() }.toDouble()
+        val here = (lengths.getOrNull(doc) ?: 0).toDouble() * ratio
+        return ((before + here) / total).coerceIn(0.0, 1.0)
+    }
+
+    /** The reverse: the place in the book that a share of it names. */
+    fun placeAt(share: Float): Pair<Int, Double> {
+        val at = share.coerceIn(0f, 1f).toDouble()
+        if (lengths.isEmpty()) {
+            val docs = book.documents.coerceAtLeast(1)
+            val exact = at * docs
+            val doc = exact.toInt().coerceIn(0, docs - 1)
+            return doc to (exact - doc).coerceIn(0.0, 1.0)
+        }
+        val total = lengths.sumOf { it.toLong() }.coerceAtLeast(1L).toDouble()
+        var wanted = at * total
+        lengths.forEachIndexed { i, len ->
+            if (wanted <= len || i == lengths.lastIndex) {
+                return i to (if (len > 0) (wanted / len).coerceIn(0.0, 1.0) else 0.0)
+            }
+            wanted -= len
+        }
+        return 0 to 0.0
+    }
+
+    /** The line in the book's bottom margin: `38/379 (10,0 %)`. */
+    fun footerText(doc: Int, page: PageState): String =
+        "${pageOfBook(doc, page)}/${total()} (${percent(share(doc, page.ratio))})"
+
+    private companion object {
+        /** A page of a paperback, for a book nothing has been laid out of yet. */
+        const val FALLBACK_CHARS = 1400.0
+    }
+}
+
+/** A share as German per cent, with the one decimal that makes it move. */
+private fun percent(share: Double): String =
+    String.format(Locale.GERMANY, "%.1f %%", (share * 100).coerceIn(0.0, 100.0))
+
+/**
+ * A WebView nobody sees, which lays every chapter out once to count its pages.
+ *
+ * A second view rather than the reader's own, because the reader is busy showing
+ * a chapter and navigating it away and back would be visible. Everything that
+ * decides where a line breaks is part of the key: the four settings and the size
+ * of the view. Change one and the old counts are counts of another book.
+ *
+ * What it finds is kept on the phone, so a book opened again with the same
+ * settings has its numbers at once.
+ */
+@Composable
+private fun MeasuringView(
+    vm: AppViewModel,
+    book: Ebook,
+    style: ReaderStyle,
+    colors: SonorusColors,
+    paging: Paging,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var view by remember { mutableStateOf<WebView?>(null) }
+    var size by remember { mutableStateOf(0 to 0) }
+
+    AndroidView(
+        factory = {
+            WebView(context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                readerDefaults(colors)
+                view = this
+            }
+        },
+        // Invisible and out of reach: the real page is drawn over it and takes
+        // every touch, and alpha 0 keeps a half-drawn chapter from flickering
+        // into sight between two measurements.
+        //
+        // The size comes from the layout rather than from the view, because
+        // asking the view for it is asking too early: a `post` from `update`
+        // still runs before the first layout and answers 0 by 0, and a size
+        // that never changes again never starts the count.
+        modifier = modifier
+            .alpha(0f)
+            .onSizeChanged { size = it.width to it.height },
+    )
+
+    LaunchedEffect(view, book.id, style, size) {
+        val web = view ?: return@LaunchedEffect
+        if (size.first <= 0 || size.second <= 0) return@LaunchedEffect
+        val key = pagesKey(style, size)
+
+        paging.forget()
+        vm.storedReaderPages(book.id, key)?.let {
+            paging.load(it)
+            return@LaunchedEffect
+        }
+        // In reading order, so the pages just ahead of the reader are right
+        // before the ones at the end of the book are.
+        var failed = false
+        for (doc in 0 until book.documents) {
+            if (paging.seen(doc) != null) continue
+            val pages = withTimeoutOrNull(SLOW_CHAPTER_MS) {
+                measureChapter(web, vm, book, doc, style, colors)
+            }
+            if (pages == null) failed = true
+            paging.saw(doc, pages ?: 1)
+        }
+        // A run that gave up on a chapter is not worth keeping: it would be
+        // read back as fact on every later open, and the book would be one
+        // page short for good.
+        if (!failed) paging.measured()?.let { vm.storeReaderPages(book.id, key, it) }
+    }
+}
+
+/** Everything a page count depends on, as one string. */
+private fun pagesKey(style: ReaderStyle, size: Pair<Int, Int>): String =
+    "${style.font.wire}/${style.size}/${style.leading}/${style.margin}/${size.first}x${size.second}"
+
+/** Lays one chapter out in [web] and answers how many pages it came to. */
+private suspend fun measureChapter(
+    web: WebView,
+    vm: AppViewModel,
+    book: Ebook,
+    doc: Int,
+    style: ReaderStyle,
+    colors: SonorusColors,
+): Int = suspendCancellableCoroutine { cont ->
+    web.webViewClient = ReaderClient(vm) {
+        applyStyle(this, style, colors)
+        countPages(this, 0) { pages -> if (cont.isActive) cont.resume(pages) }
+    }
+    web.loadUrl(vm.api.ebookReadUrl(book.id, hrefOf(book, doc)))
+}
+
+/**
+ * Asks the page what it came to, and asks again until the book's own faces have
+ * arrived.
+ *
+ * `Reader.measureNow()` rather than the usual report, because this view is
+ * never drawn and therefore never given a frame - the reader's own measurement
+ * runs on `requestAnimationFrame` and would simply never happen here.
+ */
+private fun countPages(web: WebView, tries: Int, then: (Int) -> Unit) {
+    web.postDelayed({
+        web.evaluateJavascript("window.Reader ? Reader.measureNow() : null") { answer ->
+            val seen = measurementIn(answer)
+            if (seen.fonts || tries >= FONT_TRIES) then(seen.pages)
+            else countPages(web, tries + 1, then)
+        }
+    }, if (tries == 0) SETTLE_MS else FONT_WAIT_MS)
+}
+
+private data class Measurement(val pages: Int, val fonts: Boolean)
+
+/**
+ * The measurement out of what `evaluateJavascript` hands back.
+ *
+ * It arrives as a JSON *string* holding JSON - the quoting is the bridge's, not
+ * the reader's - so it is unwrapped once before it is read.
+ */
+private fun measurementIn(answer: String?): Measurement {
+    if (answer.isNullOrBlank() || answer == "null") return Measurement(1, false)
+    val inner = runCatching { JSONObject("{\"v\":$answer}").getString("v") }.getOrNull()
+        ?: return Measurement(1, false)
+    val o = runCatching { JSONObject(inner) }.getOrNull() ?: return Measurement(1, false)
+    return Measurement(o.optInt("pages", 1).coerceAtLeast(1), o.optBoolean("fonts", false))
+}
+
+private const val SETTLE_MS = 60L
+private const val FONT_WAIT_MS = 100L
+private const val FONT_TRIES = 12
+private const val SLOW_CHAPTER_MS = 8_000L
 
 // --- The page's own half ------------------------------------------------------
+
+/** The settings every reading WebView needs, seen or unseen. */
+@SuppressLint("SetJavaScriptEnabled")
+private fun WebView.readerDefaults(colors: SonorusColors) {
+    setBackgroundColor(colors.bg.toArgb())
+    settings.javaScriptEnabled = true
+    settings.domStorageEnabled = false
+    // The text is laid out in columns of exactly one viewport, so anything that
+    // rescales it breaks the page count.
+    settings.useWideViewPort = false
+    settings.loadWithOverviewMode = false
+    settings.builtInZoomControls = false
+    settings.textZoom = 100
+    isVerticalScrollBarEnabled = false
+    isHorizontalScrollBarEnabled = false
+}
 
 /**
  * Serves the WebView out of the app's HTTP client.
@@ -399,7 +776,9 @@ private fun ReaderTopBar(
         Modifier
             .fillMaxWidth()
             .background(colors.surface)
-            .windowInsetsPadding(WindowInsets.statusBars)
+            // No inset padding of its own. The reader sits inside the Shell's
+            // scaffold, which has already kept the status bar clear; padding it
+            // a second time is the empty strip that used to sit above this row.
             .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -434,20 +813,37 @@ private fun ReaderTopBar(
 }
 
 /**
- * The page number and how far through the book this is.
+ * Where in the book this is, and the one control that moves through it.
  *
- * The page is the page of the chapter, because that is the only page anybody
- * can point at: the whole book has no fixed page count at a size the reader can
- * change. The share of the book comes from the character counts the server sent.
+ * The page of the *book* is the number on the left, because that is the number
+ * a reader means. The page of the chapter is kept under the bar: it says how
+ * much of this chapter is left, which the book's number cannot.
  */
 @Composable
-private fun ReaderBottomBar(book: Ebook, doc: Int, page: PageState) {
+private fun ReaderBottomBar(
+    paging: Paging,
+    doc: Int,
+    page: PageState,
+    scrub: Float?,
+    onScrub: (Float?) -> Unit,
+    onSeek: (Float) -> Unit,
+) {
     val colors = SonorusTheme.colors
+    val share = paging.share(doc, page.ratio)
+    val shown = scrub?.toDouble() ?: share
+    val dragging = scrub != null
+    val target = scrub?.let { paging.placeAt(it) }
+    val shownPage = if (target != null) {
+        val inDoc = (target.second * (paging.pagesOf(target.first) - 1)).roundToInt()
+        (paging.before(target.first) + inDoc + 1).coerceIn(1, paging.total())
+    } else {
+        paging.pageOfBook(doc, page)
+    }
+
     Column(
         Modifier
             .fillMaxWidth()
             .background(colors.surface)
-            .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(horizontal = 20.dp, vertical = 10.dp),
     ) {
         Row(
@@ -456,52 +852,54 @@ private fun ReaderBottomBar(book: Ebook, doc: Int, page: PageState) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Seite ${page.page + 1} von ${page.pages}",
+                "Seite $shownPage von ${paging.total()}",
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.textDim,
+                color = if (dragging) colors.accent else colors.textDim,
             )
             Text(
-                "${(shareRead(book, doc, page.ratio) * 100).toInt()} % gelesen",
+                "${percent(shown)} gelesen",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textFaint,
             )
         }
-        Spacer(Modifier.height(8.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(colors.line)
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(shareRead(book, doc, page.ratio).toFloat())
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(colors.accent)
-            )
-        }
+        Slider(
+            value = shown.toFloat(),
+            onValueChange = onScrub,
+            onValueChangeFinished = { scrub?.let(onSeek) },
+            colors = SliderDefaults.colors(
+                thumbColor = colors.accent,
+                activeTrackColor = colors.accent,
+                inactiveTrackColor = colors.line,
+            ),
+        )
+        Text(
+            "Seite ${page.page + 1} von ${page.pages} des Kapitels",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textFaint,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
-/**
- * How far through the whole book the reader is.
- *
- * Weighted by how much text each document holds rather than by their count: a
- * book that opens with eight one-line front-matter pages would otherwise be
- * "18 % read" before the first sentence.
- */
-private fun shareRead(book: Ebook, doc: Int, ratio: Double): Double {
-    val lengths = book.lengths
-    if (lengths.size != book.documents || lengths.isEmpty()) {
-        val total = book.documents.coerceAtLeast(1)
-        return ((doc + ratio) / total).coerceIn(0.0, 1.0)
+/** The way back to where a jump started. Lives for half a minute, then goes. */
+@Composable
+private fun JumpBackChip(label: String, onClick: () -> Unit) {
+    val colors = SonorusTheme.colors
+    Box(Modifier.fillMaxWidth().padding(bottom = 10.dp), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(colors.surface)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.Undo, null, tint = colors.accent, modifier = Modifier.size(18.dp))
+            Text(label, style = MaterialTheme.typography.bodySmall, color = colors.text)
+        }
     }
-    val total = lengths.sumOf { it.toLong() }.coerceAtLeast(1L).toDouble()
-    val before = lengths.take(doc).sumOf { it.toLong() }.toDouble()
-    val here = (lengths.getOrNull(doc) ?: 0).toDouble() * ratio
-    return ((before + here) / total).coerceIn(0.0, 1.0)
 }
 
 @Composable
@@ -525,7 +923,6 @@ private fun ChapterSheet(
                 .heightIn(max = 460.dp)
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 .background(colors.surface)
-                .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
             SheetHead("Kapitel", onDismiss)
             LazyColumn(contentPadding = PaddingValues(bottom = 12.dp)) {
@@ -568,7 +965,6 @@ private fun StyleSheet(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 .background(colors.surface)
-                .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(bottom = 16.dp)
         ) {
             SheetHead("Schrift", onDismiss)
@@ -586,19 +982,19 @@ private fun StyleSheet(
                 value = style.size.toFloat(),
                 range = ReaderStyle.MIN_SIZE.toFloat()..ReaderStyle.MAX_SIZE.toFloat(),
                 readout = "${style.size} px",
-            ) { onChange(style.withSize(it.toInt())) }
+            ) { onChange(style.withSize(it.roundToInt())) }
             StyleSlider(
                 label = "Zeilenabstand",
                 value = style.leading,
                 range = ReaderStyle.MIN_LEADING..ReaderStyle.MAX_LEADING,
-                readout = String.format("%.1f", style.leading),
+                readout = String.format(Locale.GERMANY, "%.1f", style.leading),
             ) { onChange(style.withLeading(it)) }
             StyleSlider(
                 label = "Rand",
                 value = style.margin.toFloat(),
                 range = ReaderStyle.MIN_MARGIN.toFloat()..ReaderStyle.MAX_MARGIN.toFloat(),
                 readout = "${style.margin} px",
-            ) { onChange(style.withMargin(it.toInt())) }
+            ) { onChange(style.withMargin(it.roundToInt())) }
         }
     }
 }

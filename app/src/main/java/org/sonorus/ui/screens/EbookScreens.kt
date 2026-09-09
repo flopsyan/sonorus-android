@@ -3,6 +3,7 @@ package org.sonorus.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,9 +14,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
+import kotlinx.coroutines.launch
 import org.sonorus.data.model.Ebook
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
@@ -26,6 +33,7 @@ import org.sonorus.ui.components.DetailSkeleton
 import org.sonorus.ui.components.EmptyNote
 import org.sonorus.ui.components.MediaCard
 import org.sonorus.ui.components.RackLabelText
+import org.sonorus.ui.components.SonorusButton
 import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.theme.SonorusTheme
 
@@ -111,6 +119,8 @@ fun EbookAuthorScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
 fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("ebook", id) { vm.lib.ebook(id) }
     val colors = SonorusTheme.colors
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
 
     LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
         val book = data.book
@@ -141,6 +151,30 @@ fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                             color = colors.textDim,
                         )
                     }
+                }
+            }
+            // The same button the spoken word has, for the same reason: a book
+            // finished on the last page still needs somebody to say so, and a
+            // book started by accident needs taking back.
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    SonorusButton(
+                        text = if (book.progress.finished) "Als ungelesen markieren"
+                        else "Als gelesen markieren",
+                        enabled = !busy,
+                        onClick = {
+                            busy = true
+                            scope.launch {
+                                runCatching { vm.setEbookFinished(book, !book.progress.finished) }
+                                    .onFailure { vm.say(it.message ?: "Konnte nicht gespeichert werden.") }
+                                busy = false
+                                load.reload()
+                            }
+                        },
+                    )
                 }
             }
             if (book.description.isNotEmpty()) {

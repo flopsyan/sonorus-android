@@ -123,6 +123,31 @@ class Settings(context: Context) {
     )
     val readerStyle: StateFlow<ReaderStyle> = _readerStyle.asStateFlow()
 
+    /**
+     * How many pages each chapter of a book came to, under the settings they
+     * were measured with.
+     *
+     * One entry per book, and it is replaced rather than added to: a count
+     * belongs to a font size and a screen, so the moment either changes the old
+     * numbers are numbers of a different book. Keeping them would only fill the
+     * file with counts nothing will ask for again.
+     */
+    fun readerPages(bookId: Int, key: String): List<Int>? {
+        val raw = prefs.getString(KEY_READER_PAGES + bookId, null) ?: return null
+        val split = raw.indexOf('|')
+        if (split <= 0 || raw.substring(0, split) != key) return null
+        return raw.substring(split + 1)
+            .split(',')
+            .mapNotNull { it.toIntOrNull() }
+            .takeIf { it.isNotEmpty() }
+    }
+
+    fun setReaderPages(bookId: Int, key: String, pages: List<Int>) {
+        prefs.edit()
+            .putString(KEY_READER_PAGES + bookId, key + "|" + pages.joinToString(","))
+            .apply()
+    }
+
     fun setReaderStyle(style: ReaderStyle) {
         prefs.edit()
             .putString(KEY_READER_FONT, style.font.wire)
@@ -134,6 +159,7 @@ class Settings(context: Context) {
     }
 
     private companion object {
+        const val KEY_READER_PAGES = "readerPages:"
         const val KEY_WIFI_ONLY = "wifiOnly"
         const val KEY_LOSSLESS_WIFI = "losslessWifiOnly"
         const val KEY_OFFLINE = "offlineMode"
