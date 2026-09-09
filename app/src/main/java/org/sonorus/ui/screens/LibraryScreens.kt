@@ -26,11 +26,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -80,6 +82,7 @@ import org.sonorus.ui.components.TrackList
 import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.starLabel
 import org.sonorus.ui.theme.SonorusTheme
+import java.text.Normalizer
 import org.sonorus.ui.theme.num
 
 /** Builds the standard set of row actions for a list of tracks. */
@@ -227,10 +230,15 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     var dir by remember { mutableStateOf(vm.prefs.trackSort.dir) }
     val load = rememberLoad("tracks", sort, dir) { vm.lib.tracks(sort = sort, dir = dir, limit = 5000) }
     val player by vm.player.state.collectAsState()
+    var query by remember { mutableStateOf("") }
 
     LoadBox(load, skeleton = { TrackListSkeleton() }) { data ->
+        val tracks = remember(data.tracks, query) {
+            if (query.isBlank()) data.tracks
+            else data.tracks.filter { matches(query, it.title, it.artist, it.album) }
+        }
         TrackList(
-            tracks = data.tracks,
+            tracks = tracks,
             currentTrackId = player.current?.id,
             // Deliberately the plain route: sorting the list rewrites nothing
             // about *which* list it is, the same call the web app makes by
@@ -239,23 +247,27 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             actions = trackActions(vm, data.tracks, "Alle Songs", Routes.TRACKS, onGo),
             showAlbum = true,
             header = {
+                Column {
+                TabSearch(query, "Songs durchsuchen") { query = it }
                 SortRow(
                     options = TRACK_SORTS,
                     sort = sort,
                     dir = dir,
-                    total = data.total,
+                    total = if (query.isBlank()) data.total else tracks.size,
                     onPick = { key, direction ->
                         sort = key
                         dir = direction
                         vm.saveSort("trackSort", SortPref(key, direction))
                     },
                 )
+                }
             },
             // The bar on the right has to agree with the sort, or it would say
             // "M" while the rows are ordered by artist. A sort with no letter
             // behind it - year, length, when it arrived, how it is rated - gets
             // none: an empty label hides the bubble, which is better than a "M"
             // that describes nothing about where the finger is.
+            emptyNote = if (query.isBlank()) "Hier ist noch nichts." else "Nichts gefunden.",
             labelOf = { track ->
                 when (sort) {
                     "title" -> scrollLabel(track.title)
@@ -267,6 +279,63 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
         )
     }
 }
+
+/**
+ * A search that narrows the tab it sits on, and nothing else.
+ *
+ * Filtered here rather than fetched: the list is already in hand - Alle Songs
+ * loads up to 5000 rows in one go - so this is instant and works offline, where
+ * a request per keystroke would be neither. The global search in the top bar is
+ * a different question ("where is this in the library?") and is untouched.
+ */
+@Composable
+private fun TabSearch(query: String, hint: String, onChange: (String) -> Unit) {
+    val colors = SonorusTheme.colors
+    OutlinedTextField(
+        value = query,
+        onValueChange = onChange,
+        singleLine = true,
+        placeholder = { Text(hint, color = colors.textFaint) },
+        leadingIcon = { Icon(Icons.Filled.Search, null, tint = colors.textDim) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onChange("") }) {
+                    Icon(Icons.Filled.Close, "Suche leeren", tint = colors.textDim)
+                }
+            }
+        },
+        shape = RoundedCornerShape(8.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = colors.accent,
+            unfocusedBorderColor = colors.line,
+            focusedContainerColor = colors.surface2,
+            unfocusedContainerColor = colors.surface2,
+            focusedTextColor = colors.text,
+            unfocusedTextColor = colors.text,
+            cursorColor = colors.accent,
+        ),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+/**
+ * Case- and accent-blind, and every word has to be in there somewhere.
+ *
+ * Folded the same way the scroll bar folds its letters, so "Bjork" finds
+ * "Björk" - typing an umlaut to find a band is not a thing anyone does.
+ */
+private fun matches(query: String, vararg fields: String): Boolean {
+    val words = fold(query).split(' ').filter { it.isNotEmpty() }
+    if (words.isEmpty()) return true
+    val hay = fields.joinToString(" ") { fold(it) }
+    return words.all { it in hay }
+}
+
+private fun fold(text: String): String =
+    Normalizer.normalize(text, Normalizer.Form.NFD)
+        .filterNot { it.isISOControl() }
+        .replace(Regex("\\p{Mn}+"), "")
+        .lowercase()
 
 @Composable
 private fun SortRow(
@@ -322,9 +391,16 @@ private fun SortRow(
 @Composable
 fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val load = rememberLoad("artists") { vm.lib.artists() }
+    var query by remember { mutableStateOf("") }
     LoadBox(load, skeleton = { CardGridSkeleton(round = true) }) { data ->
         if (data.artists.isEmpty()) return@LoadBox EmptyNote("Noch keine Interpreten.")
+        val artists = remember(data.artists, query) {
+            if (query.isBlank()) data.artists else data.artists.filter { matches(query, it.name) }
+        }
         val grid = rememberLazyGridState()
+        Column(Modifier.fillMaxSize()) {
+        TabSearch(query, "Interpreten durchsuchen") { query = it }
+        if (artists.isEmpty()) return@Column EmptyNote("Nichts gefunden.")
         Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
@@ -332,7 +408,7 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(8.dp, 8.dp, 8.dp, 24.dp),
         ) {
-            items(data.artists, key = { it.id }) { artist ->
+            items(artists, key = { it.id }) { artist ->
                 MediaCard(
                     title = artist.name,
                     subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
@@ -344,7 +420,8 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 ) { onGo(Routes.artist(artist.id)) }
             }
         }
-        GridScroller(grid, data.artists.size) { scrollLabel(data.artists[it].name) }
+        GridScroller(grid, artists.size) { scrollLabel(artists[it].name) }
+        }
         }
     }
 }
@@ -368,15 +445,22 @@ fun AlbumsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     var sort by remember { mutableStateOf(vm.prefs.albumSort.key) }
     var dir by remember { mutableStateOf(vm.prefs.albumSort.dir) }
     val load = rememberLoad("albums", sort, dir) { vm.lib.albums(sort = sort, dir = dir) }
+    var query by remember { mutableStateOf("") }
 
     LoadBox(load, skeleton = { CardGridSkeleton() }) { data ->
+        val albums = remember(data.albums, query) {
+            if (query.isBlank()) data.albums
+            else data.albums.filter { matches(query, it.title, it.artist) }
+        }
         Column(Modifier.fillMaxSize()) {
-            SortRow(ALBUM_SORTS, sort, dir, data.albums.size, "Album", "Alben") { key, direction ->
+            TabSearch(query, "Alben durchsuchen") { query = it }
+            SortRow(ALBUM_SORTS, sort, dir, albums.size, "Album", "Alben") { key, direction ->
                 sort = key
                 dir = direction
                 vm.saveSort("albumSort", SortPref(key, direction))
             }
-            AlbumGrid(data.albums, vm, onGo) { album ->
+            if (albums.isEmpty()) return@Column EmptyNote("Nichts gefunden.")
+            AlbumGrid(albums, vm, onGo) { album ->
                 when (sort) {
                     "title" -> scrollLabel(album.title)
                     "artist" -> scrollLabel(album.artist)
