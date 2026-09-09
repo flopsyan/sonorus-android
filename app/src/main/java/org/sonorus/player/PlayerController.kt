@@ -844,15 +844,16 @@ class PlayerController(
     /**
      * Reopens the running track at the quality that is set now.
      *
-     * Only ever for a **streamed** song: a download is the file it is, and
-     * nothing here re-fetches one. `rearrangeAround` cannot help - the URI has
-     * changed, so the item really does have to be built again - but the position
-     * and whether it was playing are carried over, so the switch costs the
-     * buffer and nothing else.
+     * A download is normally the file it is and nothing here re-fetches one -
+     * unless the one-off exception names this very song, which is the one way
+     * to ask for the original of something that lies here small.
+     * `rearrangeAround` cannot help - the URI has changed, so the item really
+     * does have to be built again - but the position and whether it was playing
+     * are carried over, so the switch costs the buffer and nothing else.
      */
     fun reopenAtCurrentQuality() {
         val track = _state.value.current ?: return
-        if (library.store.fileOf(track.id) != null) return
+        if (library.store.fileOf(track.id) != null && !quality.isExceptionFor(track.id)) return
         val at = exoPlayer.currentPosition.coerceAtLeast(0)
         val wasPlaying = exoPlayer.playWhenReady
         val index = exoPlayer.currentMediaItemIndex
@@ -972,7 +973,11 @@ class PlayerController(
      * connection: the same song, and not a byte of data for it.
      */
     fun mediaItem(track: Track): MediaItem {
+        // The one-off beats the download. It is a deliberate "this song, in
+        // full, now", and answering it out of a file that was fetched small
+        // would be refusing it without saying so.
         val local = library.store.fileOf(track.id)
+            ?.takeIf { !quality.isExceptionFor(track.id) }
         return MediaItem.Builder()
             .setUri(
                 local?.let { Uri.fromFile(it) }
@@ -1011,7 +1016,9 @@ class PlayerController(
      * answer, so it gets the setting's own name.
      */
     fun servedQuality(track: Track): Quality {
-        library.store.entryOf(track.id)?.let { return Quality.of(it.quality) }
+        if (!quality.isExceptionFor(track.id)) {
+            library.store.entryOf(track.id)?.let { return Quality.of(it.quality) }
+        }
         return Quality.served(track, quality.qualityFor(track.id))
     }
 

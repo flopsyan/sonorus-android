@@ -79,10 +79,22 @@ class QualityPolicy(
         return if (wanted == Quality.ORIGINAL && !allowedNow()) Quality.OPUS128 else wanted
     }
 
-    /** What to ask for when opening [trackId], exception included. */
+    /** Whether the one-off exception is the one standing for [trackId]. */
+    fun isExceptionFor(trackId: Int?): Boolean =
+        trackId != null && trackId == _exceptionFor.value
+
+    /**
+     * What to ask for when opening [trackId], exception included.
+     *
+     * An exception is always the **original**, whatever the setting says. It is
+     * only ever granted through a dialog that names the format it is about, so
+     * granting one and then handing over the small copy because the setting
+     * happens to say so would be answering a different question.
+     */
     fun qualityFor(trackId: Int?): Quality {
+        if (isExceptionFor(trackId)) return Quality.ORIGINAL
         val wanted = settings.streamQuality.value
-        return if (wanted == Quality.ORIGINAL && !allowedFor(trackId)) Quality.OPUS128 else wanted
+        return if (wanted == Quality.ORIGINAL && !allowedNow()) Quality.OPUS128 else wanted
     }
 
     /** This one song, this once. Undone as soon as anything else plays. */

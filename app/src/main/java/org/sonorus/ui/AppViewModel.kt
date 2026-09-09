@@ -700,14 +700,18 @@ class AppViewModel : ViewModel() {
         say("Einmalig in voller Qualität - nur für diesen Song.")
     }
 
-    fun qualityPickerBlocked(): String? {
-        if (!_qualityReady.value) return "Dieser Server liefert nur das Original."
-        val playing = player.state.value.current
-        if (playing != null && downloads.store.fileOf(playing.id) != null) {
-            return "Läuft vom Gerät - die Qualität steht mit dem Download fest."
-        }
-        return null
-    }
+    fun qualityPickerBlocked(): String? =
+        if (_qualityReady.value) null else "Dieser Server liefert nur das Original."
+
+    /**
+     * The quality a song lies here in, or null when it is not downloaded.
+     *
+     * What the picker needs to tell the truth about a downloaded song: it plays
+     * from the phone, in this, and the one thing that can still be asked for is
+     * the original, once.
+     */
+    fun downloadedQuality(track: org.sonorus.data.model.Track): Quality? =
+        downloads.store.entryOf(track.id)?.let { Quality.of(it.quality) }
 
     /**
      * The user's own offline switch. Turning it off is also the way back after

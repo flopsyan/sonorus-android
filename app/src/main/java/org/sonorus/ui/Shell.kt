@@ -393,16 +393,34 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
         exit = fadeOut(tween(Motion.Standard, easing = Motion.Emphasized)) +
             slideOutVertically(tween(Motion.Standard, easing = Motion.Emphasized)) { it / 8 },
     ) {
-        FullPlayer(
-            vm = vm,
-            state = playerState,
-            visibilityScope = this,
-            onClose = { expanded = false },
-            onGo = { target ->
-                expanded = false
-                nav.navigate(target) { launchSingleTop = true }
-            },
-        )
+        // Held before the Box below, which brings a scope of its own that would
+        // shadow it - and the shared element needs this one.
+        val appearing = this
+        Box(Modifier.fillMaxSize()) {
+            FullPlayer(
+                vm = vm,
+                state = playerState,
+                visibilityScope = appearing,
+                onClose = { expanded = false },
+                onGo = { target ->
+                    expanded = false
+                    nav.navigate(target) { launchSingleTop = true }
+                },
+            )
+            // The scaffold's host, drawn a second time over the player.
+            //
+            // The same [SnackbarHostState], so this is one message and not two.
+            // The player is drawn after the scaffold and covers it, so anything
+            // said while it is open was being said to a wall - the confirmation
+            // for the one-off quality is said from exactly here, and was only
+            // ever seen by somebody who closed the player in the same second.
+            SnackbarHost(
+                snackbar,
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars),
+            )
+        }
     }
     }
 }

@@ -1368,7 +1368,15 @@ private fun StreamQualitySheet(vm: AppViewModel, track: Track, onDismiss: () -> 
     val sheet = rememberModalBottomSheetState()
     val stream by vm.streamQuality.collectAsState()
     val allowed by vm.losslessAllowed.collectAsState()
+    val exception by vm.losslessException.collectAsState()
     var asking by remember { mutableStateOf(false) }
+
+    // A downloaded song is not streamed, so the list of streaming qualities has
+    // nothing to say about it. What it plays in was decided when it was
+    // fetched - and the one thing still worth asking for is the original, this
+    // once, which is the same exception the WLAN rule uses.
+    val here = remember(track.id, exception) { vm.downloadedQuality(track) }
+    val streamingThisOne = exception == track.id
 
     // A file that is already lossy is handed over untouched whatever is asked
     // for - ffmpeg goes down the ladder and never sideways. So there is nothing
@@ -1379,8 +1387,13 @@ private fun StreamQualitySheet(vm: AppViewModel, track: Track, onDismiss: () -> 
     if (asking) {
         ConfirmDialog(
             title = "Einmalig in ${shortCodec(track.codec)}",
-            message = "\"${track.title}\" wird über mobile Daten in voller Größe geladen. " +
-                "Gilt nur für diesen Song - der nächste läuft wieder klein.",
+            message = if (here != null) {
+                "\"${track.title}\" wird vom Server geladen statt vom Gerät und braucht " +
+                    "dafür Daten. Gilt nur für diesen Song - der nächste läuft wieder vom Gerät."
+            } else {
+                "\"${track.title}\" wird über mobile Daten in voller Größe geladen. " +
+                    "Gilt nur für diesen Song - der nächste läuft wieder klein."
+            },
             confirmLabel = "Einmalig laden",
             onDismiss = { asking = false },
             onConfirm = {
@@ -1393,9 +1406,42 @@ private fun StreamQualitySheet(vm: AppViewModel, track: Track, onDismiss: () -> 
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = colors.surface) {
         Column(Modifier.padding(bottom = 28.dp)) {
-            RackLabelText("Streamen", Modifier.padding(horizontal = 20.dp))
+            // "Streamen" would be a lie over a song that is playing off the
+            // phone, and that is exactly the song this sheet is most often
+            // opened on.
+            RackLabelText(
+                if (here != null && !streamingThisOne) "Qualität" else "Streamen",
+                Modifier.padding(horizontal = 20.dp),
+            )
             Spacer(Modifier.height(10.dp))
-            if (onlyFormat != null) {
+            if (here != null && !streamingThisOne) {
+                Text(
+                    "Läuft vom Gerät - ${here.label}.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.text,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                )
+                if (here != Quality.ORIGINAL) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .pressable(onClick = { asking = true })
+                            .padding(horizontal = 20.dp, vertical = 14.dp)
+                    ) {
+                        Text(
+                            "Einmalig in ${shortCodec(track.codec)} vom Server",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = colors.accent,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "Nur dieser Song. Der nächste läuft wieder vom Gerät.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textFaint,
+                        )
+                    }
+                }
+            } else if (onlyFormat != null) {
                 Text(
                     "$onlyFormat - wird nicht umgewandelt.",
                     style = MaterialTheme.typography.bodyLarge,
