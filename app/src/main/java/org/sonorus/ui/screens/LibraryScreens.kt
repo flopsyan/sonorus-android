@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
@@ -643,6 +647,15 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
 fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val colors = SonorusTheme.colors
     var query by remember { mutableStateOf("") }
+    // Opening the search means wanting to type. The field takes the focus and
+    // brings the keyboard with it, rather than asking for a second tap on the
+    // only thing on the screen.
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        focus.requestFocus()
+        keyboard?.show()
+    }
     val load = rememberLoad("search", query) {
         if (query.isBlank()) null else vm.lib.search(query.trim())
     }
@@ -666,7 +679,7 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 unfocusedTextColor = colors.text,
                 cursorColor = colors.accent,
             ),
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp).focusRequester(focus),
         )
 
         val data = load.value
