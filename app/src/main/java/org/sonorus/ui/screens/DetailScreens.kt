@@ -103,6 +103,8 @@ fun DetailHead(
     /** The quiet line of facts: how many songs, what date, how long. */
     meta: String = "",
     round: Boolean = false,
+    /** Square suits a sleeve; a book is taller than it is wide. */
+    ratio: Float = 1f,
     onPlay: () -> Unit,
     /**
      * Whether shuffle is armed, and how to arm it.
@@ -134,7 +136,7 @@ fun DetailHead(
                 .align(Alignment.CenterHorizontally)
                 .fillMaxWidth(0.58f)
                 .widthIn(max = 260.dp)
-                .aspectRatio(1f),
+                .aspectRatio(ratio),
             if (round) CircleShape else RoundedCornerShape(10.dp),
             title,
         )

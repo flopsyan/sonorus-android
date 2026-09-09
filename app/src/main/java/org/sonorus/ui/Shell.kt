@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Home
@@ -445,8 +446,10 @@ private fun BottomTabs(
             Tab(Icons.Filled.Home, "Start", route == Routes.HOME) { onGo(Routes.HOME) }
             // eBooks rather than Alle Songs, on Florian's call: the song list is
             // one tap away in the drawer, and the shelf had no way in at all.
+            // AutoStories and not MenuBook - the latter is Gesprochenes', and two
+            // tabs wearing the same glyph is worse than either choice of glyph.
             Tab(
-                icon = Icons.AutoMirrored.Filled.MenuBook,
+                icon = Icons.Filled.AutoStories,
                 label = "eBooks",
                 selected = route.inSection("ebooks"),
                 onClick = { onGo(Routes.EBOOKS) },

@@ -125,6 +125,7 @@ fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.plural(book.documents, "Kapitel", "Kapitel"),
                     ).joinToString(" · "),
                     coverUrls = listOfNotNull(vm.coverUrl(book.cover)),
+                    ratio = 2f / 3f,
                     // The play button reads the book. There is nothing else it
                     // could sensibly do, and a reader expects the cover to open
                     // the book rather than a second control below it.
@@ -184,7 +185,9 @@ private fun EbookCarryOnRow(vm: AppViewModel, books: List<Ebook>, onGo: (String)
                     title = book.title,
                     subtitle = ebookSub(book),
                     coverUrl = vm.coverUrl(book.cover),
-                    modifier = Modifier.width(150.dp),
+                    modifier = Modifier.width(140.dp),
+                    // A book cover is portrait. Square crops the title off it.
+                    ratio = 2f / 3f,
                 ) { onGo(Routes.ebook(book.id)) }
             }
         }

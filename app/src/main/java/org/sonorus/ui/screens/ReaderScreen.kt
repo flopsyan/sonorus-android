@@ -1,6 +1,7 @@
 package org.sonorus.ui.screens
 
 import android.annotation.SuppressLint
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -126,7 +127,6 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
     var page by remember { mutableStateOf(PageState()) }
     var overlay by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(Sheet.NONE) }
-    var web by remember { mutableStateOf<WebView?>(null) }
 
     // Where to land when the document has finished laying out: the stored share
     // on the first open, the far end when a chapter was entered backwards.
@@ -205,10 +205,27 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
         }
     }
 
+    // What the view is already showing. **Not state**, and that is the point:
+    // `update` runs on every recomposition, and the page reports its own state
+    // through the bridge - so a plain `loadUrl` in there reloads the document
+    // every time the reader turns a page, which is a reload loop and a blank
+    // screen. These two say what has really been done to the view.
+    val shown = remember { Loaded() }
+    val url = vm.api.ebookReadUrl(book.id, hrefOf(book, doc))
+    val latestStyle by rememberUpdatedState(style)
+
     Box(Modifier.fillMaxSize().background(colors.bg)) {
         AndroidView(
             factory = {
                 WebView(context).apply {
+                    // Definite, not WRAP_CONTENT. A WebView told to wrap its
+                    // content has no height to resolve `vh` and `%` against, so
+                    // `height: calc(100vh - ...)` computes to 0 - and a column
+                    // of zero height turns one chapter into 800 empty pages.
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
                     setBackgroundColor(colors.bg.toArgb())
                     @SuppressLint("SetJavaScriptEnabled")
                     settings.javaScriptEnabled = true
@@ -222,25 +239,31 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
                     isVerticalScrollBarEnabled = false
                     isHorizontalScrollBarEnabled = false
                     addJavascriptInterface(bridge, "SonorusReader")
-                    webViewClient = ReaderClient(vm, book.id) {
-                        applyStyle(this, style, colors)
+                    webViewClient = ReaderClient(vm) {
+                        applyStyle(this, latestStyle, colors)
+                        shown.style = latestStyle
                         // Land where the reader was, once the page has been
                         // broken into columns - reader.js reports 'ready' then.
                         if (enterFromEnd) evalReader("Reader.goToEnd()")
                         else evalReader("Reader.goToRatio(${enterAt})")
                     }
-                    web = this
                 }
             },
-            update = { it.loadUrl(vm.api.ebookReadUrl(book.id, hrefOf(book, doc))) },
+            update = { view ->
+                if (shown.url != url) {
+                    shown.url = url
+                    view.loadUrl(url)
+                    return@AndroidView
+                }
+                // Restyling is not a reload: reader.js keeps the reader's place
+                // across it, which is why style() exists on that side.
+                if (shown.style != style) {
+                    shown.style = style
+                    applyStyle(view, style, colors)
+                }
+            },
             modifier = Modifier.fillMaxSize(),
         )
-
-        // Restyling is not a reload: reader.js keeps the reader's place across
-        // it, which is the whole reason style() exists on that side.
-        LaunchedEffect(style, web) {
-            web?.let { applyStyle(it, style, colors) }
-        }
 
         AnimatedVisibility(
             visible = overlay,
@@ -285,6 +308,9 @@ private fun Reader(vm: AppViewModel, book: Ebook, onBack: () -> Unit) {
 
 private enum class Sheet { NONE, CHAPTERS, STYLE }
 
+/** What has really been pushed into the view, as opposed to what Compose holds. */
+private class Loaded(var url: String = "", var style: ReaderStyle? = null)
+
 // --- The page's own half ------------------------------------------------------
 
 /**
@@ -297,7 +323,6 @@ private enum class Sheet { NONE, CHAPTERS, STYLE }
  */
 private class ReaderClient(
     private val vm: AppViewModel,
-    private val bookId: Int,
     private val onReady: WebView.() -> Unit,
 ) : WebViewClient() {
 

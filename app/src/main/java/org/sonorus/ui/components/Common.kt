@@ -431,6 +431,8 @@ fun MediaCard(
     modifier: Modifier = Modifier,
     coverUrls: List<String> = emptyList(),
     round: Boolean = false,
+    /** Square suits a sleeve; a book is taller than it is wide. */
+    ratio: Float = 1f,
     onClick: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -444,7 +446,7 @@ fun MediaCard(
     ) {
         CoverMosaic(
             coverUrls.ifEmpty { listOfNotNull(coverUrl) },
-            Modifier.fillMaxWidth().aspectRatio(1f),
+            Modifier.fillMaxWidth().aspectRatio(ratio),
             shape = if (round) CircleShape else RoundedCornerShape(8.dp),
             contentDescription = title,
         )
