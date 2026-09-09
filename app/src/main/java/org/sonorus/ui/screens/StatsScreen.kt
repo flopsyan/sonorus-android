@@ -55,7 +55,6 @@ import org.sonorus.ui.rememberLoad
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.theme.num
 import java.util.Calendar
-import java.util.TimeZone
 import org.sonorus.ui.components.ServerOnlyNote
 import org.sonorus.ui.LocalOffline
 
@@ -74,15 +73,11 @@ fun StatsScreen(vm: AppViewModel) {
     // version of this page to draw out of the downloads.
     if (LocalOffline.current) return ServerOnlyNote("Die Statistik")
     val colors = SonorusTheme.colors
-    // The listener's day boundaries, not the server's.
-    val offset = remember {
-        TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000
-    }
     var range by remember { mutableStateOf(Range.of(vm.prefs.statsRange)) }
     var period by remember { mutableStateOf<String?>(null) }
 
     val load = rememberLoad("stats", range.key, period) {
-        vm.api.stats(offset, range.key, period)
+        vm.api.stats(range.key, period)
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {

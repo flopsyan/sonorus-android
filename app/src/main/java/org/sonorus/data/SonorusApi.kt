@@ -575,17 +575,12 @@ class SonorusApi(private val session: Session) {
     })
 
     /**
-     * One period at a time. The offset is in **minutes** and is what makes day
-     * boundaries the listener's rather than the server's - the server stores
-     * `played_at` in UTC and applies this when it groups.
+     * One period at a time.
+     *
+     * No offset: which hour, day and year a play belongs to is decided by the
+     * **server's** clock, so the same history reads the same on the phone, in
+     * the browser and in another country.
      */
-    suspend fun stats(offsetMinutes: Int, range: String? = null, period: String? = null): StatsResponse =
-        get(
-            "/api/stats",
-            mapOf(
-                "offset" to offsetMinutes.toString(),
-                "range" to range,
-                "period" to period,
-            ),
-        )
+    suspend fun stats(range: String? = null, period: String? = null): StatsResponse =
+        get("/api/stats", mapOf("range" to range, "period" to period))
 }
