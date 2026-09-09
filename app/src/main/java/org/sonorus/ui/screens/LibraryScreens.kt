@@ -248,14 +248,16 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 )
             },
             // The bar on the right has to agree with the sort, or it would say
-            // "M" while the rows are ordered by artist. Year and "added" have
-            // no letter worth showing, so it falls back to the title rather
-            // than printing a digit that means nothing here.
+            // "M" while the rows are ordered by artist. A sort with no letter
+            // behind it - year, length, when it arrived, how it is rated - gets
+            // none: an empty label hides the bubble, which is better than a "M"
+            // that describes nothing about where the finger is.
             labelOf = { track ->
                 when (sort) {
+                    "title" -> scrollLabel(track.title)
                     "artist" -> scrollLabel(track.artist)
                     "album" -> scrollLabel(track.album)
-                    else -> scrollLabel(track.title)
+                    else -> ""
                 }
             },
         )
@@ -370,14 +372,26 @@ fun AlbumsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 dir = direction
                 vm.saveSort("albumSort", SortPref(key, direction))
             }
-            AlbumGrid(data.albums, vm, onGo)
+            AlbumGrid(data.albums, vm, onGo) { album ->
+                when (sort) {
+                    "title" -> scrollLabel(album.title)
+                    "artist" -> scrollLabel(album.artist)
+                    else -> ""
+                }
+            }
         }
     }
 }
 
 @UnstableApi
 @Composable
-fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
+fun AlbumGrid(
+    albums: List<Album>,
+    vm: AppViewModel,
+    onGo: (String) -> Unit,
+    /** The letter beside the scroll thumb. Empty for a sort with no letter. */
+    labelOf: (Album) -> String = { scrollLabel(it.title) },
+) {
     if (albums.isEmpty()) return EmptyNote("Noch keine Alben.")
     val grid = rememberLazyGridState()
     Box(Modifier.fillMaxSize()) {
@@ -404,7 +418,7 @@ fun AlbumGrid(albums: List<Album>, vm: AppViewModel, onGo: (String) -> Unit) {
             ) { onGo(Routes.album(album.id)) }
         }
     }
-    GridScroller(grid, albums.size) { scrollLabel(albums[it].title) }
+    GridScroller(grid, albums.size) { labelOf(albums[it]) }
     }
 }
 
