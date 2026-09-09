@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -201,10 +203,8 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             Readout("Songs auf dem Gerät", Fmt.number(downloads.done.size))
             Readout("Belegt", Fmt.bytes(downloads.bytes))
             val downloadsWifiOnly by vm.downloads.wifiOnly.collectAsState()
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("Nur über WLAN", downloadsWifiOnly) {
-                    vm.setDownloadsWifiOnly(!downloadsWifiOnly)
-                }
+            SwitchRow("Nur über WLAN", downloadsWifiOnly) {
+                vm.setDownloadsWifiOnly(it)
             }
             Text(
                 "Mit mobilen Daten wartet die Warteschlange, statt zu laden.",
@@ -318,10 +318,8 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 }
                 Text("Lossless", style = MaterialTheme.typography.bodyLarge, color = colors.text)
                 val losslessWifiOnly by vm.losslessWifiOnly.collectAsState()
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("Nur über WLAN", losslessWifiOnly) {
-                        vm.setLosslessWifiOnly(!losslessWifiOnly)
-                    }
+                SwitchRow("Nur über WLAN", losslessWifiOnly) {
+                    vm.setLosslessWifiOnly(it)
                 }
             }
         }
@@ -350,6 +348,36 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             // way out has to be here, or the offline switch is the only one.
             if (vm.downloadsOnly) SonorusButton("Anmelden", primary = true) { vm.signIn() }
         }
+    }
+}
+
+/**
+ * A setting that is on or off, drawn as the switch it is.
+ *
+ * The two of these used to be chips, which read as a filter rather than as a
+ * state - a chip says "show me only this", a switch says "this is how it is".
+ */
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.text)
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = colors.accentInk,
+                checkedTrackColor = colors.accent,
+                checkedBorderColor = colors.accent,
+                uncheckedThumbColor = colors.textDim,
+                uncheckedTrackColor = colors.surface2,
+                uncheckedBorderColor = colors.line,
+            ),
+        )
     }
 }
 
