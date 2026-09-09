@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -66,6 +67,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
@@ -112,12 +114,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.download.DownloadStatus
+import org.sonorus.data.model.Chapter
 import org.sonorus.data.Quality
 import org.sonorus.data.shortCodec
 import org.sonorus.data.model.Lyrics
@@ -262,6 +266,11 @@ fun SharedTransitionScope.FullPlayer(
     val track = state.current ?: return
     val colors = SonorusTheme.colors
     val haptics = LocalHapticFeedback.current
+    // A podcast episode, a book part or a radio play. What is on this screen
+    // for a song and not for these is everything that treats it as a song:
+    // rating, playlists, the download of one part, shuffle and repeat. And the
+    // skips mean something different - a chapter is not a track.
+    val spoken = track.isSpoken
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showOffset by remember { mutableStateOf(false) }
@@ -642,23 +651,31 @@ fun SharedTransitionScope.FullPlayer(
                                 }
                             }
                         }
-                        IconButton(
-                            onClick = { vm.askForPlaylist(track, allowCreate = false) },
-                            modifier = Modifier.size(44.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Add,
-                                "Zu Playlist hinzufügen",
-                                tint = colors.textDim,
-                                modifier = Modifier.size(26.dp),
-                            )
+                        // Music only, all three of these. An episode belongs to
+                        // its show and a part to its book, so neither goes into
+                        // a playlist, neither is rated, and the download of a
+                        // whole book is asked for on the book's own page - the
+                        // minimised bar still has the button for what is
+                        // playing. See point 10 of Florian's list, 07.09.
+                        if (!spoken) {
+                            IconButton(
+                                onClick = { vm.askForPlaylist(track, allowCreate = false) },
+                                modifier = Modifier.size(44.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    "Zu Playlist hinzufügen",
+                                    tint = colors.textDim,
+                                    modifier = Modifier.size(26.dp),
+                                )
+                            }
                         }
                         // Putting a song on the phone is the other thing worth
                         // doing to what is playing, and until now the only way
                         // to it was to find the song again in a list. The glyph
                         // says what tapping does *now*, exactly as the row menu
                         // does - a missing file has nothing to fetch.
-                        if (!track.missing) {
+                        if (!track.missing && !spoken) {
                             // While it runs the button is a ring, exactly as a
                             // whole album's is - see [CollectionDownload]. One
                             // song is a shorter wait than an album, but it is
@@ -734,17 +751,19 @@ fun SharedTransitionScope.FullPlayer(
                             }
                         }
                     }
-                    Spacer(Modifier.height(16.dp))
-                    // The full screen shows the stars again - the bar has no
-                    // room for them, so this is one of the ways to hand out a
-                    // rating on a phone. Deliberately nothing beyond that: the
-                    // row's own menu carries the rest.
-                    //
-                    // The queue holds the track as it was when it was added, so
-                    // its own stars go stale the moment one is given here.
-                    val stars = vm.starsOf(track)
-                    Stars(stars, size = 30) { value ->
-                        vm.rate(track.id, value, stars)
+                    if (!spoken) {
+                        Spacer(Modifier.height(16.dp))
+                        // The full screen shows the stars again - the bar has no
+                        // room for them, so this is one of the ways to hand out a
+                        // rating on a phone. Deliberately nothing beyond that: the
+                        // row's own menu carries the rest.
+                        //
+                        // The queue holds the track as it was when it was added, so
+                        // its own stars go stale the moment one is given here.
+                        val stars = vm.starsOf(track)
+                        Stars(stars, size = 30) { value ->
+                            vm.rate(track.id, value, stars)
+                        }
                     }
                 }
 
@@ -809,6 +828,13 @@ fun SharedTransitionScope.FullPlayer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
+                    if (spoken) {
+                        // The edges are empty for spoken word - the row keeps
+                        // its spacing, so play/pause stays where the thumb
+                        // expects it whatever is playing.
+                        Spacer(Modifier.size(52.dp))
+                        SkipButton(forward = false) { vm.player.skipBy(-SKIP_MS) }
+                    } else {
                     IconButton(
                         onClick = {
                             vm.player.setShuffle(!state.shuffle)
@@ -827,6 +853,7 @@ fun SharedTransitionScope.FullPlayer(
                     IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(60.dp)) {
                         Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(46.dp))
                     }
+                    }
                     Box(
                         Modifier
                             .size(72.dp)
@@ -840,6 +867,10 @@ fun SharedTransitionScope.FullPlayer(
                     ) {
                         TransportGlyph(state.playing, tint = colors.accentInk, size = 34.dp)
                     }
+                    if (spoken) {
+                        SkipButton(forward = true) { vm.player.skipBy(SKIP_MS) }
+                        Spacer(Modifier.size(52.dp))
+                    } else {
                     IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(60.dp)) {
                         Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(46.dp))
                     }
@@ -874,6 +905,7 @@ fun SharedTransitionScope.FullPlayer(
                                 modifier = Modifier.size(32.dp),
                             )
                         }
+                    }
                     }
                 }
 
@@ -1043,6 +1075,20 @@ private fun QueuePanel(vm: AppViewModel, state: PlayerState, modifier: Modifier 
     val colors = SonorusTheme.colors
     val haptics = LocalHapticFeedback.current
     val current = state.current ?: return
+
+    // A book or a radio play with chapter marks lists its **chapters** here,
+    // not its files. The parts are never shown anywhere else in the app on
+    // purpose - a book is one thing to the listener - so a queue full of them
+    // would be the one place that broke that, and it is not what "was kommt
+    // als Nächstes" means in a book. A podcast has no marks and keeps its
+    // episodes, which is exactly the right answer there.
+    val chapters by vm.player.chapters.collectAsState()
+    val chapterAt by vm.player.chapterAt.collectAsState()
+    if (current.audiobookId != null && chapters.isNotEmpty()) {
+        ChapterQueue(vm, chapters, chapterAt, modifier)
+        return
+    }
+
     val upcoming = state.upcoming
 
     // Where the drag started and where it stands, both as positions in
@@ -1845,5 +1891,97 @@ private suspend fun PointerInputScope.coverGestures(
             if (dx <= -skipAfter) onNext() else if (dx >= skipAfter) onPrevious()
         }
         launch { swipe.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+    }
+}
+
+/** Florian asked for fifteen seconds, which is also what every reader uses. */
+private const val SKIP_MS = 15_000L
+
+/**
+ * The chapters of the running book, with the one being heard marked.
+ *
+ * Every chapter and not only the ones still to come: a listener who wants the
+ * one before is not asking for something unreasonable, and a list that only
+ * ever shrinks is a list you cannot go back in.
+ */
+@UnstableApi
+@Composable
+private fun ChapterQueue(
+    vm: AppViewModel,
+    chapters: List<Chapter>,
+    chapterAt: Int,
+    modifier: Modifier = Modifier,
+) {
+    val colors = SonorusTheme.colors
+    val listState = rememberLazyListState()
+    val here = chapters.indexOfFirst { it.index == chapterAt }
+
+    // Opened in the middle of a book, the chapter being heard is what the panel
+    // has to be showing - scrolling to it by hand through forty of them is not
+    // a thing anybody does twice.
+    LaunchedEffect(here) {
+        if (here > 1) listState.scrollToItem(here - 1)
+    }
+
+    LazyColumn(modifier, state = listState) {
+        item { RackLabelText("Kapitel", Modifier.padding(top = 8.dp, bottom = 4.dp)) }
+        items(chapters, key = { it.index }) { chapter ->
+            val playing = chapter.index == chapterAt
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { vm.player.playChapter(chapter) }
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    chapter.title.ifEmpty { "Kapitel ${chapter.index + 1}" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (playing) colors.accent else colors.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    Fmt.duration(chapter.start),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textFaint,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A fifteen-second skip, with fifteen written on it.
+ *
+ * Material ships Replay5, Replay10 and Replay30 and nothing between, so the
+ * ready-made glyph would have said 10 while the button jumped 15 - a control
+ * that lies about what it does. The plain circular arrow carries the number
+ * instead, and the forward one is the same arrow mirrored.
+ */
+@Composable
+private fun SkipButton(forward: Boolean, onClick: () -> Unit) {
+    val colors = SonorusTheme.colors
+    IconButton(onClick = onClick, modifier = Modifier.size(60.dp)) {
+        Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Filled.Replay,
+                if (forward) "15 Sekunden vor" else "15 Sekunden zurück",
+                tint = colors.text,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (forward) Modifier.scale(scaleX = -1f, scaleY = 1f) else Modifier),
+            )
+            Text(
+                "${SKIP_MS / 1000}",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
+                color = colors.text,
+                // The glyph's own opening sits a hair below centre.
+                modifier = Modifier.padding(top = 5.dp),
+            )
+        }
     }
 }

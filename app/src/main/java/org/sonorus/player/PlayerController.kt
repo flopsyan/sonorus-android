@@ -808,6 +808,29 @@ class PlayerController(
         exoPlayer.seekTo(target, 0)
     }
 
+    /**
+     * Straight to one chapter of the running title.
+     *
+     * A chapter names the part it lies in and how far into it, so this is a
+     * jump to that part and a seek - and where it is the part already playing,
+     * only the seek, which keeps the file open.
+     */
+    fun playChapter(chapter: Chapter) {
+        val state = _state.value
+        if (chapter.part !in state.order.indices) return
+        val here = state.order.indexOf(state.order.getOrNull(state.pos) ?: -1)
+        val ms = (chapter.offset * 1000).toLong().coerceAtLeast(0L)
+        if (chapter.part == here) {
+            seekTo(ms)
+            return
+        }
+        pushHistory()
+        resetListening()
+        exoPlayer.seekTo(chapter.part, ms)
+        exoPlayer.playWhenReady = true
+        startTicker()
+    }
+
     fun jumpTo(orderIndex: Int) {
         val state = _state.value
         if (orderIndex !in state.order.indices) return
@@ -837,6 +860,17 @@ class PlayerController(
         exoPlayer.seekTo(index, at)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = wasPlaying
+    }
+
+    /**
+     * A jump of [byMs] from where the playhead is, clamped to the part.
+     *
+     * What the skip buttons do for spoken word: a chapter is not a track, and
+     * stepping to the next file is not what "back" means in the middle of one.
+     */
+    fun skipBy(byMs: Long) {
+        val duration = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+        seekTo((exoPlayer.currentPosition + byMs).coerceIn(0L, duration))
     }
 
     fun seekTo(ms: Long) {
