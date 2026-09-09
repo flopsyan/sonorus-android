@@ -295,7 +295,7 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 )
             } else {
                 Text(
-                    "Gilt nur für dieses Gerät, nicht fürs Konto.",
+                    "Gilt nur für dieses Gerät und nur für neue Downloads.",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textDim,
                 )
@@ -323,20 +323,6 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                         vm.setLosslessWifiOnly(!losslessWifiOnly)
                     }
                 }
-                Text(
-                    "Mit mobilen Daten läuft dann Opus 128, bis wieder WLAN da ist.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textFaint,
-                )
-                // The promise worth writing down: this decides what the *next*
-                // download asks for and nothing else. A song fetched as FLAC
-                // stays a FLAC, and switching here never deletes anything.
-                Text(
-                    "Was schon heruntergeladen ist, bleibt unverändert - die Einstellung " +
-                        "gilt für neue Downloads.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textFaint,
-                )
             }
         }
 
