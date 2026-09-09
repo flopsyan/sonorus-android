@@ -96,6 +96,32 @@ class Settings(context: Context) {
         _downloadQuality.value = value
     }
 
+    /**
+     * How a book is set: face, size, leading and margin.
+     *
+     * On the phone rather than on the account, for the reason the switches
+     * above are: what reads comfortably is a fact about the screen in the hand.
+     */
+    private val _readerStyle = MutableStateFlow(
+        ReaderStyle(
+            font = ReaderFont.of(prefs.getString(KEY_READER_FONT, null)),
+            size = prefs.getInt(KEY_READER_SIZE, ReaderStyle.DEFAULT.size),
+            leading = prefs.getFloat(KEY_READER_LEADING, ReaderStyle.DEFAULT.leading),
+            margin = prefs.getInt(KEY_READER_MARGIN, ReaderStyle.DEFAULT.margin),
+        )
+    )
+    val readerStyle: StateFlow<ReaderStyle> = _readerStyle.asStateFlow()
+
+    fun setReaderStyle(style: ReaderStyle) {
+        prefs.edit()
+            .putString(KEY_READER_FONT, style.font.wire)
+            .putInt(KEY_READER_SIZE, style.size)
+            .putFloat(KEY_READER_LEADING, style.leading)
+            .putInt(KEY_READER_MARGIN, style.margin)
+            .apply()
+        _readerStyle.value = style
+    }
+
     private companion object {
         const val KEY_WIFI_ONLY = "wifiOnly"
         const val KEY_LOSSLESS_WIFI = "losslessWifiOnly"
@@ -103,5 +129,9 @@ class Settings(context: Context) {
         const val KEY_QUEUE = "playerQueue"
         const val KEY_STREAM_QUALITY = "streamQuality"
         const val KEY_DOWNLOAD_QUALITY = "downloadQuality"
+        const val KEY_READER_FONT = "readerFont"
+        const val KEY_READER_SIZE = "readerSize"
+        const val KEY_READER_LEADING = "readerLeading"
+        const val KEY_READER_MARGIN = "readerMargin"
     }
 }

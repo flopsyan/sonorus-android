@@ -157,6 +157,11 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
 
+    // A book gets the screen to itself. The furniture of a music app around a
+    // page of prose is the one thing a reading view must not have, and the
+    // reader draws its own bar over the text when it is asked for.
+    val reading = route == Routes.READER
+
     // Everything the player touches lives in one of these, and that is the only
     // reason the artwork can travel between the bar and the full screen: a
     // shared element needs both ends in the same composition, which is exactly
@@ -184,7 +189,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
             containerColor = colors.bg,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
-                TopAppBar(
+                if (!reading) TopAppBar(
                     title = {
                         Text(
                             titleFor(route, data),
@@ -210,7 +215,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                 )
             },
             bottomBar = {
-                Column {
+                if (!reading) Column {
                     val current = playerState.current
                     // The bar arrives with the first song rather than the layout
                     // jumping up by its height.
@@ -403,6 +408,7 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
     Routes.ALBUMS -> "Alben"
     Routes.GENRES -> "Genres"
     Routes.PODCASTS -> "Podcasts"
+    Routes.EBOOKS -> "eBooks"
     Routes.SEARCH -> "Suche"
     Routes.DOWNLOADS -> "Downloads"
     Routes.SETTINGS -> "Einstellungen"
@@ -437,7 +443,14 @@ private fun BottomTabs(
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
         Row(Modifier.fillMaxWidth()) {
             Tab(Icons.Filled.Home, "Start", route == Routes.HOME) { onGo(Routes.HOME) }
-            Tab(Icons.Filled.MusicNote, "Alle Songs", route == Routes.TRACKS) { onGo(Routes.TRACKS) }
+            // eBooks rather than Alle Songs, on Florian's call: the song list is
+            // one tap away in the drawer, and the shelf had no way in at all.
+            Tab(
+                icon = Icons.AutoMirrored.Filled.MenuBook,
+                label = "eBooks",
+                selected = route.inSection("ebooks"),
+                onClick = { onGo(Routes.EBOOKS) },
+            )
             Tab(Icons.Filled.Person, "Interpreten", route.inSection("artists")) { onGo(Routes.ARTISTS) }
             Tab(Icons.Filled.Album, "Alben", route.inSection("albums")) { onGo(Routes.ALBUMS) }
             // Genres moved to the drawer, where a list of 144 names belongs.

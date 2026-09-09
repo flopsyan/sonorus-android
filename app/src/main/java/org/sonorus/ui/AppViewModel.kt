@@ -8,6 +8,7 @@ import org.sonorus.SonorusApp
 import org.sonorus.data.ApiException
 import org.sonorus.data.Library
 import org.sonorus.data.Quality
+import org.sonorus.data.ReaderStyle
 import org.sonorus.data.SonorusApi
 import org.sonorus.data.formatLabel
 import org.sonorus.data.download.DownloadSync
@@ -514,6 +515,25 @@ class AppViewModel : ViewModel() {
 
     val streamQuality: StateFlow<Quality> get() = app.settings.streamQuality
     val downloadQuality: StateFlow<Quality> get() = app.settings.downloadQuality
+
+    // --- Reading --------------------------------------------------------------
+
+    val readerStyle: StateFlow<ReaderStyle> get() = app.settings.readerStyle
+
+    fun setReaderStyle(style: ReaderStyle) = app.settings.setReaderStyle(style)
+
+    /**
+     * Where the reader stopped.
+     *
+     * Fire and forget: a page turn must not wait for the network, and a lost
+     * write costs the position of one page. The reader saves again when it is
+     * left, which is the one that really has to land.
+     */
+    fun saveEbookProgress(id: Int, doc: Int, ratio: Double, finished: Boolean = false) {
+        viewModelScope.launch {
+            runCatching { lib.setEbookProgress(id, doc, ratio, finished) }
+        }
+    }
 
     /** What is really asked for, which on mobile data need not be what is set. */
     val servedStreamQuality: StateFlow<Quality> get() = app.quality.streamQuality

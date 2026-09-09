@@ -8,6 +8,9 @@ import org.sonorus.data.model.ArtistResponse
 import org.sonorus.data.model.ArtistsResponse
 import org.sonorus.data.model.BookResponse
 import org.sonorus.data.model.Bootstrap
+import org.sonorus.data.model.EbookAuthorResponse
+import org.sonorus.data.model.EbookResponse
+import org.sonorus.data.model.EbooksResponse
 import org.sonorus.data.model.GenreResponse
 import org.sonorus.data.model.GenresResponse
 import org.sonorus.data.model.HomeResponse
@@ -346,6 +349,26 @@ class Library(
 
     private fun spokenLabel(base: String) =
         if (base == "audiodramas") "Dieses Hörspiel" else "Dieses Hörbuch"
+
+    // eBooks are read from the server and nowhere else for now: no download, so
+    // no offline half to answer out of. The three reads say so plainly rather
+    // than handing back an empty shelf, which would read as "you own nothing".
+    private fun needsServer(what: String): Nothing =
+        throw ApiException("offline", "$what geht nur mit Verbindung zum Server.")
+
+    suspend fun ebooks(): EbooksResponse =
+        if (offline.value) needsServer("Lesen") else reachableAfter { api.ebooks() }
+
+    suspend fun ebookAuthor(id: Int): EbookAuthorResponse =
+        if (offline.value) needsServer("Lesen") else reachableAfter { api.ebookAuthor(id) }
+
+    suspend fun ebook(id: Int): EbookResponse =
+        if (offline.value) needsServer("Lesen") else reachableAfter { api.ebook(id) }
+
+    suspend fun setEbookProgress(id: Int, doc: Int, ratio: Double, finished: Boolean) {
+        if (offline.value) return
+        reachableAfter { api.setEbookProgress(id, doc, ratio, finished) }
+    }
 
     // --- Artwork --------------------------------------------------------------
 

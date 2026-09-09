@@ -25,6 +25,14 @@ object Routes {
     const val SPOKEN = "spoken/{base}"
     const val SPOKEN_AUTHOR = "spoken/{base}/authors/{id}"
     const val BOOK = "spoken/{base}/books/{id}"
+
+    // eBooks. The reader is a route of its own rather than an overlay, so back
+    // out of a book lands on the book's page and not on whatever came before.
+    const val EBOOKS = "ebooks"
+    const val EBOOK_AUTHOR = "ebooks/authors/{id}"
+    const val EBOOK = "ebooks/books/{id}"
+    const val READER = "ebooks/books/{id}/read"
+
     const val PLAYLIST = "playlists/{id}"
     const val STARS = "stars/{stars}"
     const val SEARCH = "search"
@@ -45,6 +53,9 @@ object Routes {
     fun spoken(base: String) = "spoken/$base"
     fun spokenAuthor(base: String, id: Int) = "spoken/$base/authors/$id"
     fun book(base: String, id: Int) = "spoken/$base/books/$id"
+    fun ebookAuthor(id: Int) = "ebooks/authors/$id"
+    fun ebook(id: Int) = "ebooks/books/$id"
+    fun reader(id: Int) = "ebooks/books/$id/read"
     fun stars(values: List<Int>) = "stars/${values.joinToString(",")}"
 }
 

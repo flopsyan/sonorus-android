@@ -28,11 +28,15 @@ import org.sonorus.ui.screens.ArtistSinglesScreen
 import org.sonorus.ui.screens.ArtistStarsScreen
 import org.sonorus.ui.screens.ArtistsScreen
 import org.sonorus.ui.screens.DownloadsScreen
+import org.sonorus.ui.screens.EbookAuthorScreen
+import org.sonorus.ui.screens.EbookScreen
+import org.sonorus.ui.screens.EbooksScreen
 import org.sonorus.ui.screens.GenreScreen
 import org.sonorus.ui.screens.GenresScreen
 import org.sonorus.ui.screens.HomeScreen
 import org.sonorus.ui.screens.NoticesScreen
 import org.sonorus.ui.screens.PlaylistScreen
+import org.sonorus.ui.screens.ReaderScreen
 import org.sonorus.ui.screens.ProfileScreen
 import org.sonorus.ui.screens.SearchScreen
 import org.sonorus.ui.screens.SettingsScreen
@@ -59,7 +63,7 @@ private const val SLIDE = 6
  */
 private val TABS = setOf(
     Routes.HOME, Routes.TRACKS, Routes.ARTISTS, Routes.ALBUMS, Routes.GENRES,
-    Routes.PODCASTS, Routes.SPOKEN,
+    Routes.PODCASTS, Routes.SPOKEN, Routes.EBOOKS,
 )
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.betweenTabs() =
@@ -183,6 +187,24 @@ fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
                 go,
             )
         }
+
+        // eBooks: the shelf, one author, one book, and the book being read.
+        composable(Routes.EBOOKS) { EbooksScreen(vm, go) }
+
+        composable(
+            Routes.EBOOK_AUTHOR,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { EbookAuthorScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        composable(
+            Routes.EBOOK,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { EbookScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        composable(
+            Routes.READER,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { ReaderScreen(vm, it.arguments?.getInt("id") ?: 0, onBack = { nav.popBackStack() }) }
 
         composable(
             Routes.BOOK,

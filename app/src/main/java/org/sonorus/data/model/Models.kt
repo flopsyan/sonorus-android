@@ -641,3 +641,93 @@ data class SpokenAuthorResponse(val author: SpokenAuthor)
 
 @Serializable
 data class BookResponse(val book: Book)
+
+// --- eBooks -------------------------------------------------------------------
+//
+// A shelf rather than a fifth spoken-word library: nothing here is played, so
+// none of it is a Track and none of it goes near the queue. The unit the reader
+// moves through is the **spine document** - the piece the EPUB itself is cut
+// into - and a fraction of the way through it. Not a page: a page is whatever
+// fits at the chosen size on the phone in hand.
+
+@Serializable
+data class EbookAuthorSummary(
+    val id: Int,
+    val name: String = "",
+    val cover: String? = null,
+    val bookCount: Int = 0,
+)
+
+@Serializable
+data class EbookAuthor(
+    val id: Int,
+    val name: String = "",
+    val cover: String? = null,
+    /** False means the picture is borrowed from one of their books. */
+    val hasOwnCover: Boolean = false,
+    val books: List<Ebook> = emptyList(),
+)
+
+@Serializable
+data class EbookProgress(
+    /** Which spine document, counted from zero. */
+    val doc: Int = 0,
+    /** How far into that document, 0 to 1. */
+    val ratio: Double = 0.0,
+    val finished: Boolean = false,
+    val started: Boolean = false,
+    /** How far through the whole book, 0 to 1 - what a progress bar wants. */
+    val read: Double = 0.0,
+    val touchedAt: String = "",
+)
+
+/** One entry of the book's own table of contents, by spine position. */
+@Serializable
+data class EbookChapter(val title: String = "", val index: Int = 0)
+
+@Serializable
+data class Ebook(
+    val id: Int,
+    val title: String = "",
+    val author: String = "",
+    val authorId: Int? = null,
+    val cover: String? = null,
+    val language: String = "",
+    val publisher: String = "",
+    val releaseDate: String = "",
+    val year: Int? = null,
+    val description: String = "",
+    /** How many spine documents the book has. */
+    val documents: Int = 0,
+    val size: Long = 0,
+    val progress: EbookProgress = EbookProgress(),
+    /**
+     * Only the book's own page carries these three, and they are what the
+     * reader needs: the chapter list, the file behind every spine position, and
+     * how much text each holds. A shelf entry has them empty.
+     */
+    val chapters: List<EbookChapter> = emptyList(),
+    /** The href of each spine document, by position. Empty outside getBook. */
+    val spine: List<String> = emptyList(),
+    /** Characters of prose per document, which turns a share into a page. */
+    val lengths: List<Int> = emptyList(),
+)
+
+@Serializable
+data class EbookStats(val books: Int = 0, val authors: Int = 0)
+
+@Serializable
+data class EbooksResponse(
+    val authors: List<EbookAuthorSummary> = emptyList(),
+    @SerialName("continue") val carryOn: List<Ebook> = emptyList(),
+    val stats: EbookStats = EbookStats(),
+)
+
+@Serializable
+data class EbookAuthorResponse(val author: EbookAuthor)
+
+@Serializable
+data class EbookResponse(val book: Ebook)
+
+@Serializable
+data class EbookProgressResponse(val progress: EbookProgress = EbookProgress())

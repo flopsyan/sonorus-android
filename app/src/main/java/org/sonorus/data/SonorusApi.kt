@@ -381,6 +381,37 @@ class SonorusApi(private val session: Session) {
     suspend fun editAuthorCover(base: String, id: Int, cover: JsonElement): SpokenAuthorResponse =
         patch("/api/$base/authors/$id", buildJsonObject { put("cover", cover) })
 
+    // --- eBooks ---------------------------------------------------------------
+
+    suspend fun ebooks(): EbooksResponse = get("/api/ebooks")
+
+    suspend fun ebookAuthor(id: Int): EbookAuthorResponse = get("/api/ebooks/authors/$id")
+
+    suspend fun ebook(id: Int): EbookResponse = get("/api/ebooks/books/$id")
+
+    suspend fun setEbookProgress(
+        id: Int,
+        doc: Int,
+        ratio: Double,
+        finished: Boolean,
+    ): EbookProgressResponse =
+        put("/api/ebooks/books/$id/progress", buildJsonObject {
+            put("doc", doc)
+            put("ratio", ratio)
+            put("finished", finished)
+        })
+
+    /**
+     * Where one file of a book lives, under the path it has inside the zip.
+     *
+     * The path is mirrored rather than rewritten, so the relative links a
+     * chapter was written with resolve by themselves. It is also why the
+     * WebView has to fetch these through the app's own client - they need the
+     * session cookie like every other request.
+     */
+    fun ebookReadUrl(id: Int, href: String): String =
+        "${session.serverUrl}/api/ebooks/books/$id/read/$href"
+
     // --- Playlists ------------------------------------------------------------
 
     suspend fun playlists(): PlaylistsResponse = get("/api/playlists")
