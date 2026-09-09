@@ -4,6 +4,18 @@ import org.sonorus.data.Library
 import org.sonorus.data.model.Track
 
 /**
+ * The two things a reconcile does to the phone.
+ *
+ * An interface and not [Downloads] itself, so [DownloadSync.apply] - the piece
+ * that decides whether a file is deleted - can be driven on a plain JVM. The
+ * same reason [Reconcile] is pure.
+ */
+interface DownloadTarget {
+    fun add(tracks: List<Track>, manual: Boolean = true)
+    fun remove(trackId: Int)
+}
+
+/**
  * Keeps the downloads in step with the collections they came from.
  *
  * Florian's rule, and it is the whole feature: **a downloaded playlist is a
@@ -32,7 +44,7 @@ import org.sonorus.data.model.Track
  */
 class DownloadSync(
     private val lib: Library,
-    private val downloads: Downloads,
+    private val downloads: DownloadTarget,
     private val store: DownloadStore,
 ) {
 
@@ -88,25 +100,8 @@ class DownloadSync(
      * just loaded its playlist knows exactly what the server says it holds, so
      * the sync needs no request of its own.
      */
-    fun apply(collection: OfflineCollection, current: List<Track>): Change {
-        val here = current.filterNot { it.missing }
-        val plan = Reconcile.plan(
-            previous = collection.trackIds,
-            current = here.map { it.id },
-            downloaded = store.snapshot.tracks.map { it.track.id }.toSet(),
-            excluded = store.snapshot.excluded.toSet(),
-            heldElsewhere = store.heldBy(exceptKey = collection.key),
-        )
-        // The baseline moves first. If the fetch below is interrupted, the songs
-        // are still in the collection and the next reconcile queues what is
-        // missing - where a baseline written afterwards would have lost them.
-        store.rememberCollection(collection.copy(trackIds = here.map { it.id }))
-        if (plan.add.isNotEmpty()) {
-            downloads.add(here.filter { it.id in plan.add }, manual = false)
-        }
-        for (id in plan.delete) downloads.remove(id)
-        return Change(added = plan.add.size, removed = plan.delete.size)
-    }
+    fun apply(collection: OfflineCollection, current: List<Track>): Change =
+        applyReconcile(store, downloads, collection, current)
 
     /** What one fetch brought back: the contents, and the collection itself. */
     private data class Fetched(val collection: OfflineCollection, val tracks: List<Track>)
@@ -145,6 +140,51 @@ class DownloadSync(
         }
         return Fetched(collection, tracks)
     }
+}
+
+/**
+ * What [DownloadSync.apply] really does, with no library in the way.
+ *
+ * Out here for the reason [Reconcile] is: this is the half that writes to the
+ * phone, so it has to be drivable on a plain JVM. [DownloadSync] needs a
+ * [org.sonorus.data.Library] for the paths that fetch, and a Library needs an
+ * Android context - which would otherwise put the most dangerous code in the
+ * app out of reach of a unit test.
+ */
+internal fun applyReconcile(
+    store: DownloadStore,
+    downloads: DownloadTarget,
+    collection: OfflineCollection,
+    current: List<Track>,
+): DownloadSync.Change {
+    // A collection the store has since forgotten is not reconciled, and the
+    // write below is why: `rememberCollection` would put it back. That is the
+    // "1 Song wird nachgeladen" at every start Florian reported - the start
+    // reconcile asks the server about one collection at a time, he removes the
+    // radio play while its answer is still in flight, and the answer revives a
+    // collection whose parts are now neither downloaded nor excluded. They land
+    // in `plan.add` on every start from then on.
+    //
+    // Both callers only ever want collections the store knows, so this narrows
+    // nothing but the window.
+    if (store.collections.none { it.key == collection.key }) return DownloadSync.Change()
+    val here = current.filterNot { it.missing }
+    val plan = Reconcile.plan(
+        previous = collection.trackIds,
+        current = here.map { it.id },
+        downloaded = store.snapshot.tracks.map { it.track.id }.toSet(),
+        excluded = store.snapshot.excluded.toSet(),
+        heldElsewhere = store.heldBy(exceptKey = collection.key),
+    )
+    // The baseline moves first. If the fetch below is interrupted, the songs are
+    // still in the collection and the next reconcile queues what is missing -
+    // where a baseline written afterwards would have lost them.
+    store.rememberCollection(collection.copy(trackIds = here.map { it.id }))
+    if (plan.add.isNotEmpty()) {
+        downloads.add(here.filter { it.id in plan.add }, manual = false)
+    }
+    for (id in plan.delete) downloads.remove(id)
+    return DownloadSync.Change(added = plan.add.size, removed = plan.delete.size)
 }
 
 /**

@@ -55,7 +55,7 @@ class Downloads(
     private val connectivity: Connectivity,
     private val settings: Settings,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-) {
+) : DownloadTarget {
 
     /** What the screens draw. */
     data class State(
@@ -214,7 +214,7 @@ class Downloads(
      * that, the first reconcile that saw it leave a playlist would delete a
      * download the user had fetched deliberately.
      */
-    fun add(tracks: List<Track>, manual: Boolean = true) {
+    override fun add(tracks: List<Track>, manual: Boolean) {
         val wanted = tracks.filterNot { it.missing }.map { it.id }
         // Asking for a song again is the one way to take back "I deleted this
         // one on purpose", whether it is asked for on its own or as part of the
@@ -287,7 +287,7 @@ class Downloads(
     }
 
     /** Takes a song back off the phone. */
-    fun remove(trackId: Int) {
+    override fun remove(trackId: Int) {
         cancel(trackId)
         scope.launch {
             store.remove(trackId)
