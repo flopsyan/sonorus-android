@@ -78,6 +78,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -125,6 +127,18 @@ import kotlinx.coroutines.launch
  * larger, exactly the decision the web app made ("there is no second player"),
  * which is why nothing here can drift out of step with the bar.
  */
+/**
+ * What the bar at the top should be calling this screen.
+ *
+ * A route names a *kind* of page - "ein Album" - and the bar was left saying
+ * "Sonorus" on every one of them, which is the least useful thing it could say
+ * about a page you are already looking at. A detail page writes its own title
+ * in here as it draws its head, so the bar names the album, the interpret or
+ * the book. A local rather than a parameter because every detail page already
+ * draws that head: nothing at the call sites has to change.
+ */
+val LocalScreenTitle = staticCompositionLocalOf { mutableStateOf<String?>(null) }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @UnstableApi
 @Composable
@@ -160,6 +174,11 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
 
+    // Cleared on the way to the next page, or a list would wear the title of the
+    // album it was opened from until something else set one.
+    val screenTitle = remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(route) { screenTitle.value = null }
+
     // A book gets the screen to itself. The furniture of a music app around a
     // page of prose is the one thing a reading view must not have, and the
     // reader draws its own bar over the text when it is asked for.
@@ -169,6 +188,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     // reason the artwork can travel between the bar and the full screen: a
     // shared element needs both ends in the same composition, which is exactly
     // what the old `Dialog` could not offer.
+    CompositionLocalProvider(LocalScreenTitle provides screenTitle) {
     SharedTransitionLayout(Modifier.fillMaxSize()) {
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -207,7 +227,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                             // the page: beside its name.
                             SonorusMark(scale = 0.5f)
                             Text(
-                                titleFor(route, data),
+                                screenTitle.value ?: titleFor(route, data),
                                 style = MaterialTheme.typography.titleLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -432,6 +452,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                     .windowInsetsPadding(WindowInsets.navigationBars),
             )
         }
+    }
     }
     }
 }

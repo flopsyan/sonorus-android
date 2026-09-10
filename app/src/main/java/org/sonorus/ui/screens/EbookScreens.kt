@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Stop
@@ -59,9 +60,9 @@ import org.sonorus.ui.theme.SonorusTheme
  * playing: no queue, no stars, no playlist, no download. A book is opened and
  * read, and the only state it carries is how far through it the reader got.
  *
- * **There is no offline half.** Reading needs the server, so [org.sonorus.data.Library]
- * throws rather than answering out of the downloads, and these screens show that
- * as the error it is. Downloads are their own session.
+ * A book that was taken along is answered out of the downloads, so all three
+ * pages work with no server at all - see [org.sonorus.data.download.EbookDownloads].
+ * One that was not says so rather than showing an empty shelf.
  */
 
 @UnstableApi
@@ -108,7 +109,6 @@ fun EbookAuthorScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     meta = Fmt.plural(author.books.size, "Buch", "Bücher"),
                     coverUrls = listOfNotNull(vm.coverUrl(author.cover)),
                     round = true,
-                    onPlay = { author.books.firstOrNull()?.let { onGo(Routes.ebook(it.id)) } },
                 )
             }
             item { EbookSectionLabel("Bücher") }
@@ -154,6 +154,9 @@ fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     // could sensibly do, and a reader expects the cover to open
                     // the book rather than a second control below it.
                     onPlay = { onGo(Routes.reader(book.id)) },
+                    playIcon = Icons.AutoMirrored.Filled.MenuBook,
+                    playLabel = if (book.progress.started && !book.progress.finished) "Weiterlesen"
+                    else "Lesen",
                     download = { EbookDownload(vm, book) },
                 )
             }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.DownloadForOffline
@@ -51,6 +52,7 @@ import org.sonorus.data.download.OfflineCollection
 import org.sonorus.data.model.Playlist
 import org.sonorus.data.model.Track
 import org.sonorus.ui.AppViewModel
+import org.sonorus.ui.LocalScreenTitle
 import org.sonorus.ui.DownloadWords
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
@@ -105,7 +107,19 @@ fun DetailHead(
     round: Boolean = false,
     /** Square suits a sleeve; a book is taller than it is wide. */
     ratio: Float = 1f,
-    onPlay: () -> Unit,
+    /**
+     * The round button. Null leaves it out, for a page where there is nothing
+     * to play - an author of books that are read has a shelf, not a transport,
+     * and a play triangle over it promises something the page cannot do.
+     */
+    onPlay: (() -> Unit)? = null,
+    /**
+     * What the round button is, where it is not a transport. A book that is read
+     * has one thing to do with it and it is not playing - and a triangle over a
+     * novel promises a voice that is not there.
+     */
+    playIcon: ImageVector = Icons.Filled.PlayArrow,
+    playLabel: String = "Abspielen",
     /**
      * Whether shuffle is armed, and how to arm it.
      *
@@ -124,6 +138,11 @@ fun DetailHead(
 ) {
     val colors = SonorusTheme.colors
     val haptics = LocalHapticFeedback.current
+
+    // The bar at the top of the shell says "Sonorus" unless a page tells it
+    // otherwise, and this is every page that has something better to say.
+    val screenTitle = LocalScreenTitle.current
+    LaunchedEffect(title) { screenTitle.value = title }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
         // Centred, and sized against the window rather than fixed: 58 % is large
@@ -207,21 +226,23 @@ fun DetailHead(
                     Icon(Icons.Filled.Shuffle, "Zufall", tint = tint, modifier = Modifier.size(26.dp))
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(colors.accent)
-                    .pressable(dip = 0.94f, onClick = onPlay),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.PlayArrow,
-                    "Abspielen",
-                    tint = colors.accentInk,
-                    modifier = Modifier.size(30.dp),
-                )
+            onPlay?.let { play ->
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(colors.accent)
+                        .pressable(dip = 0.94f, onClick = play),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        playIcon,
+                        playLabel,
+                        tint = colors.accentInk,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
             }
         }
     }

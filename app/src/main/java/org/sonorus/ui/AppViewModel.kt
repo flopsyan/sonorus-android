@@ -1259,8 +1259,24 @@ class AppViewModel : ViewModel() {
         _toast.value = null
     }
 
+    /**
+     * What to put in front of somebody when something failed.
+     *
+     * An [ApiException] is Sonorus's own and already says it in German. Anything
+     * else is the network stack talking to itself - "Failed to connect to
+     * /10.0.2.2:3111", "timeout", a hostname that does not resolve - and none of
+     * that is a sentence to show on a German screen. The kinds worth telling
+     * apart are told apart; the rest becomes the one honest sentence there is.
+     */
     fun message(error: Throwable): String = when (error) {
         is ApiException -> error.message
+        is java.net.UnknownHostException ->
+            "Diese Adresse gibt es nicht. Steht der Server richtig in den Einstellungen?"
+        is java.net.SocketTimeoutException ->
+            "Der Server antwortet nicht rechtzeitig."
+        is javax.net.ssl.SSLException ->
+            "Die verschlüsselte Verbindung kam nicht zustande."
+        is java.io.IOException -> NO_SERVER
         else -> error.message?.takeIf { it.isNotBlank() } ?: NO_SERVER
     }
 
