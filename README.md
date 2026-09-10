@@ -1,176 +1,231 @@
-# Sonorus for Android
+# Sonorus für Android
 
-Native Kotlin client for [Sonorus](https://github.com/flopsyan/sonorus), built
-against the REST API that server already has. **Nothing has to be changed on the
-server side**: a native client sends neither `Origin` nor `Sec-Fetch-Site`, and
-`rejectCrossSite` deliberately lets exactly those requests through.
+Nativer Kotlin-Client für [Sonorus](https://github.com/flopsyan/sonorus), gebaut
+gegen die REST-API, die der Server ohnehin hat. **Am Server muss nichts geändert
+werden**: Ein nativer Client schickt weder `Origin` noch `Sec-Fetch-Site`, und
+`rejectCrossSite` lässt genau diese Anfragen absichtlich durch.
 
-What the app adds over the web app: playback keeps running in the background,
-and Android draws the notification itself - title, cover art, progress and
-next/previous - instead of whatever the browser happens to grant.
+Was die App gegenüber der Web-App draufhat: Die Wiedergabe läuft im Hintergrund
+weiter, und Android zeichnet die Benachrichtigung selbst - Titel, Cover,
+Fortschritt und Weiter/Zurück - statt dem, was der Browser gerade gewährt.
 
-In the full player the **cover art is swiped sideways** to jump to the next or
-previous song; swiping it down closes the player. Its head says which list is
-playing ("Wiedergabe aus Album" and the name below it), and the three dots
-beside it open the song: add it to a playlist, put it in the queue, or go to its
-album or its interpret. Artist and album under the title are two separate links,
-each going where it says. A title too long to fit is cut off, and **tapping it
-runs it through once** so it can be read.
+Im großen Player wird das **Cover seitlich gewischt**, um zum nächsten oder
+vorherigen Song zu springen; nach unten gewischt schließt es den Player. Der Kopf
+sagt, welche Liste gerade läuft ("Wiedergabe aus Album" und darunter der Name),
+und die drei Punkte daneben öffnen den Song: zur Playlist hinzufügen, in die
+Warteschlange legen oder zum Album bzw. zum Interpreten gehen. Interpret und
+Album unter dem Titel sind zwei getrennte Links, jeder führt dorthin, wo er
+hinzeigt. Ein zu langer Titel wird abgeschnitten, und **ein Tipp darauf lässt ihn
+einmal durchlaufen**, damit er lesbar ist.
 
-The progress bar can be tapped **and dragged**: hold, slide, release - the seek
-happens on release, not before. That goes for the full player as well as the bar
-along the bottom edge.
+Die Fortschrittsleiste lässt sich antippen **und ziehen**: halten, schieben,
+loslassen - gesprungen wird beim Loslassen, nicht vorher. Das gilt für den großen
+Player wie für die Leiste am unteren Rand.
 
 ## Android Auto
 
-In the car Sonorus appears among the media apps and can be browsed there:
-shuffle mix, recently played, playlists, ratings, artists, albums, genres and
-all songs. Tapping a song plays **the list** it sits in, starting at exactly
-that point - the same thing tapping it on the phone does. Voice search ("play
-…") searches title, artist and album at once.
+Im Auto taucht Sonorus unter den Medien-Apps auf und lässt sich dort durchgehen:
+Zufallsmix, zuletzt gehört, Playlists, Bewertungen, Interpreten, Alben, Genres
+und alle Songs. Ein Tipp auf einen Song spielt **die Liste**, in der er steht,
+genau ab dieser Stelle - dasselbe, was ein Tipp auf dem Handy tut. Die Sprachsuche
+("spiele …") durchsucht Titel, Interpret und Album gleichzeitig.
 
-The car drives the same player as the phone: a trip counts towards the
-statistics like any other listening, and the queue is the same one afterwards.
-Downloaded songs play from disk, and with no connection it shows exactly those
-downloads.
+Das Auto steuert denselben Player wie das Handy: Eine Fahrt zählt für die
+Statistik wie jedes andere Hören, und die Warteschlange ist hinterher dieselbe.
+Heruntergeladene Songs laufen von der Platte, und ohne Verbindung zeigt es genau
+diese Downloads.
 
-## Split screen: the strip
+## Geteilter Bildschirm: der Streifen
 
-Squeezed into a short window - split screen with the divider dragged most of the
-way over - the app drops the library and shows the transport instead. It is meant
-for navigation on the other half of the screen, where a top bar, a page and six
-tabs would only be furniture cut in half.
+In ein kurzes Fenster gequetscht - geteilter Bildschirm mit dem Trenner fast ganz
+herübergezogen - lässt die App die Bibliothek weg und zeigt stattdessen die
+Transportleiste. Gedacht ist das für die Navigation auf der anderen
+Bildschirmhälfte, wo eine Titelleiste, eine Seite und sechs Tabs nur halbierte
+Möblierung wären.
 
-There are two sizes of it, and the app picks whichever fits:
+Es gibt zwei Größen davon, und die App nimmt, was passt:
 
-- **the strip**, from 175 dp of height: artwork, name, interpret and album, a
-  seek rail you can drag, and previous / play / next;
-- **the panel**, under that: one line - artwork, name, interpret and the three
-  controls - with the progress as a hairline across the top. Nothing on it is
-  draggable, because a scrub target three pixels tall between two buttons is a
-  mis-tap at the wheel.
+- **den Streifen**, ab 175 dp Höhe: Cover, Name, Interpret und Album, eine
+  ziehbare Suchleiste und Zurück / Play / Weiter;
+- **die Leiste**, darunter: eine Zeile - Cover, Name, Interpret und die drei
+  Bedienelemente - mit dem Fortschritt als Haarlinie darüber. Nichts daran ist
+  ziehbar, denn ein drei Pixel hohes Ziel zwischen zwei Knöpfen ist am Lenkrad
+  ein Fehlgriff.
 
-It switches on its own, below **320 dp of window height and only in multi-window**,
-so a phone held sideways still gets the whole app. Dragging the divider back
-restores the shell on the page it was on.
+Umgeschaltet wird von selbst, **unter 320 dp Fensterhöhe und nur im
+Mehrfenstermodus**, damit ein quer gehaltenes Handy noch die ganze App bekommt.
+Zieht man den Trenner zurück, ist die Hülle wieder da, auf der Seite, auf der sie
+war.
 
 ## Qualität
 
-Two settings of their own, both per **device** and not per account: what is
-streamed, and what a download fetches. A phone on a train and a browser on the
-LAN are the same login and want opposite things.
+Zwei eigene Einstellungen, beide pro **Gerät** und nicht pro Konto: was gestreamt
+wird und was ein Download holt. Ein Handy im Zug und ein Browser im LAN sind
+dieselbe Anmeldung und wollen das Gegenteil voneinander.
 
-**Only lossless is ever re-encoded** - FLAC, WAV, ALAC, APE, WavPack, DSD. An
-MP3, an AAC or an Opus file is handed over as it lies whatever its bitrate, so
-picking "Opus 128" changes nothing at all for a podcast that is already an MP3.
-The chip under the transport therefore says the format really coming out of the
-speaker, not the one that was asked for, and one tap on it switches the setting
-mid-song. The rule sits in `Quality.served` and mirrors `willTranscode` on the
-server: **change one side and change the other**, `QualityTest` is what catches
-it if you do not.
+**Umgewandelt wird nur Verlustfreies** - FLAC, WAV, ALAC, APE, WavPack, DSD. Eine
+MP3, eine AAC- oder eine Opus-Datei wird ausgeliefert, wie sie liegt, egal mit
+welcher Bitrate; "Opus 128" zu wählen ändert für einen Podcast, der schon eine MP3
+ist, also gar nichts. Der Chip unter der Transportleiste sagt deshalb das Format,
+das wirklich aus dem Lautsprecher kommt, nicht das, was gewünscht war - und ein
+Tipp darauf öffnet die Auswahl mitten im Song.
+
+Ist "Lossless nur über WLAN" an und du bist auf mobilen Daten, lässt sich das
+Original **einmalig für genau diesen Song** trotzdem anfordern. Das gilt auch für
+einen Song, der bereits klein heruntergeladen auf dem Gerät liegt: Er kommt dann
+für dieses eine Mal in voller Qualität vom Server, der nächste läuft wieder vom
+Gerät.
+
+Die Regel steckt in `Quality.served` und spiegelt `willTranscode` auf dem Server:
+**Ändert man die eine Seite, ändert man die andere**, und `QualityTest` ist das,
+was es merkt, wenn nicht.
 
 ## Statistik
 
-The same page the web app has, and it counts **all four libraries**: music,
-podcasts, audiobooks and radio plays. The playtime, the chart and the averages
-are all of them together; a Spielzeit table splits the selected period per
-library, and "Meistgehörtes Gesprochenes" ranks shows, books and radio plays.
-The three music top lists stay music alone - one 70-minute episode outweighs a
-dozen songs.
+Dieselbe Seite, die die Web-App hat, und sie zählt **alle vier Bibliotheken**:
+Musik, Podcasts, Hörbücher und Hörspiele. Spielzeit, Diagramm und Durchschnitte
+sind alle zusammen; eine Spielzeit-Tabelle teilt den gewählten Zeitraum nach
+Bibliothek auf, und "Meistgehörtes Gesprochenes" reiht Sendungen, Bücher und
+Hörspiele. Die drei Musik-Bestenlisten bleiben allein Musik - eine 70-Minuten-
+Folge wiegt ein Dutzend Songs auf.
 
-## Downloads and offline use
+Eine Wiedergabe wird über die Stunden verteilt, durch die sie wirklich lief: Ein
+Hörspiel, das um 14:40 beginnt und zweieinhalb Stunden läuft, sind zwanzig Minuten
+in der 14-Uhr-Säule, je eine Stunde in 15 und 16 Uhr und zehn Minuten in 17 Uhr -
+gezählt wird es trotzdem als **eine** Wiedergabe. Welche Stunde das ist, entscheidet
+die Uhr des Servers, damit dieselbe Vergangenheit auf jedem Gerät und in jedem Land
+gleich aussieht.
 
-Songs, albums, playlists, genres and rating lists can be pulled onto the device
-("Download" in the head of a collection, in a song's menu, or - for whatever is
-playing right now - straight from the full player, beside the "+"). Whatever is
-downloaded then **always** plays from disk - connection or not, which saves
-mobile data on the road.
+## E-Books
 
-**With no connection the app starts straight into its downloads**, with no step
-in between: no login form, no progress bar, no request that would have to run
-into a timeout first. Library, artists, albums, genres, playlists, search and
-lyrics then come from what is on the device; a strip under the title bar says
-that the short library is the one being shown. As soon as a server can be
-reached again, the app switches back by itself.
+Die fünfte Bibliothek, und die einzige, die gelesen statt gehört wird: ein Regal
+mit Autoren und ihren Büchern, und eine Leseansicht dafür.
 
-Anything that needs a connection is switched off while offline and says so:
-rating, changing playlists, statistics, notices, accounts, scan and import.
+Die Leseansicht selbst kommt **vom Server** (`public/reader/`) und läuft in einer
+WebView - ein EPUB ist HTML mit eigenem Stylesheet, und ein Buch, das seine
+Formatierung verliert, liest sich falsch. Was die App drumherum tut:
 
-The offline library is built out of the songs on the device, so it carries no
-**album ratings**: an offline album shows no stars and sorting the grid by
-rating falls back to the title. The stars are back as soon as a server is.
+- **Umblättern** durch Tippen auf die linke oder rechte Seite, oder durch Wischen.
+  Die Seitenleiste gibt die Wischgeste her, solange ein Buch offen ist.
+- **Die Seitenzahl des ganzen Buchs**, dauerhaft im unteren Rand: `38/379
+  (10,0 %)`. Ein EPUB hat keine feste Seitenzahl - eine Seite ist, was bei dieser
+  Schriftgröße auf diesen Bildschirm passt - also wird sie gemessen: Im
+  Hintergrund wird jedes Kapitel einmal gesetzt und gezählt, gespeichert pro Buch,
+  Schrift und Bildschirm. Bis das durch ist, steht dort eine Schätzung aus den
+  Zeichenzahlen, damit ein Buch aufgeht, statt zu laden.
+- **Schrift, Größe, Zeilenabstand und Rand**, live übernommen, ohne das Buch zu
+  schließen. Die Größe geht bis auf 6 px herunter.
+- **Eine ziehbare Fortschrittsleiste** durchs ganze Buch, und danach ein Knopf
+  zurück an die verlassene Stelle - er steht eine halbe Minute lang da.
+- **Die Stelle wird als Anteil eines Kapitels gemerkt**, nicht als Seitenzahl:
+  Eine Seite ist auf einem anderen Gerät eine andere Seite.
 
-Under **Downloads** (in the sidebar) is what lies on the device and how much
-space it takes. That is also where the two switches live: *Wi-Fi only* and a
-manual *offline mode*, which stays on the downloads even when a connection
-exists.
+Ein Buch lässt sich **herunterladen** und dann ohne jeden Server lesen. Mit der
+EPUB-Datei wandert die Leseansicht selbst mit - Stylesheet, Skript und die vier
+Ubuntu-Schnitte -, sonst ginge ein heruntergeladenes Buch beim ersten Mal ohne
+Verbindung als unformatierter Text auf. Der Lesestand wird auch offline gemerkt
+und nachgereicht, sobald der Server wieder da ist.
 
-## Building the APK
+## Downloads und Offline-Betrieb
+
+Songs, Alben, Playlists, Genres, Bewertungslisten, Hörbücher, Hörspiele,
+Podcast-Folgen, alle Songs und E-Books lassen sich auf das Gerät holen
+("Herunterladen" im Kopf einer Sammlung, im Menü eines Songs oder - für das, was
+gerade läuft - direkt aus dem großen Player, neben dem "+"). Was heruntergeladen
+ist, läuft danach **immer** von der Platte - mit oder ohne Verbindung, was
+unterwegs mobile Daten spart.
+
+**Ohne Verbindung startet die App direkt in ihre Downloads**, ohne Zwischenschritt:
+kein Anmeldeformular, kein Ladebalken, keine Anfrage, die erst in einen Timeout
+laufen müsste. Bibliothek, Interpreten, Alben, Genres, Playlists, Suche, Songtexte
+und heruntergeladene Bücher kommen dann von dem, was auf dem Gerät liegt; ein
+Streifen unter der Titelleiste sagt, dass die kurze Bibliothek gezeigt wird.
+Sobald wieder ein Server erreichbar ist, schaltet die App von selbst zurück.
+
+Alles, was eine Verbindung braucht, ist offline abgeschaltet und sagt das:
+bewerten, Playlists ändern, Statistik, Mitteilungen, Konten, Scan und Import.
+
+Die Offline-Bibliothek wird aus den Songs auf dem Gerät gebaut und trägt deshalb
+keine **Album-Bewertungen**: Ein Album zeigt offline keine Sterne, und das Raster
+nach Bewertung zu sortieren fällt auf den Titel zurück. Die Sterne sind wieder da,
+sobald ein Server da ist.
+
+Unter **Downloads** (in der Seitenleiste) steht, was auf dem Gerät liegt und wie
+viel Platz es braucht. Dort sitzen auch die beiden Schalter: *Nur über WLAN* und
+ein manueller *Offline-Modus*, der auf den Downloads bleibt, auch wenn eine
+Verbindung besteht.
+
+Ein Download, der abgebrochen wurde, bleibt abgebrochen - auch wenn der Song zu
+einer heruntergeladenen Playlist gehört. Ihn erneut anzufordern hebt das wieder
+auf.
+
+## Das APK bauen
 
 ```bash
-export JAVA_HOME=/path/to/jdk21
-export ANDROID_HOME=/path/to/android-sdk
+export JAVA_HOME=/pfad/zu/jdk21
+export ANDROID_HOME=/pfad/zum/android-sdk
 ./gradlew assembleRelease
 ```
 
-The finished APK lands in `app/build/outputs/apk/release/app-release.apk`.
+Das fertige APK landet in `app/build/outputs/apk/release/app-release.apk`.
 
-For a **signed** release you need a `keystore.properties` in the project root
-(not in the repository, see `.gitignore`):
+Für einen **signierten** Release braucht es eine `keystore.properties` im
+Projektwurzelverzeichnis (nicht im Repository, siehe `.gitignore`):
 
 ```properties
-storeFile=/path/to/sonorus-release.keystore
+storeFile=/pfad/zu/sonorus-release.keystore
 storePassword=…
 keyAlias=sonorus
 keyPassword=…
 ```
 
-Without that file the project still builds - just unsigned.
+Ohne diese Datei baut das Projekt trotzdem - eben unsigniert.
 
-**The signing key is permanent.** Lose it and an installed app can no longer be
-updated, only uninstalled and installed afresh. Playlists, ratings and history
-live on the server and survive that; the only thing lost is the local queue.
+**Der Signierschlüssel ist endgültig.** Geht er verloren, lässt sich eine
+installierte App nicht mehr aktualisieren, nur deinstallieren und neu
+installieren. Playlists, Bewertungen und Verlauf liegen auf dem Server und
+überleben das; verloren geht allein die lokale Warteschlange.
 
-## Getting it onto the phone
+## Auf das Handy bekommen
 
-Over USB, with USB debugging enabled:
+Über USB, mit aktiviertem USB-Debugging:
 
 ```bash
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-Without a cable: copy the APK to the phone (cloud, mail, USB mass storage) and
-open it there in the file manager. Android will ask once for permission to
-install apps from that source.
+Ohne Kabel: das APK aufs Handy kopieren (Cloud, Mail, USB-Massenspeicher) und
+dort im Dateimanager öffnen. Android fragt einmal nach der Erlaubnis, Apps aus
+dieser Quelle zu installieren.
 
-The first start asks for the server address, username and password.
+Der erste Start fragt nach Serveradresse, Benutzername und Passwort.
 
-## The server address has to be HTTPS
+## Die Serveradresse muss HTTPS sein
 
-The release build allows no cleartext HTTP. That is not a default put there to
-be awkward, it follows from the thing itself: the session cookie carries the
-`Secure` flag and is not sent back over HTTP anyway. An HTTPS address works, a
-bare LAN IP does not.
+Der Release-Build lässt kein unverschlüsseltes HTTP zu. Das ist keine Schikane,
+sondern folgt aus der Sache selbst: Das Sitzungs-Cookie trägt das `Secure`-Flag
+und wird über HTTP ohnehin nicht zurückgeschickt. Eine HTTPS-Adresse
+funktioniert, eine nackte LAN-IP nicht.
 
-The debug build (`assembleDebug`) allows HTTP to `10.0.2.2` and `localhost`, so
-it can be run in the emulator against a local test instance.
+Der Debug-Build (`assembleDebug`) erlaubt HTTP zu `10.0.2.2` und `localhost`,
+damit er sich im Emulator gegen eine lokale Testinstanz fahren lässt.
 
-## Versions
+## Versionen
 
-`compileSdk` stays at **36** and AGP at **8.13.2**, because API 37 so far exists
-only in the preview channel. The androidx libraries are therefore pinned to the
-last version each that accepts 36 - see the note in
-`gradle/libs.versions.toml`. Anyone raising one of them has to raise compileSdk
-and AGP along with it.
+`compileSdk` bleibt bei **36** und AGP bei **8.13.2**, weil API 37 bisher nur im
+Preview-Kanal existiert. Die androidx-Bibliotheken sind deshalb jeweils auf die
+letzte Version festgenagelt, die 36 akzeptiert - siehe die Notiz in
+`gradle/libs.versions.toml`. Wer eine davon anhebt, muss compileSdk und AGP
+mit anheben.
 
-## What is still missing
+## Was noch fehlt
 
-- Playlists cannot be reordered by dragging in the sidebar. The endpoint
-  (`PUT /api/playlists/order`) is present in the client, only the gesture is
-  missing.
-- The cover art crop is built, but has not yet been run through with a real
-  photo on a device.
+- Playlists lassen sich in der Seitenleiste nicht per Ziehen umsortieren. Der
+  Endpunkt (`PUT /api/playlists/order`) ist im Client vorhanden, es fehlt nur die
+  Geste.
+- Der Bildzuschnitt fürs Cover ist gebaut, aber noch nie mit einem echten Foto
+  auf einem Gerät durchgespielt worden.
 
-## License
+## Lizenz
 
-Apache License 2.0 - see [LICENSE](LICENSE).
+Apache License 2.0 - siehe [LICENSE](LICENSE).
