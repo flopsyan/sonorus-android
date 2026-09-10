@@ -48,6 +48,20 @@ class DownloadStoreTest {
     }
 
     @Test
+    fun `the queue outlives the process`() {
+        store.saveQueue(listOf(track(3), track(1)))
+
+        assertEquals(listOf(3, 1), DownloadStore(root).loadQueue().map { it.id })
+    }
+
+    @Test
+    fun `a queue that cannot be read is an empty one`() {
+        File(root, "queue.json").writeText("{ not json")
+
+        assertTrue(DownloadStore(root).loadQueue().isEmpty())
+    }
+
+    @Test
     fun `what was downloaded is still there after a restart`() {
         store.put(store(1))
         store.rememberCover("/covers/album-7.jpg")

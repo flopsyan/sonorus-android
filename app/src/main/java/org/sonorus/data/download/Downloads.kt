@@ -1,8 +1,11 @@
 package org.sonorus.data.download
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import org.sonorus.data.Connectivity
 import org.sonorus.data.Quality
@@ -14,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +26,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
@@ -39,9 +44,9 @@ enum class DownloadStatus { NONE, QUEUED, RUNNING, DONE, FAILED }
  * One song at a time, on purpose: a phone on a train gets more out of finishing
  * one file than out of three half files, and a single writer is what lets the
  * index be a plain file. The queue is worked by one coroutine, and a
- * [DownloadService] holds the process up while it runs - without it Android is
- * free to kill the app the moment it goes to the background, which is precisely
- * when a long download is left alone.
+ * [DownloadJob] - a [DownloadService] before Android 14 - holds the process up
+ * while it runs; without it Android is free to kill the app the moment it goes
+ * to the background, which is precisely when a long download is left alone.
  *
  * Every download is resumable: it writes `<id>.part` and asks for the rest with
  * a `Range` header, which the server answers because `res.sendFile` sets
@@ -70,6 +75,11 @@ class Downloads(
         val failed: Map<Int, String> = emptyMap(),
         /** The queue is standing still because there is no connection it may use. */
         val waiting: Boolean = false,
+        /** The server could not be reached just now; the same song is tried again shortly. */
+        val retrying: Boolean = false,
+        /** Too many tries in a row came to nothing, so the system decides when to go on. */
+        val paused: Boolean = false,
+        val wifiOnly: Boolean = false,
         val bytes: Long = 0,
         /**
          * How far the whole run is, **by size and not by count**.
@@ -87,6 +97,15 @@ class Downloads(
     ) {
         val busy: Boolean get() = active != null || queued.isNotEmpty()
         val running: Int get() = queued.size + if (active != null) 1 else 0
+
+        /** Why nothing is moving, or null while a song is on its way. */
+        val stalled: String?
+            get() = when {
+                waiting -> if (wifiOnly) "Wartet auf WLAN" else "Wartet auf eine Verbindung"
+                retrying -> "Server nicht erreichbar - neuer Versuch gleich"
+                paused -> "Pausiert - geht von selbst weiter"
+                else -> null
+            }
 
         /** 0 to 1 across the whole run, or null when nothing is running. */
         val batchProgress: Float?
@@ -148,6 +167,29 @@ class Downloads(
     private var worker: Job? = null
     private var current: Job? = null
 
+    /** The request in flight. Cancelling the coroutine alone leaves it blocked in `read()` for up to 30 s. */
+    @Volatile
+    private var call: Call? = null
+
+    /** Tries in a row that brought not a single new byte, and when that streak began. */
+    private var fruitless = 0
+    private var stalledSince = 0L
+
+    /** See [DownloadRetry.MAX_CUT_SHORT]; counted for the song in [cutShortId] only. */
+    private var cutShort = 0
+    private var cutShortId = -1
+
+    @Volatile
+    private var retrying = false
+
+    @Volatile
+    private var paused = false
+
+    private val useJob = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+
+    /** The ids last written to the queue file, so a progress tick does not write it again. */
+    private var savedQueue: List<Int> = emptyList()
+
     /**
      * Holds the CPU while songs are being fetched.
      *
@@ -186,7 +228,17 @@ class Downloads(
         // an app whose storage was cleared. An entry promising a file that is
         // not there is exactly the failure this feature exists to prevent.
         scope.launch { store.prune() }
+        // The queue outlives the process: the system may start the job again long after it died.
+        synchronized(pending) {
+            for (track in store.loadQueue()) {
+                if (store.isDownloaded(track.id) || pending.any { it.id == track.id }) continue
+                pending.addLast(track)
+                runTotalBytes += estimate(track)
+            }
+            savedQueue = pending.map { it.id }
+        }
         publish()
+        drawNotification()
         // A queue held back by "Wi-Fi only" has to start by itself once the
         // phone is on Wi-Fi, or the setting would simply look broken.
         scope.launch {
@@ -201,6 +253,16 @@ class Downloads(
     fun setWifiOnly(on: Boolean) {
         settings.wifiOnly = on
         _wifiOnly.value = on
+        // The job carries the network it waits for, so it is scheduled again with the new one.
+        if (synchronized(pending) { pending.isNotEmpty() } || active != null) hold(force = true)
+        publish()
+    }
+
+    /** The app is on screen - the one moment a user-initiated job may be scheduled. */
+    fun onAppVisible() {
+        if (synchronized(pending) { pending.isEmpty() }) return
+        hold(visibleNow = true)
+        start()
     }
 
     // --- Asking for downloads -------------------------------------------------
@@ -318,13 +380,16 @@ class Downloads(
             pending.removeAll { it.id == trackId }
             failed.remove(trackId)
         }
-        if (active?.id == trackId) current?.cancel()
+        if (active?.id == trackId) {
+            current?.cancel()
+            call?.cancel()
+        }
         store.exclude(listOf(trackId))
         // The last one out turns the light off: with nothing waiting there is
         // nothing for the service to say, and it may be waiting rather than
         // running - in which case no worker will end and stop it.
         val empty = synchronized(pending) { pending.isEmpty() } && active == null
-        if (empty) stopService()
+        if (empty) release()
         publish()
     }
 
@@ -340,11 +405,12 @@ class Downloads(
         }
         worker?.cancel()
         current?.cancel()
+        call?.cancel()
         active = null
         // Every one of them was cancelled by hand - see [cancel].
         if (going.isNotEmpty()) store.exclude(going)
         publish()
-        stopService()
+        release()
     }
 
     /**
@@ -368,6 +434,7 @@ class Downloads(
         }
         worker?.cancel()
         current?.cancel()
+        call?.cancel()
         active = null
         runTotalBytes = 0
         runDoneBytes = 0
@@ -384,7 +451,7 @@ class Downloads(
             publish()
         }
         publish()
-        stopService()
+        release()
         return fetched.size
     }
 
@@ -418,13 +485,17 @@ class Downloads(
         // on screen: a foreground service may not be started from the
         // background, so one started only when the network comes back would be
         // refused and the queue would run unprotected and unseen.
-        startService()
+        hold()
         if (worker?.isActive == true) return
         if (!allowed()) {
             publish()
             return
         }
+        val previous = worker
         worker = scope.launch {
+            // A stopped run may still be unwinding: two writers on one part file corrupt it, and its finally would drop our wake lock.
+            previous?.join()
+            paused = false
             try {
                 // The genre list is the one thing offline cannot derive with the
                 // server's own ids, so it rides along with every batch.
@@ -432,22 +503,64 @@ class Downloads(
 
                 while (true) {
                     if (!allowed()) break
-                    val next = synchronized(pending) { pending.removeFirstOrNull() } ?: break
+                    // Taken and marked active in one step, so the saved queue never loses it in between.
+                    val next = synchronized(pending) { pending.removeFirstOrNull()?.also { active = it } } ?: break
                     // Before the song, not once before the run: acquiring again
                     // refreshes the limit, so a long queue never outlives its lock.
                     holdCpu()
-                    active = next
                     progress = 0f
                     publish()
 
+                    val before = partLength(next)
                     var error: Throwable? = null
                     val job = launch { runCatching { fetch(next) }.onFailure { error = it } }
                     current = job
                     job.join()
                     current = null
 
+                    val failure = error
+                    val progressed = partLength(next) > before
+                    if (progressed) {
+                        if (cutShortId != next.id) {
+                            cutShortId = next.id
+                            cutShort = 0
+                        }
+                        cutShort++
+                    }
+                    if (!job.isCancelled && failure != null && DownloadRetry.isTransport(failure) &&
+                        cutShort < DownloadRetry.MAX_CUT_SHORT
+                    ) {
+                        // The connection failed, not the song: it goes back to the front and waits.
+                        fruitless = if (progressed) 1 else fruitless + 1
+                        if (fruitless == 1) stalledSince = SystemClock.elapsedRealtime()
+                        synchronized(pending) {
+                            pending.addFirst(next)
+                            active = null
+                        }
+                        activeBytes = 0
+                        activeExpected = 0
+                        progress = 0f
+                        if (SystemClock.elapsedRealtime() - stalledSince >= DownloadRetry.GIVE_UP_AFTER_MS) {
+                            if (DownloadJob.isRunning) {
+                                paused = true
+                                publish()
+                                break
+                            }
+                            // Nothing would restart the queue from here, so it keeps trying and lets the CPU sleep between tries.
+                            releaseCpu()
+                        }
+                        retrying = true
+                        publish()
+                        try {
+                            delay(DownloadRetry.delayFor(fruitless))
+                        } finally {
+                            retrying = false
+                        }
+                        continue
+                    }
+                    fruitless = 0
                     if (!job.isCancelled) {
-                        error?.let { synchronized(pending) { failed[next.id] = it.message ?: "Download fehlgeschlagen." } }
+                        failure?.let { synchronized(pending) { failed[next.id] = it.message ?: "Download fehlgeschlagen." } }
                     }
                     // Whether it arrived or failed, this song is behind the run now -
                     // a bar that stops at a file the server refused would never
@@ -477,7 +590,7 @@ class Downloads(
                 // Only when there is nothing left. The loop above also ends when
                 // the connection goes, and the songs still queued behind it are
                 // what the notification is for.
-                if (empty) stopService()
+                if (empty) release() else if (paused) DownloadJob.finish(context, reschedule = true)
             } finally {
                 // Also on cancellation, which is the path a stopped run takes -
                 // a lock left held there would cost battery for nothing.
@@ -503,7 +616,7 @@ class Downloads(
             ?: DownloadStore.extensionFor(track, answer.contentType)
         val target = store.targetOf(track.id, extension)
         target.delete()
-        if (!part.renameTo(target)) throw IOException("Die Datei konnte nicht abgelegt werden.")
+        if (!part.renameTo(target)) throw DownloadLocalFailure("Die Datei konnte nicht abgelegt werden.")
 
         track.cover?.takeIf { it.isNotEmpty() && store.coverOf(it) == null }?.let { path ->
             runCatching { cover(path) }
@@ -549,6 +662,7 @@ class Downloads(
             .build()
 
         val call = api.client.newCall(request)
+        this.call = call
         return call.execute().use { response ->
             if (response.code == 401 && retry) {
                 api.relogin()
@@ -561,7 +675,7 @@ class Downloads(
                 return stream(track, part, retry = false)
             }
             if (!response.isSuccessful) {
-                throw IOException("Der Server antwortet mit HTTP ${response.code}.")
+                throw DownloadRetry.httpFailure(response.code)
             }
             val body = response.body
             val append = response.code == 206 && have > 0
@@ -620,16 +734,76 @@ class Downloads(
         }
     }
 
-    // --- The service that keeps the process alive -----------------------------
+    // --- What keeps the process alive -----------------------------------------
 
-    private fun startService() {
+    /** A job on Android 14 and up, which may only be scheduled while the app is on screen; a service below. */
+    private fun hold(force: Boolean = false, visibleNow: Boolean = visible()) {
+        if (useJob) {
+            if (!visibleNow || DownloadJob.ensure(context, unmetered = _wifiOnly.value, force = force)) return
+            // A job the system refused still leaves the foreground service, with its six hours.
+        }
         runCatching {
             ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java))
         }
     }
 
-    private fun stopService() {
+    private fun release() {
+        if (useJob) {
+            DownloadJob.finish(context, reschedule = false)
+            // The job leaves its notification behind on purpose, see [DownloadJob].
+            DownloadNotification.hide(context)
+        }
         runCatching { context.stopService(Intent(context, DownloadService::class.java)) }
+    }
+
+    private fun visible(): Boolean {
+        val info = ActivityManager.RunningAppProcessInfo()
+        ActivityManager.getMyMemoryState(info)
+        return info.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+    }
+
+    /** The system started the job, so the queue may run with the phone locked. */
+    fun onJobStarted() {
+        if (synchronized(pending) { pending.isEmpty() } && active == null) release() else start()
+    }
+
+    /** The system took the job back. The song in flight goes back to the front and resumes from its part file. */
+    fun onJobStopped() {
+        synchronized(pending) {
+            active?.let { song -> if (pending.none { it.id == song.id }) pending.addFirst(song) }
+            active = null
+        }
+        worker?.cancel()
+        current?.cancel()
+        call?.cancel()
+        activeBytes = 0
+        activeExpected = 0
+        progress = 0f
+        if (allowed()) paused = true
+        publish()
+    }
+
+    private fun partLength(track: Track): Long = File(store.audioDir, "${track.id}.part").length()
+
+    /** At most once a second: five updates a second had the system shed them. */
+    private fun drawNotification() = scope.launch {
+        var shown: State? = null
+        var at = 0L
+        state.collect { s ->
+            if (!s.busy) {
+                if (shown != null) DownloadNotification.hide(context)
+                shown = null
+                return@collect
+            }
+            val now = SystemClock.elapsedRealtime()
+            val last = shown
+            if (last != null && last.stalled == s.stalled && last.running == s.running && now - at < NOTIFY_MS) {
+                return@collect
+            }
+            shown = s
+            at = now
+            DownloadNotification.show(context, s)
+        }
     }
 
     private fun publish() {
@@ -650,14 +824,31 @@ class Downloads(
             progress = progress,
             failed = failures,
             waiting = queued.isNotEmpty() && !allowed(),
+            retrying = retrying,
+            paused = paused && running == null,
+            wifiOnly = _wifiOnly.value,
             bytes = store.bytes,
             batchDoneBytes = runDoneBytes + inFlight,
             batchTotalBytes = runTotalBytes,
         )
+        saveQueue()
+    }
+
+    private fun saveQueue() {
+        val tracks = synchronized(pending) {
+            val all = listOfNotNull(active) + pending
+            val ids = all.map { it.id }
+            if (ids == savedQueue) return
+            savedQueue = ids
+            all
+        }
+        runCatching { store.saveQueue(tracks) }
     }
 
     private companion object {
         const val REPORT_MS = 200L
+
+        const val NOTIFY_MS = 1_000L
 
         const val WAKE_TAG = "sonorus:downloads"
 

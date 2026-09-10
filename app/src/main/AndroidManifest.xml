@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Android 14 and up: downloads run as a user-initiated job, see DownloadJob. -->
+    <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS" />
 
     <application
         android:name=".SonorusApp"
@@ -59,12 +61,17 @@
             </intent-filter>
         </service>
 
-        <!-- Holds the process up while songs are being downloaded, and draws the
-             only progress that is visible while the app is not on screen. -->
+        <!-- Holds the process up while songs are being downloaded, on Android 13
+             and older. Newer versions use the job below. -->
         <service
             android:name=".data.download.DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".data.download.DownloadJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
     </application>
 

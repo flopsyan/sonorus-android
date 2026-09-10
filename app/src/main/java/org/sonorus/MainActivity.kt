@@ -65,6 +65,12 @@ class MainActivity : ComponentActivity() {
      * was paused and then left would otherwise keep a position that is up to
      * that much too old.
      */
+    override fun onStart() {
+        super.onStart()
+        // A user-initiated download job may only be scheduled while the app is visible.
+        SonorusApp.instance.downloads.onAppVisible()
+    }
+
     override fun onStop() {
         super.onStop()
         SonorusApp.instance.player.saveQueue()

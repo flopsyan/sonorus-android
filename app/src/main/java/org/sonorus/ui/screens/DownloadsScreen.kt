@@ -147,7 +147,7 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(
-                                    if (state.waiting) "Wartet auf WLAN" else state.activeTitle,
+                                    state.stalled ?: state.activeTitle,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = colors.text,
                                     maxLines = 1,
@@ -164,7 +164,7 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                             Progress(
                                 done = (state.progress * 100).toInt(),
                                 total = 100,
-                                indeterminate = state.waiting || state.progress <= 0f,
+                                indeterminate = state.stalled != null || state.progress <= 0f,
                             )
                             Spacer(Modifier.height(12.dp))
                             SonorusButton("Abbrechen") { vm.downloads.cancelAll() }

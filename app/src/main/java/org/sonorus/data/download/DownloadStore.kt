@@ -5,6 +5,7 @@ import org.sonorus.data.model.Ebook
 import org.sonorus.data.model.Genre
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Track
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -74,6 +75,10 @@ class DownloadStore(private val root: File) {
     private val accountFile = File(root, "account.json")
     private val accountTemp = File(root, "account.json.tmp")
 
+    /** Songs asked for and not here yet, apart from the index, which only holds what is really on the phone. */
+    private val queueFile = File(root, "queue.json")
+    private val queueTemp = File(root, "queue.json.tmp")
+
     private val lock = Any()
 
     @Volatile
@@ -128,6 +133,25 @@ class DownloadStore(private val root: File) {
             ?.takeIf { it.file != entry.file }
             ?.let { File(audioDir, it.file).delete() }
         s.copy(tracks = s.tracks.filter { it.track.id != entry.track.id } + entry)
+    }
+
+    // --- The download queue -----------------------------------------------------
+
+    fun saveQueue(tracks: List<Track>) {
+        synchronized(queueFile) {
+            root.mkdirs()
+            queueTemp.writeText(json.encodeToString(ListSerializer(Track.serializer()), tracks))
+            if (!queueTemp.renameTo(queueFile)) {
+                queueFile.delete()
+                queueTemp.renameTo(queueFile)
+            }
+        }
+    }
+
+    /** An unreadable queue is an empty one: the collections are asked again at the next start anyway. */
+    fun loadQueue(): List<Track> = synchronized(queueFile) {
+        runCatching { json.decodeFromString(ListSerializer(Track.serializer()), queueFile.readText()) }
+            .getOrDefault(emptyList())
     }
 
     // --- Books that are read ----------------------------------------------------
