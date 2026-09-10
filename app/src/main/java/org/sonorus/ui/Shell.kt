@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
@@ -101,6 +102,7 @@ import androidx.navigation.compose.rememberNavController
 import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.Playlist
 import org.sonorus.ui.components.ConfirmDialog
+import org.sonorus.ui.components.SonorusMark
 import org.sonorus.ui.components.PlaylistPickerDialog
 import org.sonorus.ui.components.TextPromptDialog
 import org.sonorus.ui.components.PlayerBar
@@ -196,12 +198,21 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
             topBar = {
                 if (!reading) TopAppBar(
                     title = {
-                        Text(
-                            titleFor(route, data),
-                            style = MaterialTheme.typography.titleLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            // The mark the web carries in its sidebar, at the one
+                            // place on this screen that is the app rather than
+                            // the page: beside its name.
+                            SonorusMark(scale = 0.5f)
+                            Text(
+                                titleFor(route, data),
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawer.open() } }) {
@@ -431,7 +442,7 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
     Routes.ALBUMS -> "Alben"
     Routes.GENRES -> "Genres"
     Routes.PODCASTS -> "Podcasts"
-    Routes.EBOOKS -> "eBooks"
+    Routes.EBOOKS -> "E-Books"
     Routes.SEARCH -> "Suche"
     Routes.DOWNLOADS -> "Downloads"
     Routes.SETTINGS -> "Einstellungen"
@@ -472,7 +483,7 @@ private fun BottomTabs(
             // tabs wearing the same glyph is worse than either choice of glyph.
             Tab(
                 icon = Icons.Filled.AutoStories,
-                label = "eBooks",
+                label = "E-Books",
                 selected = route.inSection("ebooks"),
                 onClick = { onGo(Routes.EBOOKS) },
             )
@@ -601,6 +612,7 @@ private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            SonorusMark(scale = 0.55f)
             Text(data.siteName, style = MaterialTheme.typography.headlineSmall, color = colors.text)
         }
         Spacer(Modifier.height(8.dp))
@@ -616,6 +628,9 @@ private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
         SidebarRow(Icons.Filled.Mic, "Podcasts") { onGo(Routes.PODCASTS) }
         SidebarRow(Icons.AutoMirrored.Filled.MenuBook, "Hörbücher") { onGo(Routes.spoken("audiobooks")) }
         SidebarRow(Icons.Filled.TheaterComedy, "Hörspiele") { onGo(Routes.spoken("audiodramas")) }
+        // Read rather than heard, and in the same list for the same reason: this
+        // is the one place that names every library there is.
+        SidebarRow(Icons.AutoMirrored.Filled.LibraryBooks, "E-Books") { onGo(Routes.EBOOKS) }
         // Not a sixth kind of list but a place: what is on the phone rather than
         // on the server, and the one page that still works with nothing behind it.
         val downloads by vm.downloads.state.collectAsState()

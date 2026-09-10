@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -475,3 +476,35 @@ fun MediaCard(
 }
 
 val ScreenPadding = PaddingValues(horizontal = 16.dp)
+
+/**
+ * The four bars of the app icon.
+ *
+ * Drawn rather than shipped as a picture: it is four rounded rectangles, it has
+ * to take the theme's own two colours, and a drawable would have to be exported
+ * again at every size it is wanted in. [scale] is the whole size: 1 is the mark
+ * over the login form, and anything smaller is the same mark beside a title.
+ */
+@Composable
+fun SonorusMark(scale: Float = 1f, modifier: Modifier = Modifier) {
+    val colors = SonorusTheme.colors
+    Row(
+        modifier
+            .clip(RoundedCornerShape(14.dp * scale))
+            .background(colors.accent)
+            .padding(14.dp * scale)
+            .height(36.dp * scale),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp * scale),
+    ) {
+        for (h in listOf(14, 34, 22, 8)) {
+            Box(
+                Modifier
+                    .width(6.dp * scale)
+                    .height(h.dp * scale)
+                    .clip(RoundedCornerShape(3.dp * scale))
+                    .background(colors.accentInk)
+            )
+        }
+    }
+}

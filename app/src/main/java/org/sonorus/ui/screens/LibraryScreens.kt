@@ -262,6 +262,11 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     sort = sort,
                     dir = dir,
                     total = if (query.isBlank()) data.total else tracks.size,
+                    // The whole library, in the same control an album has. Not a
+                    // standing order like a playlist's: "Alle Songs" is not a
+                    // list somebody keeps, it is everything there is, and what
+                    // arrives later is fetched by asking again.
+                    trailing = { CollectionDownload(vm, data.tracks) },
                     onPick = { key, direction ->
                         sort = key
                         dir = direction

@@ -75,6 +75,11 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     val dramas = remember(snapshot) { Offline.books(snapshot, "drama") }
     val shows = remember(snapshot) { Offline.podcasts(snapshot).podcasts }
     val spokenTotal = remember(snapshot) { snapshot.tracks.count { it.track.isSpoken } }
+    // Books that are read have a downloader of their own, so they have a state
+    // of their own to be rebuilt on. They are on the phone like everything else
+    // here, and this is the page that says what is.
+    val ebookState by vm.ebookDownloads.state.collectAsState()
+    val ebooks = remember(ebookState, snapshot) { snapshot.ebooks.map { it.book } }
 
     Column(Modifier.fillMaxSize()) {
         TrackList(
@@ -113,14 +118,16 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                         .takeIf { dramas.isNotEmpty() },
                                     Fmt.plural(shows.sumOf { it.episodeCount }, "Folge", "Folgen")
                                         .takeIf { shows.isNotEmpty() },
-                                    Fmt.bytes(state.bytes),
+                                    Fmt.plural(ebooks.size, "E-Book", "E-Books")
+                                        .takeIf { ebooks.isNotEmpty() },
+                                    Fmt.bytes(state.bytes + ebooks.sumOf { it.size }),
                                     Fmt.durationLong(snapshot.tracks.sumOf { it.track.duration }),
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textDim,
                             )
                         }
-                        if (tracks.isNotEmpty() || spokenTotal > 0) {
+                        if (tracks.isNotEmpty() || spokenTotal > 0 || ebooks.isNotEmpty()) {
                             SonorusButton("Alle entfernen", danger = true) { clearing = true }
                         }
                     }
@@ -196,6 +203,18 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                         }
                     }
 
+                    if (ebooks.isNotEmpty()) {
+                        RackLabelText("E-Books", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                        for (book in ebooks) {
+                            SpokenRow(
+                                title = book.title,
+                                subtitle = book.author,
+                                meta = Fmt.bytes(book.size),
+                                coverUrl = vm.coverUrl(book.cover),
+                            ) { onGo(Routes.ebook(book.id)) }
+                        }
+                    }
+
                     SpokenSection("Hörbücher", audiobooks, vm) { onGo(Routes.book("audiobooks", it)) }
                     SpokenSection("Hörspiele", dramas, vm) { onGo(Routes.book("audiodramas", it)) }
                     if (shows.isNotEmpty()) {
@@ -215,11 +234,12 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                             "Songs",
                             Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         )
-                    } else if (spokenTotal == 0) {
+                    } else if (spokenTotal == 0 && ebooks.isEmpty()) {
                         Text(
                             "Noch nichts heruntergeladen. Auf einem Album, einer Playlist, einem " +
-                                "Hörbuch oder im Menü eines Songs steht \"Herunterladen\"; bei einem " +
-                                "Podcast steht der Pfeil neben der einzelnen Folge.",
+                                "Hörbuch, einem E-Book oder im Menü eines Songs steht " +
+                                "\"Herunterladen\"; bei einem Podcast steht der Pfeil neben der " +
+                                "einzelnen Folge.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textDim,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),

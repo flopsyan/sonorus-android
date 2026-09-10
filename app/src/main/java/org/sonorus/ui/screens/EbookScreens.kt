@@ -72,7 +72,7 @@ fun EbooksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     LoadBox(load, skeleton = { CardGridSkeleton() }) { data ->
         if (data.authors.isEmpty()) {
             return@LoadBox EmptyNote(
-                "Noch keine eBooks. Sonorus liest sie aus dem Ordner, den der Server " +
+                "Noch keine E-Books. Sonorus liest sie aus dem Ordner, den der Server " +
                     "eingehängt hat - ein Ordner je Autor, darin ein Ordner je Buch."
             )
         }

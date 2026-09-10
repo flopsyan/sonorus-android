@@ -201,7 +201,13 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         Panel("Downloads") {
             Readout("Songs auf dem Gerät", Fmt.number(downloads.done.size))
-            Readout("Belegt", Fmt.bytes(downloads.bytes))
+            // Books are downloaded by a downloader of their own, and they are the
+            // largest single files on the phone - leaving them out of "Belegt"
+            // made the number wrong by megabytes.
+            val ebookState by vm.ebookDownloads.state.collectAsState()
+            val ebooks = remember(ebookState, downloads) { vm.downloads.store.snapshot.ebooks }
+            if (ebooks.isNotEmpty()) Readout("E-Books auf dem Gerät", Fmt.number(ebooks.size))
+            Readout("Belegt", Fmt.bytes(downloads.bytes + ebooks.sumOf { it.book.size }))
             val downloadsWifiOnly by vm.downloads.wifiOnly.collectAsState()
             SwitchRow("Nur über WLAN", downloadsWifiOnly) {
                 vm.setDownloadsWifiOnly(it)

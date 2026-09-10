@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.sonorus.ui.components.RackLabelText
 import org.sonorus.ui.components.SonorusButton
+import org.sonorus.ui.components.SonorusMark
 import org.sonorus.ui.theme.SonorusTheme
 
 /**
@@ -81,7 +82,7 @@ fun LoginScreen(
                 .padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            LevelMeterMark()
+            SonorusMark()
             Spacer(Modifier.height(18.dp))
             Text("Sonorus", style = MaterialTheme.typography.displaySmall, color = colors.text)
             Spacer(Modifier.height(4.dp))
@@ -252,27 +253,3 @@ private fun Field(
     }
 }
 
-/** The four bars of the app icon, as a mark over the login form. */
-@Composable
-private fun LevelMeterMark() {
-    val colors = SonorusTheme.colors
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(colors.accent)
-            .padding(horizontal = 14.dp, vertical = 14.dp)
-            .height(36.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        for (h in listOf(14, 34, 22, 8)) {
-            Box(
-                Modifier
-                    .width(6.dp)
-                    .height(h.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(colors.accentInk)
-            )
-        }
-    }
-}

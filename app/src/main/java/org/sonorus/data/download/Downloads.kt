@@ -304,26 +304,40 @@ class Downloads(
     }
 
     /** Stops a download that has not finished. What is written stays, and resumes. */
+    /**
+     * Stop fetching this song, and stop meaning it.
+     *
+     * The exclusion is the point. A song that belongs to a downloaded playlist
+     * is under a standing order, so a cancelled download without it is a
+     * download the next reconcile starts again - at the next app start, over
+     * and over. Asking for the song again clears the exclusion, which is what
+     * `add` does, so this takes nothing back permanently.
+     */
     fun cancel(trackId: Int) {
         synchronized(pending) {
             pending.removeAll { it.id == trackId }
             failed.remove(trackId)
         }
         if (active?.id == trackId) current?.cancel()
+        store.exclude(listOf(trackId))
         publish()
     }
 
     fun cancelAll() {
-        synchronized(pending) {
+        val going = synchronized(pending) {
+            val ids = pending.map { it.id } + listOfNotNull(active?.id)
             pending.clear()
             failed.clear()
             runDownloaded.clear()
             runTotalBytes = 0
             runDoneBytes = 0
+            ids
         }
         worker?.cancel()
         current?.cancel()
         active = null
+        // Every one of them was cancelled by hand - see [cancel].
+        if (going.isNotEmpty()) store.exclude(going)
         publish()
         stopService()
     }
@@ -340,7 +354,9 @@ class Downloads(
      * Answers how many songs were removed, so the confirmation can say it.
      */
     fun cancelRun(): Int {
+        var going = emptyList<Int>()
         val fetched = synchronized(pending) {
+            going = pending.map { it.id } + listOfNotNull(active?.id)
             pending.clear()
             failed.clear()
             runDownloaded.toList().also { runDownloaded.clear() }
@@ -352,6 +368,10 @@ class Downloads(
         runDoneBytes = 0
         scope.launch {
             for (id in fetched) store.remove(id)
+            // What was given back and what never arrived are both "no thank
+            // you", so both are excluded - or the next reconcile fetches them
+            // again on behalf of the collection they belong to.
+            store.exclude(fetched + going)
             // The part file of the song that was interrupted is this run's too,
             // and leaving it would have the next download resume into a file
             // nobody asked for any more.

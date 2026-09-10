@@ -357,9 +357,9 @@ class Library(
     private fun spokenLabel(base: String) =
         if (base == "audiodramas") "Dieses Hörspiel" else "Dieses Hörbuch"
 
-    // eBooks are read from the server and nowhere else for now: no download, so
-    // no offline half to answer out of. The three reads say so plainly rather
-    // than handing back an empty shelf, which would read as "you own nothing".
+    // What is not on the phone and cannot be fetched. A book that was downloaded
+    // is answered out of the store; one that was not says so plainly rather than
+    // handing back an empty page, which would read as "you own nothing".
     private fun needsServer(what: String): Nothing =
         throw ApiException("offline", "$what geht nur mit Verbindung zum Server.")
 
