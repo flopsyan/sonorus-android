@@ -320,6 +320,11 @@ class Downloads(
         }
         if (active?.id == trackId) current?.cancel()
         store.exclude(listOf(trackId))
+        // The last one out turns the light off: with nothing waiting there is
+        // nothing for the service to say, and it may be waiting rather than
+        // running - in which case no worker will end and stop it.
+        val empty = synchronized(pending) { pending.isEmpty() } && active == null
+        if (empty) stopService()
         publish()
     }
 
@@ -405,12 +410,20 @@ class Downloads(
 
     private fun start() {
         synchronized(pending) { if (pending.isEmpty()) return }
+        // Before the connection is even asked about. A queue that is waiting for
+        // WLAN is still a queue, and the service is what says so on screen and
+        // what keeps the process alive to say it - stopping it here is how the
+        // notification came to disappear the moment a phone went into a pocket
+        // and its WLAN slept. It also has to be started while the app is still
+        // on screen: a foreground service may not be started from the
+        // background, so one started only when the network comes back would be
+        // refused and the queue would run unprotected and unseen.
+        startService()
         if (worker?.isActive == true) return
         if (!allowed()) {
             publish()
             return
         }
-        startService()
         worker = scope.launch {
             try {
                 // The genre list is the one thing offline cannot derive with the
@@ -450,15 +463,21 @@ class Downloads(
                 active = null
                 // The run is over: a fresh tap starts a fresh one, and a cancel
                 // after this point has nothing of its own left to take back.
-                synchronized(pending) {
+                val empty = synchronized(pending) {
                     if (pending.isEmpty()) {
                         runDownloaded.clear()
                         runTotalBytes = 0
                         runDoneBytes = 0
+                        true
+                    } else {
+                        false
                     }
                 }
                 publish()
-                stopService()
+                // Only when there is nothing left. The loop above also ends when
+                // the connection goes, and the songs still queued behind it are
+                // what the notification is for.
+                if (empty) stopService()
             } finally {
                 // Also on cancellation, which is the path a stopped run takes -
                 // a lock left held there would cost battery for nothing.
