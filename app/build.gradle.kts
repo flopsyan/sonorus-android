@@ -22,8 +22,8 @@ android {
         applicationId = "org.sonorus"
         minSdk = 26
         targetSdk = 36
-        versionCode = 24
-        versionName = "0.17.1"
+        versionCode = 25
+        versionName = "0.18.0"
     }
 
     signingConfigs {
