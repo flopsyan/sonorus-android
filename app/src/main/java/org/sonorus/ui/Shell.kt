@@ -282,6 +282,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                                 onToggle = { vm.player.toggle() },
                                 onNext = { vm.player.next() },
                                 onPrevious = { vm.player.previous() },
+                                onSkip = { vm.player.skipBy(it) },
                                 onExpand = { expanded = true },
                                 onSeek = { f ->
                                     val d = playerState.durationMs

@@ -4,10 +4,12 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -21,6 +23,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -73,6 +77,51 @@ class PlaybackService : MediaLibraryService() {
                     .build()
             )
             .build()
+        followSpokenWord()
+    }
+
+    /**
+     * Swaps the notification's two skip buttons for what is playing.
+     *
+     * Spoken word gets the same fifteen seconds the app's own players show, and
+     * music keeps prev/next. The notification was the one surface still stepping
+     * whole **files**: it drives the ExoPlayer directly rather than going through
+     * [PlayerController], so the controller's chapter logic never ran for it and
+     * a press in the middle of a book landed in the next part.
+     *
+     * The buttons are bound to `COMMAND_SEEK_BACK`/`COMMAND_SEEK_FORWARD`, which
+     * is the only kind of skip a controller outside the app can ask for - the
+     * fifteen seconds themselves are the player's own seek increments, set in
+     * [PlayerController]. A button in `SLOT_BACK` or `SLOT_FORWARD` replaces the
+     * default one there, so an empty list is what gives music its prev/next back.
+     */
+    private fun followSpokenWord() {
+        scope.launch {
+            app.player.state
+                .map { it.current?.isSpoken == true }
+                .distinctUntilChanged()
+                .collect { spoken ->
+                    mediaSession?.setMediaButtonPreferences(
+                        if (spoken) skipButtons else emptyList()
+                    )
+                }
+        }
+    }
+
+    /** Media3 ships a glyph that says 15, so nothing here has to be drawn. */
+    private val skipButtons by lazy {
+        listOf(
+            CommandButton.Builder(CommandButton.ICON_SKIP_BACK_15)
+                .setPlayerCommand(Player.COMMAND_SEEK_BACK)
+                .setSlots(CommandButton.SLOT_BACK)
+                .setDisplayName("15 Sekunden zurück")
+                .build(),
+            CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_15)
+                .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
+                .setSlots(CommandButton.SLOT_FORWARD)
+                .setDisplayName("15 Sekunden vor")
+                .build(),
+        )
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession

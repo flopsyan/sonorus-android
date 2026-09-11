@@ -42,10 +42,12 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.data.model.Track
 import org.sonorus.player.PlayerState
+import org.sonorus.player.SKIP_MS
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.components.Cover
 import org.sonorus.ui.components.SeekRail
+import org.sonorus.ui.components.SkipButton
 import org.sonorus.ui.components.Stars
 import org.sonorus.ui.components.TransportGlyph
 import org.sonorus.ui.components.rememberPlayhead
@@ -324,12 +326,19 @@ private fun Strip(
         // Shuffle and repeat cost nothing here: the row is as tall as its
         // tallest child either way, and the width was going spare. That is why
         // they have no threshold of their own while the stars do.
+        //
+        // Spoken word gets the full player's transport instead: the two skips in
+        // place of prev/next, and no shuffle or repeat at all. A book is one
+        // thing played in one order, so both modes are as meaningless here as
+        // the rating already was - and the row is `SpaceEvenly`, so dropping two
+        // of five children leaves play/pause exactly where it was.
+        val spoken = track.isSpoken
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            if (modes) {
+            if (modes && !spoken) {
                 IconButton(
                     onClick = {
                         haptics.toggled(!state.shuffle)
@@ -346,8 +355,12 @@ private fun Strip(
                     )
                 }
             }
-            IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(60.dp)) {
-                Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(46.dp))
+            if (spoken) {
+                SkipButton(forward = false, onClick = { vm.player.skipBy(-SKIP_MS) })
+            } else {
+                IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(60.dp)) {
+                    Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(46.dp))
+                }
             }
             Box(
                 Modifier
@@ -362,10 +375,14 @@ private fun Strip(
             ) {
                 TransportGlyph(state.playing, tint = colors.accentInk, size = 32.dp)
             }
-            IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(60.dp)) {
-                Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(46.dp))
+            if (spoken) {
+                SkipButton(forward = true, onClick = { vm.player.skipBy(SKIP_MS) })
+            } else {
+                IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(60.dp)) {
+                    Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(46.dp))
+                }
             }
-            if (modes) {
+            if (modes && !spoken) {
                 IconButton(
                     onClick = {
                         haptics.toggled(state.repeat == "off")
@@ -462,8 +479,18 @@ private fun Panel(vm: AppViewModel, state: PlayerState, track: Track) {
                     )
                 }
             }
-            IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(32.dp))
+            if (track.isSpoken) {
+                SkipButton(
+                    forward = false,
+                    onClick = { vm.player.skipBy(-SKIP_MS) },
+                    button = 40.dp,
+                    glyph = 32.dp,
+                    number = 9.sp,
+                )
+            } else {
+                IconButton(onClick = { vm.player.previous() }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.text, modifier = Modifier.size(32.dp))
+                }
             }
             Box(
                 Modifier
@@ -478,8 +505,18 @@ private fun Panel(vm: AppViewModel, state: PlayerState, track: Track) {
             ) {
                 TransportGlyph(state.playing, tint = colors.accentInk, size = 22.dp)
             }
-            IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(32.dp))
+            if (track.isSpoken) {
+                SkipButton(
+                    forward = true,
+                    onClick = { vm.player.skipBy(SKIP_MS) },
+                    button = 40.dp,
+                    glyph = 32.dp,
+                    number = 9.sp,
+                )
+            } else {
+                IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.text, modifier = Modifier.size(32.dp))
+                }
             }
         }
     }

@@ -102,6 +102,16 @@ data class PlayerState(
  * the pref is left to the client it belongs to; [org.sonorus.ui.AppViewModel]
  * writes it back untouched.
  */
+/**
+ * How far one skip moves the playhead in spoken word.
+ *
+ * Florian asked for fifteen seconds, which is also what every reader uses. It
+ * lives here rather than in a screen because four surfaces have to agree on it:
+ * the full player, the minimised bar, the Maps strip - and the notification,
+ * which reaches it through ExoPlayer's own seek increments below.
+ */
+const val SKIP_MS = 15_000L
+
 @UnstableApi
 class PlayerController(
     context: Context,
@@ -160,6 +170,12 @@ class PlayerController(
             /* handleAudioFocus = */ true,
         )
         .setHandleAudioBecomingNoisy(true)
+        // What the notification's two skip buttons move by. They are bound to
+        // `COMMAND_SEEK_BACK`/`COMMAND_SEEK_FORWARD` rather than to anything of
+        // this class's own, because a controller outside the app - the
+        // notification, the car, a watch - can only ask the player itself.
+        .setSeekBackIncrementMs(SKIP_MS)
+        .setSeekForwardIncrementMs(SKIP_MS)
         .build()
         .apply {
             shuffleModeEnabled = false

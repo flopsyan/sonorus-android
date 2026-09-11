@@ -36,8 +36,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.sonorus.data.model.Chapter
 import org.sonorus.data.model.Track
+import org.sonorus.player.SKIP_MS
 import org.sonorus.ui.Motion
 import org.sonorus.ui.pressable
 import org.sonorus.ui.nowLines
@@ -63,6 +65,11 @@ const val PlayerCoverKey = "player-cover"
  * [coverVisible] is false while the full player is open: the artwork is then
  * being drawn *there*, and the bar has to say so rather than draw its own copy
  * over it - that is what makes the two one picture instead of two.
+ *
+ * Spoken word gets the two fifteen-second skips in place of prev/next, the same
+ * swap the full player makes - the bar is the control that is actually reached
+ * for while a book plays, so it was the one place the old buttons were still
+ * stepping to the next *file* in the middle of a chapter.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -79,6 +86,8 @@ fun SharedTransitionScope.PlayerBar(
     onToggle: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    /** A jump of this many milliseconds from where the playhead is. */
+    onSkip: (Long) -> Unit,
     onExpand: () -> Unit,
     onSeek: (Float) -> Unit,
 ) {
@@ -154,8 +163,22 @@ fun SharedTransitionScope.PlayerBar(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = onPrevious) {
-                Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.textDim)
+            // The glyph is drawn a little larger than the 24 dp arrows it
+            // replaces: it has to carry a two-digit number inside its opening,
+            // and at the arrows' size that number is no longer readable.
+            if (track.isSpoken) {
+                SkipButton(
+                    forward = false,
+                    onClick = { onSkip(-SKIP_MS) },
+                    button = 48.dp,
+                    glyph = 28.dp,
+                    number = 8.sp,
+                    tint = colors.textDim,
+                )
+            } else {
+                IconButton(onClick = onPrevious) {
+                    Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.textDim)
+                }
             }
             IconButton(onClick = {
                 haptics.toggled(!playing)
@@ -163,8 +186,19 @@ fun SharedTransitionScope.PlayerBar(
             }) {
                 TransportGlyph(playing, tint = colors.accent, size = 30.dp)
             }
-            IconButton(onClick = onNext) {
-                Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.textDim)
+            if (track.isSpoken) {
+                SkipButton(
+                    forward = true,
+                    onClick = { onSkip(SKIP_MS) },
+                    button = 48.dp,
+                    glyph = 28.dp,
+                    number = 8.sp,
+                    tint = colors.textDim,
+                )
+            } else {
+                IconButton(onClick = onNext) {
+                    Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.textDim)
+                }
             }
         }
     }

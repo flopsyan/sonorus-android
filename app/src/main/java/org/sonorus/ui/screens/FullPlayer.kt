@@ -67,7 +67,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
@@ -114,7 +113,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -127,6 +125,7 @@ import org.sonorus.data.shortCodec
 import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Track
 import org.sonorus.player.PlayerState
+import org.sonorus.player.SKIP_MS
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.Motion
@@ -141,6 +140,7 @@ import org.sonorus.ui.components.MenuItem
 import org.sonorus.ui.components.PlayerCoverKey
 import org.sonorus.ui.components.RackLabelText
 import org.sonorus.ui.components.SeekRail
+import org.sonorus.ui.components.SkipButton
 import org.sonorus.ui.components.Stars
 import org.sonorus.ui.components.TransportGlyph
 import org.sonorus.ui.components.rememberPlayhead
@@ -833,7 +833,7 @@ fun SharedTransitionScope.FullPlayer(
                         // its spacing, so play/pause stays where the thumb
                         // expects it whatever is playing.
                         Spacer(Modifier.size(52.dp))
-                        SkipButton(forward = false) { vm.player.skipBy(-SKIP_MS) }
+                        SkipButton(forward = false, onClick = { vm.player.skipBy(-SKIP_MS) })
                     } else {
                     IconButton(
                         onClick = {
@@ -868,7 +868,7 @@ fun SharedTransitionScope.FullPlayer(
                         TransportGlyph(state.playing, tint = colors.accentInk, size = 34.dp)
                     }
                     if (spoken) {
-                        SkipButton(forward = true) { vm.player.skipBy(SKIP_MS) }
+                        SkipButton(forward = true, onClick = { vm.player.skipBy(SKIP_MS) })
                         Spacer(Modifier.size(52.dp))
                     } else {
                     IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(60.dp)) {
@@ -1940,9 +1940,6 @@ private suspend fun PointerInputScope.coverGestures(
     }
 }
 
-/** Florian asked for fifteen seconds, which is also what every reader uses. */
-private const val SKIP_MS = 15_000L
-
 /**
  * The chapters of the running book, with the one being heard marked.
  *
@@ -1999,35 +1996,3 @@ private fun ChapterQueue(
     }
 }
 
-/**
- * A fifteen-second skip, with fifteen written on it.
- *
- * Material ships Replay5, Replay10 and Replay30 and nothing between, so the
- * ready-made glyph would have said 10 while the button jumped 15 - a control
- * that lies about what it does. The plain circular arrow carries the number
- * instead, and the forward one is the same arrow mirrored.
- */
-@Composable
-private fun SkipButton(forward: Boolean, onClick: () -> Unit) {
-    val colors = SonorusTheme.colors
-    IconButton(onClick = onClick, modifier = Modifier.size(60.dp)) {
-        Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-            Icon(
-                Icons.Filled.Replay,
-                if (forward) "15 Sekunden vor" else "15 Sekunden zurück",
-                tint = colors.text,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(if (forward) Modifier.scale(scaleX = -1f, scaleY = 1f) else Modifier),
-            )
-            Text(
-                "${SKIP_MS / 1000}",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = 10.sp,
-                color = colors.text,
-                // The glyph's own opening sits a hair below centre.
-                modifier = Modifier.padding(top = 5.dp),
-            )
-        }
-    }
-}
