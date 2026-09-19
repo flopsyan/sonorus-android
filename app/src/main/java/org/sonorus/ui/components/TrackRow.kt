@@ -117,6 +117,8 @@ fun TrackRow(
     /** The rating to draw. Passed in, because a row given a star has to redraw
      *  without its whole list being fetched again. */
     stars: Int = track.stars,
+    /** That rating is written down but not yet acknowledged: drawn in a paler amber. */
+    waiting: Boolean = false,
     /** Drawn as the small arrow that says this song plays without a network. */
     downloaded: Boolean = false,
     coverUrl: String? = null,
@@ -237,7 +239,7 @@ fun TrackRow(
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         } else if (stars > 0) {
-            Stars(stars, size = 12, enabled = false)
+            Stars(stars, size = 12, enabled = false, waiting = waiting)
         }
 
         // The one marker a downloaded row wears, in the amber the rest of the

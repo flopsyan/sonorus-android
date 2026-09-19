@@ -11,6 +11,7 @@ import org.sonorus.data.Quality
 import org.sonorus.data.ReaderStyle
 import org.sonorus.data.SonorusApi
 import org.sonorus.data.formatLabel
+import org.sonorus.data.serverAnswered
 import org.sonorus.data.download.DownloadSync
 import org.sonorus.data.download.Downloads
 import org.sonorus.data.download.OfflineCollection
@@ -825,35 +826,66 @@ class AppViewModel : ViewModel() {
      */
     private val ratings = mutableStateMapOf<Int, Int>()
 
+    /**
+     * What a rating looks like while the server has not confirmed it: the value
+     * to *draw*, which is not always the value being written. Clearing a rating
+     * keeps its stars on screen, pale, until the server agrees - a row that
+     * empties on the tap has nothing left to show as waiting.
+     *
+     * Seeded from the queue on disk, so a rating given in a tunnel and still
+     * unsent is pale after a restart too rather than claiming the full colour
+     * for something only this phone knows.
+     */
+    private val drafts = mutableStateMapOf<Int, Int>().apply {
+        for (write in pending.writes) if (write.kind == "rating") put(write.trackId, write.stars)
+    }
+
     /** The rating to draw for [track]: what this phone last set, else the row's. */
-    fun starsOf(track: Track): Int = ratings[track.id] ?: track.stars
+    fun starsOf(track: Track): Int = ratings[track.id] ?: drafts[track.id] ?: track.stars
+
+    /** The same, but what the widget paints - see [drafts]. */
+    fun starsShown(track: Track): Int = drafts[track.id] ?: starsOf(track)
+
+    /** Whether that rating is still on its way to the server. */
+    fun ratingWaiting(track: Track): Boolean = drafts.containsKey(track.id)
 
     /**
      * Clicking the rating a track already has clears it, exactly like the web
      * app. [onDone] carries the new value back so a list can redraw its row.
+     *
+     * The rating is written into the queue **first, always**, and only then
+     * sent. It used to go into the queue only when the app already knew it was
+     * offline, and "offline" here means the radio is down - not that the server
+     * can be reached. So a rating given on a dying wifi took the other path,
+     * failed, and was gone but for a toast; measured in the database that was
+     * one or two lost per evening of rating, turning up unrated again days
+     * later. Queue first costs one file write and cannot lose anything.
      */
     fun rate(trackId: Int, stars: Int, current: Int, onDone: (Int) -> Unit = {}) {
         val next = if (current == stars) 0 else stars
-        // Offline the star is kept rather than refused. It is written onto the
-        // row this phone holds - so the star playlists offline are right at
-        // once - and queued for the server. Rating a library is done by ear on
-        // a sofa or a train, which is exactly where there is no server.
+        val seq = pending.rate(trackId, next)
+        downloads.store.applyRating(trackId, next)
+        ratings[trackId] = next
+        drafts[trackId] = if (next > 0) next else current
+        onDone(next)
+        countWaiting()
         if (lib.offline.value) {
-            pending.rate(trackId, next)
-            downloads.store.applyRating(trackId, next)
-            ratings[trackId] = next
-            onDone(next)
-            countWaiting()
             say("Bewertet - wird übertragen, sobald der Server wieder da ist.")
             return
         }
         viewModelScope.launch {
             runCatching { api.rate(trackId, next) }
                 .onSuccess {
-                    // The server's answer, not `next` - it is the one that counts,
-                    // and writing it before the request would have to be undone
-                    // again when the request fails.
+                    // A second rating of the same song replaces the first in the
+                    // queue, so ours may no longer be the one that counts. Then
+                    // the newer one owns the stars and this answer is stale.
+                    val ours = pending.writes.any { w -> w.seq == seq }
+                    pending.done(seq)
+                    countWaiting()
+                    if (!ours) return@onSuccess
+                    // The server's answer, not `next` - it is the one that counts.
                     ratings[trackId] = it.stars
+                    drafts.remove(trackId)
                     onDone(it.stars)
                     refreshQuietly()
                     // A star moves a song between the star playlists, so a
@@ -861,7 +893,15 @@ class AppViewModel : ViewModel() {
                     // downloaded, which is the ordinary case.
                     viewModelScope.launch { runCatching { downloadSync.reconcileKind("stars") } }
                 }
-                .onFailure { say(message(it), true) }
+                .onFailure {
+                    // Nothing was lost - it is queued, and the stars stay pale
+                    // until it goes up. Marking the server unreachable is what
+                    // makes the next read use the downloads and the flush happen
+                    // on the way back; without it every following rating would
+                    // take this same path and fail the same way.
+                    if (!serverAnswered(it)) lib.markUnreachable()
+                    say("Bewertet - wird übertragen, sobald der Server wieder da ist.")
+                }
         }
     }
 

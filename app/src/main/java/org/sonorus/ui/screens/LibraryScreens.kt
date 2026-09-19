@@ -121,7 +121,12 @@ fun trackActions(
         onGoAlbum = { it.albumId?.let { id -> onGo(Routes.album(id)) } },
         onEdit = { vm.editSingle(it) },
         onRemove = onRemove,
-        starsOf = { vm.starsOf(it) },
+        // What a row draws is the draft while one is waiting - the rating the
+        // server has not acknowledged yet, in a paler amber. `onRate` above asks
+        // starsOf instead, because the toggle has to compare against the rating
+        // itself and not against what a pending clear still leaves on screen.
+        starsOf = { vm.starsShown(it) },
+        waitingOf = { vm.ratingWaiting(it) },
         statusOf = { downloads.statusOf(it.id) },
         onDownload = { vm.download(listOf(it)) },
         onCancelDownload = { vm.downloads.cancel(it.id) },

@@ -65,6 +65,8 @@ data class TrackActions(
      * answers with what it last set instead.
      */
     val starsOf: (Track) -> Int = { it.stars },
+    /** Whether that rating is still on its way to the server, and so drawn pale. */
+    val waitingOf: (Track) -> Boolean = { false },
     /** What this phone has of the song - the same reasoning as [starsOf]. */
     val statusOf: (Track) -> DownloadStatus = { DownloadStatus.NONE },
     val onDownload: (Track) -> Unit = {},
@@ -141,6 +143,7 @@ fun TrackList(
                 showYear = showYear,
                 showArtist = showArtist(track),
                 stars = actions.starsOf(track),
+                waiting = actions.waitingOf(track),
                 downloaded = actions.statusOf(track) == DownloadStatus.DONE,
                 coverUrl = coverUrl(track),
                 // A row taken out of a playlist, or a list re-sorted under the
@@ -247,7 +250,11 @@ fun TrackMenu(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 RackLabelText("Bewerten")
-                Stars(actions.starsOf(track), size = 28) { value ->
+                Stars(
+                    actions.starsOf(track),
+                    size = 28,
+                    waiting = actions.waitingOf(track),
+                ) { value ->
                     actions.onRate(track, value)
                     onDismiss()
                 }

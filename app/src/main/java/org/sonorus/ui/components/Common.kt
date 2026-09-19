@@ -205,6 +205,14 @@ fun Stars(
     modifier: Modifier = Modifier,
     size: Int = 16,
     enabled: Boolean = true,
+    /**
+     * The rating is written down but the server has not confirmed it yet, so it
+     * is drawn in the same amber turned down. The tap registered and is queued;
+     * the full colour is what says it really arrived. A rating being taken away
+     * keeps its stars lit here until the server agrees, which is why this can be
+     * filled while the value behind it is already 0.
+     */
+    waiting: Boolean = false,
     onRate: (Int) -> Unit = {},
 ) {
     val colors = SonorusTheme.colors
@@ -213,7 +221,11 @@ fun Stars(
         for (star in 1..5) {
             val filled = star <= value
             val tint by animateColorAsState(
-                if (filled) colors.accent else colors.textFaint,
+                when {
+                    !filled -> colors.textFaint
+                    waiting -> colors.accentDim
+                    else -> colors.accent
+                },
                 Motion.quick(),
                 label = "star",
             )

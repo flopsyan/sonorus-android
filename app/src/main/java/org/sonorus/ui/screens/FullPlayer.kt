@@ -761,7 +761,11 @@ fun SharedTransitionScope.FullPlayer(
                         // The queue holds the track as it was when it was added, so
                         // its own stars go stale the moment one is given here.
                         val stars = vm.starsOf(track)
-                        Stars(stars, size = 30) { value ->
+                        Stars(
+                            vm.starsShown(track),
+                            size = 30,
+                            waiting = vm.ratingWaiting(track),
+                        ) { value ->
                             vm.rate(track.id, value, stars)
                         }
                     }

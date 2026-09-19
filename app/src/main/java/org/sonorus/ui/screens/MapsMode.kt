@@ -282,9 +282,10 @@ private fun Strip(
             // own stars go stale the moment one is given anywhere else.
             val given = vm.starsOf(track)
             Stars(
-                given,
+                vm.starsShown(track),
                 Modifier.align(Alignment.CenterHorizontally),
                 size = STAR_SIZE,
+                waiting = vm.ratingWaiting(track),
             ) { value -> vm.rate(track.id, value, given) }
         }
 

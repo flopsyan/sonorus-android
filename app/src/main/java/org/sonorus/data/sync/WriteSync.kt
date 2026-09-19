@@ -17,11 +17,15 @@ import kotlinx.coroutines.sync.withLock
  *
  * Two kinds of failure, and telling them apart is the whole robustness of this:
  *
- *  - **The server said no.** A playlist somebody deleted in the browser, a
- *    track that is gone. The write is dropped and the queue moves on, because a
- *    write that can never succeed would block every later one for good.
- *  - **The server did not answer.** Then nothing is dropped and the flush stops
- *    where it is; the next connection picks it up at the same place.
+ *  - **The server refused, and will refuse again.** A playlist somebody deleted
+ *    in the browser, a track that is gone. Only these are dropped, and only
+ *    because a write that can never succeed would block every later one for
+ *    good. The list is [PERMANENT] and it is deliberately short.
+ *  - **Anything else.** Nothing is dropped and the flush stops where it is; the
+ *    next connection picks it up at the same place. A proxy, a server mid
+ *    restart and a re-login that did not go through all land here - the last of
+ *    those used to count as "the server said no" and threw away every queued
+ *    rating in one silent pass.
  *
  * That distinction is the same one [org.sonorus.data.Library] makes for reads,
  * and for the same reason: an error the server produced proves the server is
@@ -51,9 +55,13 @@ class WriteSync(
                 pending.done(write.seq)
                 sent++
             } catch (error: ApiException) {
-                // `not_json` and `bad_url` are not the server talking - a captive
-                // portal or a wrong address answered instead.
-                if (error.code == "not_json" || error.code == "bad_url") {
+                // Only a refusal that will read the same way tomorrow is worth
+                // dropping. Everything else is a "not now": `not_json` and
+                // `bad_url` are a captive portal or a wrong address rather than
+                // the server, a 502 is the proxy, and `bad_login` is a re-login
+                // that did not go through - and that one used to throw away a
+                // whole evening of ratings in one pass, silently.
+                if (!permanentRefusal(error.code)) {
                     return@withLock Result(sent, dropped, stopped = true)
                 }
                 pending.done(write.seq)
@@ -116,3 +124,24 @@ class WriteSync(
      */
     private fun realFolder(folderId: Int?): Int? = folderId?.takeIf { it > 0 }
 }
+
+/**
+ * The server's own error codes for "this will never work": the thing is gone,
+ * the value is not one, the account may not.
+ */
+private val PERMANENT = setOf("not_found", "invalid_stars", "forbidden")
+
+/**
+ * Whether a refusal will read exactly the same way tomorrow.
+ *
+ * Pure and out here so a test can pin it, the same reasoning as
+ * [org.sonorus.data.serverAnswered]: this is the rule that decides whether a
+ * queued write is thrown away or kept, and getting it wrong is not a wrong
+ * error message - it is the thing the user did, gone, and noticed days later.
+ *
+ * The list is deliberately short. A re-login that did not go through
+ * (`bad_login`), a captive portal (`not_json`), a wrong address (`bad_url`) and
+ * every 5xx are all "not now", and the queue is exactly the right place for a
+ * "not now" to wait.
+ */
+internal fun permanentRefusal(code: String): Boolean = code in PERMANENT
