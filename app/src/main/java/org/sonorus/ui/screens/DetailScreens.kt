@@ -59,6 +59,7 @@ import org.sonorus.ui.LoadBox
 import org.sonorus.ui.LocalOffline
 import org.sonorus.ui.Motion
 import org.sonorus.ui.Routes
+import org.sonorus.ui.ShuffleDefault
 import org.sonorus.ui.pressable
 import org.sonorus.ui.toggled
 import org.sonorus.ui.components.ConfirmDialog
@@ -72,6 +73,7 @@ import org.sonorus.ui.components.Section
 import org.sonorus.ui.components.SonorusButton
 import org.sonorus.ui.components.TrackList
 import org.sonorus.ui.rememberLoad
+import org.sonorus.ui.rememberShuffle
 import org.sonorus.ui.starLabel
 import org.sonorus.ui.theme.SonorusTheme
 
@@ -464,6 +466,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("album", id) { vm.lib.album(id) }
     val player by vm.player.state.collectAsState()
     val key = Routes.album(id)
+    val shuffle = rememberShuffle(ShuffleDefault.ALBUM)
 
     var editing by remember { mutableStateOf(false) }
 
@@ -483,7 +486,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
             tracks = tracks,
             currentTrackId = player.current?.id,
             currentFromHere = player.sourceKey == key,
-            actions = trackActions(vm, tracks, source, key, onGo),
+            actions = trackActions(vm, tracks, source, key, onGo, shuffle = shuffle.value),
             // The name under every row would be the one printed once at the top
             // of the page, twelve times over. A compilation is the exception:
             // there the artist really is the only thing telling the rows apart,
@@ -502,9 +505,9 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.durationLong(album.duration),
                     ).joinToString(" · "),
                     coverUrls = listOfNotNull(vm.coverUrl(album.cover)),
-                    onPlay = { vm.player.playCollection(tracks, source, key) },
-                    shuffle = player.shuffle,
-                    onToggleShuffle = { vm.toggleShuffle() },
+                    onPlay = { vm.playCollection(tracks, source, key, shuffle.value) },
+                    shuffle = shuffle.value,
+                    onToggleShuffle = { shuffle.value = !shuffle.value },
                     onEdit = { editing = true },
                     // Kept in step with the server: a song that appears on the
                     // record after a scan is fetched, one that goes is let go.
@@ -529,6 +532,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("artist", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
     val key = Routes.artist(id)
+    val shuffle = rememberShuffle(ShuffleDefault.ARTIST)
 
     var editing by remember { mutableStateOf(false) }
 
@@ -548,7 +552,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
             tracks = tracks,
             currentTrackId = player.current?.id,
             currentFromHere = player.sourceKey == key,
-            actions = trackActions(vm, tracks, artist.name, key, onGo),
+            actions = trackActions(vm, tracks, artist.name, key, onGo, shuffle = shuffle.value),
             showAlbum = true,
             // Same rule as an album: the page is one person, so their name under
             // every row says nothing. A track credited to somebody else does.
@@ -566,9 +570,9 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         coverUrls = artist.covers.mapNotNull { vm.coverUrl(it) }
                             .ifEmpty { listOfNotNull(vm.coverUrl(artist.cover)) },
                         round = true,
-                        onPlay = { vm.player.playCollection(tracks, artist.name, key) },
-                        shuffle = player.shuffle,
-                        onToggleShuffle = { vm.toggleShuffle() },
+                        onPlay = { vm.playCollection(tracks, artist.name, key, shuffle.value) },
+                        shuffle = shuffle.value,
+                        onToggleShuffle = { shuffle.value = !shuffle.value },
                         onEdit = { editing = true },
                         // Kept in step like an album: a song that appears under
                         // this artist after a scan is fetched, one that goes is
@@ -639,6 +643,7 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("singles", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
     val key = Routes.artistSingles(id)
+    val shuffle = rememberShuffle(ShuffleDefault.SINGLES)
 
     LoadBox(load, skeleton = { DetailSkeleton(round = true) }) { data ->
         val singles = data.artist.singles
@@ -646,7 +651,14 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
             tracks = singles,
             currentTrackId = player.current?.id,
             currentFromHere = player.sourceKey == key,
-            actions = trackActions(vm, singles, "${data.artist.name}: Singles", key, onGo),
+            actions = trackActions(
+                vm = vm,
+                tracks = singles,
+                source = "${data.artist.name}: Singles",
+                sourceKey = key,
+                onGo = onGo,
+                shuffle = shuffle.value,
+            ),
             // The singles list swaps the always-empty album column for a year.
             showYear = true,
             header = {
@@ -655,9 +667,9 @@ fun ArtistSinglesScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     artist = data.artist.name,
                     meta = Fmt.plural(singles.size, "Song", "Songs"),
                     coverUrls = albumCovers(singles).mapNotNull { vm.coverUrl(it) },
-                    onPlay = { vm.player.playCollection(singles, "Singles", key) },
-                    shuffle = player.shuffle,
-                    onToggleShuffle = { vm.toggleShuffle() },
+                    onPlay = { vm.playCollection(singles, "Singles", key, shuffle.value) },
+                    shuffle = shuffle.value,
+                    onToggleShuffle = { shuffle.value = !shuffle.value },
                     download = { CollectionDownload(vm, singles) },
                 )
             },
@@ -677,6 +689,7 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
     val load = rememberLoad("artist-stars", id) { vm.lib.artist(id) }
     val player by vm.player.state.collectAsState()
     val key = Routes.artistStars(id, values)
+    val shuffle = rememberShuffle(ShuffleDefault.ARTIST_STARS)
 
     LoadBox(load, skeleton = { DetailSkeleton(round = true) }) { data ->
         val filtered = data.artist.tracks.filter { it.stars in values }
@@ -689,7 +702,7 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
             tracks = filtered,
             currentTrackId = player.current?.id,
             currentFromHere = player.sourceKey == key,
-            actions = trackActions(vm, filtered, data.artist.name, key, onGo),
+            actions = trackActions(vm, filtered, data.artist.name, key, onGo, shuffle = shuffle.value),
             showAlbum = true,
             header = {
                 val label = values.sortedDescending().joinToString(", ") { starLabel(it) }
@@ -702,9 +715,9 @@ fun ArtistStarsScreen(vm: AppViewModel, id: Int, values: List<Int>, onGo: (Strin
                             Fmt.durationLong(filtered.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(filtered).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playCollection(filtered, label, key) },
-                        shuffle = player.shuffle,
-                        onToggleShuffle = { vm.toggleShuffle() },
+                        onPlay = { vm.playCollection(filtered, label, key, shuffle.value) },
+                        shuffle = shuffle.value,
+                        onToggleShuffle = { shuffle.value = !shuffle.value },
                         download = { CollectionDownload(vm, filtered) },
                     )
                     PickerRow(
@@ -726,6 +739,7 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val load = rememberLoad("playlist", id) { vm.lib.playlist(id) }
     val player by vm.player.state.collectAsState()
     val key = Routes.playlist(id)
+    val shuffle = rememberShuffle(ShuffleDefault.PLAYLIST)
 
     LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
         val tracks = data.tracks
@@ -740,6 +754,7 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                 sourceKey = key,
                 onGo = onGo,
                 onRemove = { track -> vm.removeFromPlaylist(id, track) { load.reload() } },
+                shuffle = shuffle.value,
             ),
             showAlbum = true,
             header = {
@@ -754,9 +769,9 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.durationLong(tracks.sumOf { it.duration }),
                     ).joinToString(" · "),
                     coverUrls = albumCovers(tracks).mapNotNull { vm.coverUrl(it) },
-                    onPlay = { vm.player.playCollection(tracks, data.playlist.name, key) },
-                    shuffle = player.shuffle,
-                    onToggleShuffle = { vm.toggleShuffle() },
+                    onPlay = { vm.playCollection(tracks, data.playlist.name, key, shuffle.value) },
+                    shuffle = shuffle.value,
+                    onToggleShuffle = { shuffle.value = !shuffle.value },
                     // The one collection whose order has to be stored with it.
                     download = {
                         CollectionDownload(

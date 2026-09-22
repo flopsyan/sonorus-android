@@ -808,6 +808,41 @@ class AppViewModel : ViewModel() {
         savePlayerPrefs()
     }
 
+    /**
+     * Play a whole collection from a page that carries its own shuffle switch.
+     *
+     * The switch belongs to the page and not to the player - see
+     * [rememberShuffle] - so the player hears about it here, at the one moment
+     * it can be acted on without surprising anybody. Merely looking at an album
+     * while a shuffled playlist runs leaves that playlist shuffled.
+     */
+    fun playCollection(tracks: List<Track>, source: String, sourceKey: String, shuffle: Boolean?) {
+        armShuffle(shuffle)
+        player.playCollection(tracks, source, sourceKey)
+    }
+
+    /**
+     * The same for one row: tapping a song is playing from this page too, so the
+     * switch standing over the list has to mean the same thing for both.
+     */
+    fun playTracks(
+        tracks: List<Track>,
+        index: Int,
+        source: String,
+        sourceKey: String,
+        shuffle: Boolean?,
+    ) {
+        armShuffle(shuffle)
+        player.playTracks(tracks, index, source, sourceKey)
+    }
+
+    /** Null is a page with no switch of its own, which leaves the player alone. */
+    private fun armShuffle(on: Boolean?) {
+        if (on == null || player.state.value.shuffle == on) return
+        player.setShuffle(on)
+        savePlayerPrefs()
+    }
+
     // --- Ratings --------------------------------------------------------------
 
     /**

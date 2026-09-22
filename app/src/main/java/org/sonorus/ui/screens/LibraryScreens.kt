@@ -70,6 +70,7 @@ import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
 import org.sonorus.ui.Routes
+import org.sonorus.ui.ShuffleDefault
 import org.sonorus.ui.components.Chip
 import org.sonorus.ui.components.FastScroller
 import org.sonorus.ui.components.scrollLabel
@@ -88,6 +89,7 @@ import org.sonorus.ui.components.SonorusButton
 import org.sonorus.ui.components.TrackActions
 import org.sonorus.ui.components.TrackList
 import org.sonorus.ui.rememberLoad
+import org.sonorus.ui.rememberShuffle
 import org.sonorus.ui.starLabel
 import org.sonorus.ui.theme.SonorusTheme
 import java.text.Normalizer
@@ -104,12 +106,18 @@ fun trackActions(
     sourceKey: String,
     onGo: (String) -> Unit,
     onRemove: ((Track) -> Unit)? = null,
+    /**
+     * The shuffle the page over this list is standing at, or null on a page that
+     * has no switch of its own. Tapping a row is playing from the page, so it
+     * has to mean what the switch says - see [org.sonorus.ui.ShuffleDefault].
+     */
+    shuffle: Boolean? = null,
 ): TrackActions {
     // Read here, so a row redraws the moment its download finishes - the same
     // reasoning the ratings map follows.
     val downloads by vm.downloads.state.collectAsState()
     return TrackActions(
-        onPlay = { index -> vm.player.playTracks(tracks, index, source, sourceKey) },
+        onPlay = { index -> vm.playTracks(tracks, index, source, sourceKey, shuffle) },
         onPlayNext = { vm.player.playNext(listOf(it)) },
         onEnqueue = { vm.player.enqueue(listOf(it)) },
         // The current rating is the one the view model knows, not the one the row
@@ -771,13 +779,21 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
     val all = rememberLoad("all-genres") { vm.lib.genres() }
     val player by vm.player.state.collectAsState()
     val key = Routes.genre(ids)
+    val shuffle = rememberShuffle(ShuffleDefault.GENRE)
 
     LoadBox(selection, skeleton = { DetailSkeleton() }) { data ->
         TrackList(
             tracks = data.genre.tracks,
             currentTrackId = player.current?.id,
             currentFromHere = player.sourceKey == key,
-            actions = trackActions(vm, data.genre.tracks, data.genre.name, key, onGo),
+            actions = trackActions(
+                vm = vm,
+                tracks = data.genre.tracks,
+                source = data.genre.name,
+                sourceKey = key,
+                onGo = onGo,
+                shuffle = shuffle.value,
+            ),
             showAlbum = true,
             header = {
                 Column {
@@ -790,9 +806,11 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                             Fmt.durationLong(data.genre.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playCollection(data.genre.tracks, data.genre.name, key) },
-                        shuffle = player.shuffle,
-                        onToggleShuffle = { vm.toggleShuffle() },
+                        onPlay = {
+                            vm.playCollection(data.genre.tracks, data.genre.name, key, shuffle.value)
+                        },
+                        shuffle = shuffle.value,
+                        onToggleShuffle = { shuffle.value = !shuffle.value },
                         // A downloaded genre is kept in step: a song that is
                         // tagged into it later is fetched with the rest.
                         download = {
@@ -862,6 +880,7 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
     val load = rememberLoad("stars", values.joinToString(",")) { vm.lib.stars(values) }
     val player by vm.player.state.collectAsState()
     val key = Routes.stars(values)
+    val shuffle = rememberShuffle(ShuffleDefault.STARS)
     val counts = vm.bootstrap?.stars?.mapKeys { it.key.toIntOrNull() ?: -1 } ?: emptyMap()
 
     LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
@@ -870,7 +889,7 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
             tracks = data.tracks,
             currentTrackId = player.current?.id,
             currentFromHere = player.sourceKey == key,
-            actions = trackActions(vm, data.tracks, title, key, onGo),
+            actions = trackActions(vm, data.tracks, title, key, onGo, shuffle = shuffle.value),
             showAlbum = true,
             header = {
                 Column {
@@ -884,9 +903,9 @@ fun StarsScreen(vm: AppViewModel, values: List<Int>, onGo: (String) -> Unit) {
                             Fmt.durationLong(data.tracks.sumOf { it.duration }),
                         ).joinToString(" · "),
                         coverUrls = albumCovers(data.tracks).mapNotNull { vm.coverUrl(it) },
-                        onPlay = { vm.player.playCollection(data.tracks, title, key) },
-                        shuffle = player.shuffle,
-                        onToggleShuffle = { vm.toggleShuffle() },
+                        onPlay = { vm.playCollection(data.tracks, title, key, shuffle.value) },
+                        shuffle = shuffle.value,
+                        onToggleShuffle = { shuffle.value = !shuffle.value },
                         // Star playlists move by themselves - a song rated up
                         // into this selection is fetched, one rated out of it
                         // goes again unless something else holds it.
