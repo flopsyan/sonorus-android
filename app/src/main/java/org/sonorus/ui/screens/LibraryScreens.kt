@@ -249,7 +249,12 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     // simply starts from what the account remembers.
     var sort by remember { mutableStateOf(vm.prefs.trackSort.key) }
     var dir by remember { mutableStateOf(vm.prefs.trackSort.dir) }
-    val load = rememberLoad("tracks", sort, dir) { vm.lib.tracks(sort = sort, dir = dir, limit = 5000) }
+    // The whole library and not a page of it: what is loaded here is what the
+    // download button under the head offers and what the sort row counts, so a
+    // limit is a limit on the meaning of both - 2026-09-22, a remove dialog that
+    // said 5000 over a library of 8168. The server has no cap of its own any
+    // more either.
+    val load = rememberLoad("tracks", sort, dir) { vm.lib.tracks(sort = sort, dir = dir) }
     val player by vm.player.state.collectAsState()
     var query by remember { mutableStateOf("") }
 
