@@ -23,14 +23,15 @@ import org.sonorus.SonorusApp
 class DownloadJob : JobService() {
 
     override fun onStartJob(params: JobParameters): Boolean {
-        val downloads = (application as SonorusApp).downloads
+        val app = application as SonorusApp
+        val downloads = app.downloads
         var unmetered: Boolean? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Detach, not remove: a job stopped by a lost network leaves a queue that still has to say so.
             setNotification(
                 params,
                 DownloadNotification.ID,
-                DownloadNotification.build(this, downloads.state.value),
+                DownloadNotification.build(this, downloads.state.value, app.videoDownloads.state.value),
                 JOB_END_NOTIFICATION_POLICY_DETACH,
             )
             unmetered = getSystemService(JobScheduler::class.java)?.getPendingJob(ID)
@@ -38,6 +39,7 @@ class DownloadJob : JobService() {
         }
         running = Running(this, params, unmetered)
         downloads.onJobStarted()
+        app.videoDownloads.onJobStarted()
         return true
     }
 
@@ -47,6 +49,7 @@ class DownloadJob : JobService() {
     override fun onStopJob(params: JobParameters): Boolean {
         running = null
         (application as SonorusApp).downloads.onJobStopped()
+        (application as SonorusApp).videoDownloads.onJobStopped()
         return true
     }
 

@@ -15,6 +15,7 @@ import org.sonorus.data.serverAnswered
 import org.sonorus.data.download.DownloadSync
 import org.sonorus.data.download.Downloads
 import org.sonorus.data.download.OfflineCollection
+import org.sonorus.data.download.VideoDownloads
 import org.sonorus.data.sync.PendingWrites
 import org.sonorus.data.sync.TreeEdits
 import org.sonorus.data.sync.WriteSync
@@ -38,6 +39,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 
@@ -518,8 +520,33 @@ class AppViewModel : ViewModel() {
     }
 
     fun clearDownloads() {
+        videoDownloads.cancelAll()
         downloads.clear()
         say("Alle Downloads entfernt.")
+    }
+
+    // --- Films and series -------------------------------------------------------
+
+    val videoDownloads: VideoDownloads get() = app.videoDownloads
+    val videoDownloadQuality: StateFlow<String> get() = app.settings.videoDownloadQuality
+
+    fun setVideoDownloadQuality(value: String) = app.settings.setVideoDownloadQuality(value)
+
+    fun downloadVideos(items: List<VideoDownloads.Item>) {
+        if (items.isEmpty()) return
+        videoDownloads.add(items)
+        say(if (items.size == 1) "Wird heruntergeladen." else "${items.size} Folgen werden heruntergeladen.")
+    }
+
+    fun removeVideoDownload(videoId: Int) {
+        videoDownloads.remove(videoId)
+        say("Download entfernt.")
+    }
+
+    /** A video pref (subtitle language, autoplay): stored on the account like the web does. */
+    fun saveVideoPref(key: String, value: JsonElement, apply: (Prefs) -> Prefs) {
+        viewModelScope.launch { runCatching { api.setPref(key, value) } }
+        bootstrap?.let { b -> _phase.value = AppPhase.Ready(b.copy(prefs = apply(b.prefs))) }
     }
 
     /**

@@ -107,6 +107,8 @@ data class KindTotals(
     val podcast: KindTotal = KindTotal(),
     val book: KindTotal = KindTotal(),
     val drama: KindTotal = KindTotal(),
+    val movie: KindTotal = KindTotal(),
+    val show: KindTotal = KindTotal(),
     val total: KindTotal = KindTotal(),
 )
 
@@ -137,6 +139,8 @@ data class TopLists(
      * book forty times. [TopEntry.kind] says which library a row came from.
      */
     val spoken: List<TopEntry> = emptyList(),
+    /** Films and whole series; [TopEntry.kind] is "movie" or "show". */
+    val videos: List<TopEntry> = emptyList(),
 )
 
 /** One shape for all three lists - an artist puts its name in [title] too. */

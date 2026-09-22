@@ -207,7 +207,9 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             val ebookState by vm.ebookDownloads.state.collectAsState()
             val ebooks = remember(ebookState, downloads) { vm.downloads.store.snapshot.ebooks }
             if (ebooks.isNotEmpty()) Readout("E-Books auf dem Gerät", Fmt.number(ebooks.size))
-            Readout("Belegt", Fmt.bytes(downloads.bytes + ebooks.sumOf { it.book.size }))
+            val videoState by vm.videoDownloads.state.collectAsState()
+            if (videoState.done.isNotEmpty()) Readout("Videos auf dem Gerät", Fmt.number(videoState.done.size))
+            Readout("Belegt", Fmt.bytes(downloads.bytes + ebooks.sumOf { it.book.size } + videoState.bytes))
             val downloadsWifiOnly by vm.downloads.wifiOnly.collectAsState()
             SwitchRow("Nur über WLAN", downloadsWifiOnly) {
                 vm.setDownloadsWifiOnly(it)
@@ -321,6 +323,12 @@ fun SettingsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     for (quality in Quality.entries) {
                         Chip(quality.label, downloadQuality == quality) { vm.setDownloadQuality(quality) }
                     }
+                }
+                Text("Videos herunterladen", style = MaterialTheme.typography.bodyLarge, color = colors.text)
+                val videoQuality by vm.videoDownloadQuality.collectAsState()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("Original", videoQuality == "original") { vm.setVideoDownloadQuality("original") }
+                    Chip("Kleiner (720p)", videoQuality == "small") { vm.setVideoDownloadQuality("small") }
                 }
                 Text("Lossless", style = MaterialTheme.typography.bodyLarge, color = colors.text)
                 val losslessWifiOnly by vm.losslessWifiOnly.collectAsState()

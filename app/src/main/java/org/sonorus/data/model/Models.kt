@@ -324,6 +324,10 @@ data class Prefs(
      * A key that is not there, or a value that is neither, means tiles.
      */
     val collectionView: Map<String, String> = emptyMap(),
+    /** The subtitle language picked last, `""` for off - written by both clients. */
+    val videoSubLang: String = "",
+    val videoAudioLang: String = "",
+    val videoAutoplay: Boolean = true,
 )
 
 @Serializable
@@ -417,6 +421,8 @@ data class SearchResponse(
     val episodes: List<Track> = emptyList(),
     val books: List<Book> = emptyList(),
     val dramas: List<Book> = emptyList(),
+    val movies: List<VideoTitle> = emptyList(),
+    val shows: List<VideoTitle> = emptyList(),
 )
 
 @Serializable

@@ -30,6 +30,7 @@ import org.sonorus.data.model.Book
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.Routes
+import org.sonorus.ui.VideoFmt
 import org.sonorus.ui.components.Chip
 import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.Progress
@@ -80,6 +81,13 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     // here, and this is the page that says what is.
     val ebookState by vm.ebookDownloads.state.collectAsState()
     val ebooks = remember(ebookState, snapshot) { snapshot.ebooks.map { it.book } }
+    // Films and episodes have their own queue too; a series is listed episode by episode.
+    val videoState by vm.videoDownloads.state.collectAsState()
+    val videos = remember(videoState, snapshot) {
+        vm.downloads.store.snapshot.videos.sortedWith(
+            compareBy({ !it.isMovie }, { it.info.title.title.lowercase() }, { it.info.season ?: 0 }, { it.info.episode ?: 0 })
+        )
+    }
 
     Column(Modifier.fillMaxSize()) {
         TrackList(
@@ -111,7 +119,7 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                     // here to count - "0 Songs" is the right
                                     // thing to say on an empty page.
                                     Fmt.plural(tracks.size, "Song", "Songs")
-                                        .takeIf { tracks.isNotEmpty() || spokenTotal == 0 },
+                                        .takeIf { tracks.isNotEmpty() || (spokenTotal == 0 && videos.isEmpty()) },
                                     Fmt.plural(audiobooks.size, "Hörbuch", "Hörbücher")
                                         .takeIf { audiobooks.isNotEmpty() },
                                     Fmt.plural(dramas.size, "Hörspiel", "Hörspiele")
@@ -120,14 +128,17 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                         .takeIf { shows.isNotEmpty() },
                                     Fmt.plural(ebooks.size, "E-Book", "E-Books")
                                         .takeIf { ebooks.isNotEmpty() },
-                                    Fmt.bytes(state.bytes + ebooks.sumOf { it.size }),
-                                    Fmt.durationLong(snapshot.tracks.sumOf { it.track.duration }),
+                                    Fmt.plural(videos.size, "Video", "Videos")
+                                        .takeIf { videos.isNotEmpty() },
+                                    Fmt.bytes(state.bytes + ebooks.sumOf { it.size } + videoState.bytes),
+                                    Fmt.durationLong(snapshot.tracks.sumOf { it.track.duration })
+                                        .takeIf { snapshot.tracks.isNotEmpty() || videos.isEmpty() },
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textDim,
                             )
                         }
-                        if (tracks.isNotEmpty() || spokenTotal > 0 || ebooks.isNotEmpty()) {
+                        if (tracks.isNotEmpty() || spokenTotal > 0 || ebooks.isNotEmpty() || videos.isNotEmpty()) {
                             SonorusButton("Alle entfernen", danger = true) { clearing = true }
                         }
                     }
@@ -170,6 +181,56 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                             SonorusButton("Abbrechen") { vm.downloads.cancelAll() }
                         }
                         Spacer(Modifier.height(8.dp))
+                    }
+
+                    if (videoState.busy) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(colors.surface)
+                                .padding(16.dp),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    videoState.stalled ?: videoState.line ?: "",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.text,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    Fmt.plural(videoState.queued.size + if (videoState.active != null) 1 else 0, "Video", "Videos"),
+                                    style = num(12.sp),
+                                    color = colors.textDim,
+                                )
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Progress(
+                                done = (videoState.progress * 100).toInt(),
+                                total = 100,
+                                indeterminate = videoState.stalled != null || videoState.progress <= 0f,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            SonorusButton("Abbrechen") { vm.videoDownloads.cancelAll() }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    if (videoState.failed.isNotEmpty()) {
+                        Text(
+                            "${Fmt.plural(videoState.failed.size, "Video", "Videos")} konnten nicht geladen " +
+                                "werden. Der erste Fehler: ${videoState.failed.values.first()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.danger,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
                     }
 
                     if (state.failed.isNotEmpty()) {
@@ -216,6 +277,24 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                         }
                     }
 
+                    if (videos.isNotEmpty()) {
+                        RackLabelText("Filme & Serien", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                        for (v in videos) {
+                            SpokenRow(
+                                title = if (v.isMovie) v.info.title.title
+                                else "${v.info.title.title} · ${VideoFmt.episodeCode(v.info.season, v.info.episode, v.info.episodeEnd)}",
+                                subtitle = listOfNotNull(
+                                    v.info.name.takeIf { !v.isMovie && it.isNotEmpty() },
+                                    // What is on the phone, not what was asked for: a file that is small already comes as it is.
+                                    if (v.kind == "small") "Kleiner" else "Original",
+                                ).joinToString(" · "),
+                                meta = Fmt.bytes(v.bytes),
+                                coverUrl = vm.coverUrl(if (v.isMovie) v.info.title.poster else v.info.still ?: v.info.title.poster),
+                                ratio = if (v.isMovie) 2f / 3f else 16f / 9f,
+                            ) { onGo(if (v.isMovie) Routes.movie(v.titleId) else Routes.show(v.titleId)) }
+                        }
+                    }
+
                     SpokenSection("Hörbücher", audiobooks, vm) { onGo(Routes.book("audiobooks", it)) }
                     SpokenSection("Hörspiele", dramas, vm) { onGo(Routes.book("audiodramas", it)) }
                     if (shows.isNotEmpty()) {
@@ -235,7 +314,7 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                             "Songs",
                             Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         )
-                    } else if (spokenTotal == 0 && ebooks.isEmpty()) {
+                    } else if (spokenTotal == 0 && ebooks.isEmpty() && videos.isEmpty()) {
                         Text(
                             "Noch nichts heruntergeladen. Auf einem Album, einer Playlist, einem " +
                                 "Hörbuch, einem E-Book oder im Menü eines Songs steht " +
@@ -254,8 +333,8 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
     if (clearing) {
         ConfirmDialog(
             title = "Alle Downloads entfernen",
-            message = "${Fmt.plural(tracks.size + spokenTotal, "Titel", "Titel")} " +
-                "(${Fmt.bytes(state.bytes)}) " +
+            message = "${Fmt.plural(tracks.size + spokenTotal + videos.size, "Titel", "Titel")} " +
+                "(${Fmt.bytes(state.bytes + videoState.bytes)}) " +
                 "werden von diesem Gerät gelöscht. Auf dem Server bleibt alles, wie es ist - " +
                 "ohne Verbindung ist danach aber nichts mehr abspielbar.",
             confirmLabel = "Entfernen",

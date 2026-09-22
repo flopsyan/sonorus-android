@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
@@ -183,6 +184,10 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     // page of prose is the one thing a reading view must not have, and the
     // reader draws its own bar over the text when it is asked for.
     val reading = route == Routes.READER
+    // A film gets it even more so: no bars at all, landscape, and nothing of the
+    // music player over the picture.
+    val watching = route == Routes.WATCH
+    if (watching) org.sonorus.ui.screens.FullscreenLandscape()
 
     // Everything the player touches lives in one of these, and that is the only
     // reason the artwork can travel between the bar and the full screen: a
@@ -195,7 +200,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
         // A book takes the horizontal swipe for its own page turns, so the
         // drawer must not listen for one while one is open: the gesture cannot
         // belong to both, and in a reading view it belongs to the page.
-        gesturesEnabled = !reading,
+        gesturesEnabled = !reading && !watching,
         drawerContent = {
             ModalDrawerSheet(
                 drawerContainerColor = colors.surface,
@@ -216,7 +221,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
             containerColor = colors.bg,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
-                if (!reading) TopAppBar(
+                if (!reading && !watching) TopAppBar(
                     title = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -251,7 +256,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                 )
             },
             bottomBar = {
-                if (!reading) Column {
+                if (!reading && !watching) Column {
                     val current = playerState.current
                     // The bar arrives with the first song rather than the layout
                     // jumping up by its height.
@@ -317,7 +322,7 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
                 // appearing, because the page under it has to move down for it
                 // and a page that jumps is what reads as the bug.
                 AnimatedVisibility(
-                    visible = offline,
+                    visible = offline && !watching,
                     enter = expandVertically(Motion.travel()) + fadeIn(Motion.entering()),
                     exit = shrinkVertically(Motion.travel()) + fadeOut(Motion.quick()),
                 ) {
@@ -465,6 +470,7 @@ private fun titleFor(route: String?, data: Bootstrap): String = when (route) {
     Routes.GENRES -> "Genres"
     Routes.PODCASTS -> "Podcasts"
     Routes.EBOOKS -> "E-Books"
+    Routes.VIDEOS -> "Filme & Serien"
     Routes.SEARCH -> "Suche"
     Routes.DOWNLOADS -> "Downloads"
     Routes.SETTINGS -> "Einstellungen"
@@ -509,8 +515,10 @@ private fun BottomTabs(
                 selected = route.inSection("ebooks"),
                 onClick = { onGo(Routes.EBOOKS) },
             )
+            // Videos where Interpreten stood, Alben to the drawer: Florian's order
+            // of 2026-09-22.
+            Tab(Icons.Filled.Movie, "Videos", route.inSection("videos")) { onGo(Routes.VIDEOS) }
             Tab(Icons.Filled.Person, "Interpreten", route.inSection("artists")) { onGo(Routes.ARTISTS) }
-            Tab(Icons.Filled.Album, "Alben", route.inSection("albums")) { onGo(Routes.ALBUMS) }
             // Genres moved to the drawer, where a list of 144 names belongs.
             // The bottom row is six places wide and this is worth one of them:
             // spoken word is three libraries and none of them had a way in.
@@ -653,13 +661,15 @@ private fun Sidebar(vm: AppViewModel, data: Bootstrap, onGo: (String) -> Unit) {
         // Read rather than heard, and in the same list for the same reason: this
         // is the one place that names every library there is.
         SidebarRow(Icons.AutoMirrored.Filled.LibraryBooks, "E-Books") { onGo(Routes.EBOOKS) }
+        SidebarRow(Icons.Filled.Movie, "Filme & Serien") { onGo(Routes.VIDEOS) }
         // Not a sixth kind of list but a place: what is on the phone rather than
         // on the server, and the one page that still works with nothing behind it.
         val downloads by vm.downloads.state.collectAsState()
+        val videoDownloads by vm.videoDownloads.state.collectAsState()
         SidebarRow(
             icon = Icons.Filled.DownloadForOffline,
             label = "Downloads",
-            count = downloads.done.size,
+            count = downloads.done.size + videoDownloads.done.size,
         ) { onGo(Routes.DOWNLOADS) }
 
         PlaylistLibrary(vm, data, onGo)

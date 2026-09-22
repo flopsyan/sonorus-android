@@ -164,6 +164,8 @@ data class OfflineSnapshot(
     val tracks: List<DownloadedTrack> = emptyList(),
     /** Books that were taken along. Read rather than played, so a list of their own. */
     val ebooks: List<DownloadedEbook> = emptyList(),
+    /** Films and episodes. Watched rather than played, so a list of their own too. */
+    val videos: List<DownloadedVideo> = emptyList(),
     /** Server paths like `/covers/album-3.jpg` whose picture lies on this phone. */
     val covers: List<String> = emptyList(),
     val playlists: List<OfflineCollection> = emptyList(),

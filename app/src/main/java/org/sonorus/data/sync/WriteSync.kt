@@ -79,6 +79,7 @@ class WriteSync(
             "progress" -> api.setProgress(write.trackId, write.position, write.completed)
             "ebookProgress" ->
                 api.setEbookProgress(write.ebookId, write.doc, write.ratio, write.completed)
+            "videoProgress" -> api.setVideoProgress(write.videoId, write.position, write.completed)
 
             "playlistCreate" -> {
                 val tree = api.createPlaylist(write.name, realFolder(write.folderId))

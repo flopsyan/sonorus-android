@@ -31,10 +31,14 @@
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
 
+        <!-- Turning and resizing do not rebuild the activity: the video player
+             turns the screen to landscape, and a rebuild would tear down the
+             running video with it. Compose redraws for the new size by itself. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Sonorus">
             <intent-filter>

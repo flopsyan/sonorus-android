@@ -174,6 +174,9 @@ fun StatsScreen(vm: AppViewModel) {
             }
             TopList("Meistgehörte Alben", data.listening.top.albums, vm) { it.artist }
             TopList("Meistgehörtes Gesprochenes", data.listening.top.spoken, vm) { spokenSub(it) }
+            TopList("Meistgesehene Videos", data.listening.top.videos, vm) {
+                if (it.kind == "movie") "Film" else "Serie"
+            }
 
             // Lifetime, on purpose - see the note above.
             RackLabelText("Durchschnitt", Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
@@ -231,6 +234,8 @@ private fun KindTable(kinds: KindTotals) {
         KindRow("Podcasts", kinds.podcast, kinds.total.seconds)
         KindRow("Hörbücher", kinds.book, kinds.total.seconds)
         KindRow("Hörspiele", kinds.drama, kinds.total.seconds)
+        KindRow("Filme", kinds.movie, kinds.total.seconds)
+        KindRow("Serien", kinds.show, kinds.total.seconds)
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
         KindRow("Gesamt", kinds.total, 0.0, accent = true)
     }

@@ -2,6 +2,16 @@ package org.sonorus.data
 
 import org.sonorus.data.download.DownloadStore
 import org.sonorus.data.download.Offline
+import org.sonorus.data.download.VideoOffline
+import org.sonorus.data.model.CollectionResponse
+import org.sonorus.data.model.CollectionsResponse
+import org.sonorus.data.model.MovieResponse
+import org.sonorus.data.model.MoviesResponse
+import org.sonorus.data.model.PersonResponse
+import org.sonorus.data.model.PlayerInfo
+import org.sonorus.data.model.ShowResponse
+import org.sonorus.data.model.ShowsResponse
+import org.sonorus.data.model.VideoHomeResponse
 import org.sonorus.data.sync.PendingWrites
 import org.sonorus.data.model.AlbumResponse
 import org.sonorus.data.model.AlbumsResponse
@@ -404,6 +414,75 @@ class Library(
         }
         runCatching { reachableAfter { api.setEbookProgress(id, doc, ratio, finished) } }
             .onFailure { pending?.ebookProgress(id, doc, ratio, finished) }
+    }
+
+    // --- Films and series ------------------------------------------------------
+    // Offline they are what was downloaded, like everything else (VideoOffline).
+
+    suspend fun videoHome(): VideoHomeResponse =
+        if (offline.value) VideoOffline.home(store.snapshot) else reachableAfter { api.videoHome() }
+
+    suspend fun movies(): MoviesResponse =
+        if (offline.value) VideoOffline.movies(store.snapshot) else reachableAfter { api.movies() }
+
+    suspend fun shows(): ShowsResponse =
+        if (offline.value) VideoOffline.shows(store.snapshot) else reachableAfter { api.shows() }
+
+    suspend fun movie(id: Int): MovieResponse =
+        if (offline.value) VideoOffline.movie(store.snapshot, id) ?: gone("Dieser Film")
+        else reachableAfter { api.movie(id) }
+
+    suspend fun show(id: Int): ShowResponse =
+        if (offline.value) VideoOffline.show(store.snapshot, id) ?: gone("Diese Serie")
+        else reachableAfter { api.show(id) }
+
+    suspend fun videoCollection(id: Int): CollectionResponse =
+        if (offline.value) needsServer("Eine Filmreihe") else reachableAfter { api.videoCollection(id) }
+
+    suspend fun videoCollections(): CollectionsResponse =
+        if (offline.value) needsServer("Die Filmreihen") else reachableAfter { api.videoCollections() }
+
+    suspend fun videoPerson(id: Int): PersonResponse =
+        if (offline.value) needsServer("Diese Seite") else reachableAfter { api.videoPerson(id) }
+
+    /** A downloaded video answers from the phone even online: it is what will play. */
+    suspend fun playerInfo(id: Int): PlayerInfo {
+        val local = VideoOffline.playerInfo(store.snapshot, id)
+        if (offline.value) return local ?: gone("Dieses Video")
+        return runCatching { reachableAfter { api.playerInfo(id).video } }
+            .getOrElse { error -> local ?: throw error }
+    }
+
+    /**
+     * Where a video was left. Kept on the phone for a download and queued while
+     * the server cannot hear it, the same way a reading position is.
+     */
+    suspend fun setVideoProgress(id: Int, position: Double, completed: Boolean) {
+        store.applyVideoProgress(id, if (completed) 0.0 else position, completed)
+        if (offline.value) {
+            pending?.videoProgress(id, position, completed)
+            return
+        }
+        runCatching { reachableAfter { api.setVideoProgress(id, position, completed) } }
+            .onFailure { pending?.videoProgress(id, position, completed) }
+    }
+
+    suspend fun setVideoWatched(id: Int, watched: Boolean) {
+        store.applyVideoProgress(id, 0.0, watched)
+        if (offline.value) {
+            pending?.videoProgress(id, 0.0, watched)
+            return
+        }
+        reachableAfter { api.setVideoWatched(id, watched) }
+    }
+
+    /** A film, a whole series or one season. Needs the server: it names videos the phone may not have. */
+    suspend fun setTitleWatched(titleId: Int, watched: Boolean, season: Int? = null) {
+        if (offline.value) needsServer("Das")
+        reachableAfter { api.setTitleWatched(titleId, watched, season) }
+        store.snapshot.videos
+            .filter { it.titleId == titleId && (season == null || it.info.season == season) }
+            .forEach { store.applyVideoProgress(it.id, 0.0, watched) }
     }
 
     // --- Artwork --------------------------------------------------------------

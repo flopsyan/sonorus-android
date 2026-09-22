@@ -987,7 +987,9 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             data == null && load.loading -> Loading()
             data == null -> EmptyNote("Nichts gefunden.")
             else -> {
-                if (data.tracks.isEmpty() && data.artists.isEmpty() && data.albums.isEmpty()) {
+                if (data.tracks.isEmpty() && data.artists.isEmpty() && data.albums.isEmpty() &&
+                    data.movies.isEmpty() && data.shows.isEmpty()
+                ) {
                     EmptyNote("Nichts gefunden.")
                 } else {
                     TrackList(
@@ -999,6 +1001,8 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                         currentFromHere = player.sourceKey == Routes.SEARCH,
                         actions = trackActions(vm, data.tracks, "Suche", Routes.SEARCH, onGo),
                         showAlbum = true,
+                        // A search that found only films says so above, not "nothing here" under it.
+                        emptyNote = if (data.movies.isEmpty() && data.shows.isEmpty()) "Hier ist noch nichts." else null,
                         header = {
                             Column {
                                 if (data.artists.isNotEmpty()) {
@@ -1033,6 +1037,25 @@ fun SearchScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                                     coverUrl = vm.coverUrl(album.cover),
                                                     modifier = Modifier.width(130.dp),
                                                 ) { onGo(Routes.album(album.id)) }
+                                            }
+                                        }
+                                    }
+                                }
+                                for ((label, titles) in listOf("Filme" to data.movies, "Serien" to data.shows)) {
+                                    if (titles.isEmpty()) continue
+                                    Section(label) {
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 12.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            items(titles, key = { it.id }) { t ->
+                                                MediaCard(
+                                                    title = t.title,
+                                                    subtitle = t.year?.toString().orEmpty(),
+                                                    coverUrl = vm.coverUrl(t.poster),
+                                                    ratio = 2f / 3f,
+                                                    modifier = Modifier.width(110.dp),
+                                                ) { onGo(if (t.isMovie) Routes.movie(t.id) else Routes.show(t.id)) }
                                             }
                                         }
                                     }

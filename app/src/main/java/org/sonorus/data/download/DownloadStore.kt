@@ -1,11 +1,14 @@
 package org.sonorus.data.download
 
 import org.sonorus.data.model.Bootstrap
+import org.sonorus.data.model.Cue
 import org.sonorus.data.model.Ebook
 import org.sonorus.data.model.Genre
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Track
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -53,6 +56,10 @@ class DownloadStore(private val root: File) {
      * downloaded book opens with no server at all.
      */
     val readerDir = File(ebookDir, "reader")
+
+    /** Films and episodes, each beside a `<id>.subs.json` with its subtitle cues. */
+    val videoDir = File(root, "videos")
+    private val videoQueueFile = File(root, "video-queue.json")
     private val indexFile = File(root, "library.json")
     private val tempFile = File(root, "library.json.tmp")
 
@@ -94,6 +101,7 @@ class DownloadStore(private val root: File) {
     init {
         audioDir.mkdirs()
         coverDir.mkdirs()
+        videoDir.mkdirs()
         load()
     }
 
@@ -199,6 +207,69 @@ class DownloadStore(private val root: File) {
                 )
             )
         })
+    }
+
+    // --- Films and episodes ----------------------------------------------------
+
+    fun videoOf(id: Int): DownloadedVideo? = state.videos.firstOrNull { it.id == id }
+
+    fun isVideoDownloaded(id: Int): Boolean = videoOf(id) != null
+
+    fun videoFileOf(id: Int): File? {
+        val entry = videoOf(id) ?: return null
+        return File(videoDir, entry.file).takeIf { it.isFile && it.length() > 0 }
+    }
+
+    val videoBytes: Long get() = state.videos.sumOf { it.bytes }
+
+    fun videoTarget(id: Int, extension: String): File = File(videoDir, "$id.$extension")
+
+    fun videoPart(id: Int): File = File(videoDir, "$id.part")
+
+    fun putVideo(entry: DownloadedVideo) = update { s ->
+        s.videos.firstOrNull { it.id == entry.id }
+            ?.takeIf { it.file != entry.file }
+            ?.let { File(videoDir, it.file).delete() }
+        s.copy(videos = s.videos.filterNot { it.id == entry.id } + entry)
+    }
+
+    fun removeVideo(id: Int) = update { s ->
+        s.videos.firstOrNull { it.id == id }?.let { File(videoDir, it.file).delete() }
+        cuesFile(id).delete()
+        videoPart(id).delete()
+        s.copy(videos = s.videos.filterNot { it.id == id })
+    }
+
+    /** Where a downloaded video was left, so the phone knows it without a server. */
+    fun applyVideoProgress(id: Int, position: Double, completed: Boolean) = update { s ->
+        val entry = s.videos.firstOrNull { it.id == id } ?: return@update s
+        if (entry.position == position && entry.completed == completed) return@update s
+        s.copy(videos = s.videos.map { if (it.id == id) it.copy(position = position, completed = completed) else it })
+    }
+
+    private fun cuesFile(id: Int) = File(videoDir, "$id.subs.json")
+
+    private val cuesSerializer = MapSerializer(String.serializer(), ListSerializer(Cue.serializer()))
+
+    fun saveCues(id: Int, cues: Map<String, List<Cue>>) {
+        videoDir.mkdirs()
+        cuesFile(id).writeText(json.encodeToString(cuesSerializer, cues))
+    }
+
+    fun cuesOf(id: Int, key: String): List<Cue>? =
+        runCatching { json.decodeFromString(cuesSerializer, cuesFile(id).readText())[key] }.getOrNull()
+
+    fun saveVideoQueue(items: List<VideoDownloads.Item>) {
+        synchronized(videoQueueFile) {
+            root.mkdirs()
+            videoQueueFile.writeText(json.encodeToString(ListSerializer(VideoDownloads.Item.serializer()), items))
+        }
+    }
+
+    fun loadVideoQueue(): List<VideoDownloads.Item> = synchronized(videoQueueFile) {
+        runCatching {
+            json.decodeFromString(ListSerializer(VideoDownloads.Item.serializer()), videoQueueFile.readText())
+        }.getOrDefault(emptyList())
     }
 
     fun removeEbook(id: Int) = update { s ->
@@ -431,8 +502,10 @@ class DownloadStore(private val root: File) {
             audioDir.deleteRecursively()
             coverDir.deleteRecursively()
             ebookDir.deleteRecursively()
+            videoDir.deleteRecursively()
             audioDir.mkdirs()
             coverDir.mkdirs()
+            videoDir.mkdirs()
             write(OfflineSnapshot(account = state.account))
         }
     }
@@ -451,10 +524,12 @@ class DownloadStore(private val root: File) {
             val covers = s.covers.filter { File(coverDir, coverName(it)).isFile }
             val books = s.ebooks.filter { File(ebookDir, it.file).let { f -> f.isFile && f.length() > 0 } }
             dropped += s.ebooks.size - books.size
+            val videos = s.videos.filter { File(videoDir, it.file).let { f -> f.isFile && f.length() > 0 } }
+            dropped += s.videos.size - videos.size
             if (kept.size == s.tracks.size && covers.size == s.covers.size &&
-                books.size == s.ebooks.size
+                books.size == s.ebooks.size && videos.size == s.videos.size
             ) s
-            else s.copy(tracks = kept, covers = covers, ebooks = books)
+            else s.copy(tracks = kept, covers = covers, ebooks = books, videos = videos)
         }
         return dropped
     }

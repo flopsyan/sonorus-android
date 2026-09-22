@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // A user-initiated download job may only be scheduled while the app is visible.
         SonorusApp.instance.downloads.onAppVisible()
+        SonorusApp.instance.videoDownloads.onAppVisible()
     }
 
     override fun onStop() {

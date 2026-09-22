@@ -12,7 +12,9 @@ import org.sonorus.data.SonorusApi
 import org.sonorus.data.download.DownloadStore
 import org.sonorus.data.download.DownloadSync
 import org.sonorus.data.download.Downloads
+import org.sonorus.data.download.DownloadNotification
 import org.sonorus.data.download.EbookDownloads
+import org.sonorus.data.download.VideoDownloads
 import org.sonorus.data.sync.PendingWrites
 import org.sonorus.data.sync.WriteSync
 import org.sonorus.player.PlayerController
@@ -68,6 +70,10 @@ class SonorusApp : Application() {
     lateinit var ebookDownloads: EbookDownloads
         private set
 
+    /** Films and episodes taken along; shares the songs' foreground job and notification. */
+    lateinit var videoDownloads: VideoDownloads
+        private set
+
     /** Keeps a downloaded collection in step with the collection it came from. */
     lateinit var downloadSync: DownloadSync
         private set
@@ -95,6 +101,10 @@ class SonorusApp : Application() {
         // Its own downloader: a book is one file and none of the queue's
         // questions - quality, bitrate, one song at a time - apply to it.
         ebookDownloads = EbookDownloads(api, store)
+        videoDownloads = VideoDownloads(this, api, store, connectivity, settings, downloads.wifiOnly)
+        downloads.otherBusy = { videoDownloads.state.value.busy }
+        videoDownloads.otherBusy = { downloads.state.value.busy }
+        DownloadNotification.watch(this, scope, downloads.state, videoDownloads.state)
         // Beside the downloads rather than inside them: what was heard offline
         // is not a file, and it has to survive "Alle Downloads entfernen".
         playLog = PlayLog(

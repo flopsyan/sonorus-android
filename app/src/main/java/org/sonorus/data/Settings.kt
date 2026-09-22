@@ -107,6 +107,17 @@ class Settings(context: Context) {
         _downloadQuality.value = value
     }
 
+    /** What a film or an episode is downloaded as: `original` or `small` (720p). */
+    private val _videoDownloadQuality = MutableStateFlow(
+        prefs.getString(KEY_VIDEO_DOWNLOAD_QUALITY, null).takeIf { it == "small" } ?: "original"
+    )
+    val videoDownloadQuality: StateFlow<String> = _videoDownloadQuality.asStateFlow()
+
+    fun setVideoDownloadQuality(value: String) {
+        prefs.edit().putString(KEY_VIDEO_DOWNLOAD_QUALITY, value).apply()
+        _videoDownloadQuality.value = value
+    }
+
     /**
      * How a book is set: face, size, leading and margin.
      *
@@ -167,6 +178,7 @@ class Settings(context: Context) {
         const val KEY_QUEUE = "playerQueue"
         const val KEY_STREAM_QUALITY = "streamQuality"
         const val KEY_DOWNLOAD_QUALITY = "downloadQuality"
+        const val KEY_VIDEO_DOWNLOAD_QUALITY = "videoDownloadQuality"
         const val KEY_READER_FONT = "readerFont"
         const val KEY_READER_SIZE = "readerSize"
         const val KEY_READER_LEADING = "readerLeading"

@@ -593,4 +593,74 @@ class SonorusApi(private val session: Session) {
      */
     suspend fun stats(range: String? = null, period: String? = null): StatsResponse =
         get("/api/stats", mapOf("range" to range, "period" to period))
+
+    // --- Films and series -------------------------------------------------------
+
+    /** A server path like `/api/videos/3/file` or `/video-art/x.jpg`, made absolute. */
+    fun absolute(path: String): String = if (path.startsWith("http")) path else session.serverUrl + path
+
+    suspend fun videoHome(): VideoHomeResponse = get("/api/video-home")
+
+    suspend fun movies(): MoviesResponse = get("/api/movies")
+
+    suspend fun shows(): ShowsResponse = get("/api/shows")
+
+    suspend fun movie(id: Int): MovieResponse = get("/api/movies/$id")
+
+    suspend fun show(id: Int): ShowResponse = get("/api/shows/$id")
+
+    suspend fun videoCollections(): CollectionsResponse = get("/api/collections")
+
+    suspend fun videoCollection(id: Int): CollectionResponse = get("/api/collections/$id")
+
+    suspend fun videoPerson(id: Int): PersonResponse = get("/api/people/$id")
+
+    suspend fun playerInfo(id: Int): PlayerInfoResponse = get("/api/videos/$id")
+
+    suspend fun videoPlan(id: Int, start: Double, audio: Int?, caps: JsonObject, force: String?): PlanResponse =
+        post("/api/videos/$id/plan", buildJsonObject {
+            put("start", start)
+            audio?.let { put("audio", it) }
+            put("caps", caps)
+            force?.let { put("force", it) }
+        })
+
+    suspend fun subtitleCues(id: Int, key: String): CuesResponse = get("/api/videos/$id/subtitles/$key")
+
+    suspend fun setVideoProgress(id: Int, position: Double, completed: Boolean) {
+        put<JsonElement>("/api/videos/$id/progress", buildJsonObject {
+            put("position", position)
+            put("completed", completed)
+        })
+    }
+
+    suspend fun setVideoWatched(id: Int, watched: Boolean) {
+        put<JsonElement>("/api/videos/$id/watched", buildJsonObject { put("watched", watched) })
+    }
+
+    /** A whole film or series, or one season of it. */
+    suspend fun setTitleWatched(id: Int, watched: Boolean, season: Int? = null) {
+        put<JsonElement>("/api/video-titles/$id/watched", buildJsonObject {
+            put("watched", watched)
+            season?.let { put("season", it) }
+        })
+    }
+
+    suspend fun startVideoPlay(videoId: Int): PlayIdResponse =
+        post("/api/video-plays", buildJsonObject { put("videoId", videoId) })
+
+    suspend fun updateVideoPlay(playId: Int, seconds: Double) {
+        put<JsonElement>("/api/video-plays/$playId", buildJsonObject { put("seconds", seconds) })
+    }
+
+    /** Asking is also what makes the server start preparing; see `DownloadTicket`. */
+    suspend fun videoDownload(id: Int, quality: String, caps: JsonObject): DownloadTicket =
+        post("/api/videos/$id/download", buildJsonObject {
+            put("quality", quality)
+            put("caps", caps)
+        })
+
+    suspend fun releaseVideoDownload(id: Int, key: String) {
+        delete<JsonElement>("/api/videos/$id/download/$key")
+    }
 }

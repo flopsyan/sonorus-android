@@ -1,12 +1,8 @@
 package org.sonorus.data.download
 
-import android.app.ActivityManager
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
-import androidx.core.content.ContextCompat
 import org.sonorus.data.Connectivity
 import org.sonorus.data.Quality
 import org.sonorus.data.Settings
@@ -185,8 +181,6 @@ class Downloads(
     @Volatile
     private var paused = false
 
-    private val useJob = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-
     /** The ids last written to the queue file, so a progress tick does not write it again. */
     private var savedQueue: List<Int> = emptyList()
 
@@ -238,7 +232,6 @@ class Downloads(
             savedQueue = pending.map { it.id }
         }
         publish()
-        drawNotification()
         // A queue held back by "Wi-Fi only" has to start by itself once the
         // phone is on Wi-Fi, or the setting would simply look broken.
         scope.launch {
@@ -736,30 +729,14 @@ class Downloads(
 
     // --- What keeps the process alive -----------------------------------------
 
-    /** A job on Android 14 and up, which may only be scheduled while the app is on screen; a service below. */
-    private fun hold(force: Boolean = false, visibleNow: Boolean = visible()) {
-        if (useJob) {
-            if (!visibleNow || DownloadJob.ensure(context, unmetered = _wifiOnly.value, force = force)) return
-            // A job the system refused still leaves the foreground service, with its six hours.
-        }
-        runCatching {
-            ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java))
-        }
-    }
+    /** Whether the video queue still needs the job or service this one would let go of. */
+    var otherBusy: () -> Boolean = { false }
+
+    private fun hold(force: Boolean = false, visibleNow: Boolean = DownloadHold.visible()) =
+        DownloadHold.hold(context, unmetered = _wifiOnly.value, force = force, visibleNow = visibleNow)
 
     private fun release() {
-        if (useJob) {
-            DownloadJob.finish(context, reschedule = false)
-            // The job leaves its notification behind on purpose, see [DownloadJob].
-            DownloadNotification.hide(context)
-        }
-        runCatching { context.stopService(Intent(context, DownloadService::class.java)) }
-    }
-
-    private fun visible(): Boolean {
-        val info = ActivityManager.RunningAppProcessInfo()
-        ActivityManager.getMyMemoryState(info)
-        return info.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+        if (!otherBusy()) DownloadHold.release(context)
     }
 
     /** The system started the job, so the queue may run with the phone locked. */
@@ -784,27 +761,6 @@ class Downloads(
     }
 
     private fun partLength(track: Track): Long = File(store.audioDir, "${track.id}.part").length()
-
-    /** At most once a second: five updates a second had the system shed them. */
-    private fun drawNotification() = scope.launch {
-        var shown: State? = null
-        var at = 0L
-        state.collect { s ->
-            if (!s.busy) {
-                if (shown != null) DownloadNotification.hide(context)
-                shown = null
-                return@collect
-            }
-            val now = SystemClock.elapsedRealtime()
-            val last = shown
-            if (last != null && last.stalled == s.stalled && last.running == s.running && now - at < NOTIFY_MS) {
-                return@collect
-            }
-            shown = s
-            at = now
-            DownloadNotification.show(context, s)
-        }
-    }
 
     private fun publish() {
         val queued = synchronized(pending) { pending.map { it.id } }
@@ -847,8 +803,6 @@ class Downloads(
 
     private companion object {
         const val REPORT_MS = 200L
-
-        const val NOTIFY_MS = 1_000L
 
         const val WAKE_TAG = "sonorus:downloads"
 

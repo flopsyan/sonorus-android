@@ -41,6 +41,7 @@ data class PendingWrite(
     val itemId: Int = 0,
     val name: String = "",
     val folderId: Int? = null,
+    val videoId: Int = 0,
 )
 
 @Serializable
@@ -152,6 +153,11 @@ class PendingWrites(private val file: File) {
     fun progress(trackId: Int, position: Double, completed: Boolean) = add(
         PendingWrite(kind = "progress", trackId = trackId, position = position, completed = completed),
         replaces = { it.kind == "progress" && it.trackId == trackId },
+    )
+
+    fun videoProgress(videoId: Int, position: Double, completed: Boolean) = add(
+        PendingWrite(kind = "videoProgress", videoId = videoId, position = position, completed = completed),
+        replaces = { it.kind == "videoProgress" && it.videoId == videoId },
     )
 
     fun createPlaylist(localId: Int, name: String, folderId: Int?) =

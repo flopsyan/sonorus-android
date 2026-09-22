@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -28,10 +29,11 @@ class DownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val downloads = (application as SonorusApp).downloads
+        val app = application as SonorusApp
         // Once per service: collecting in every start stacked a collector per start.
         scope.launch {
-            downloads.state.collect { if (!it.busy) stopSelf() }
+            combine(app.downloads.state, app.videoDownloads.state) { a, b -> a.busy || b.busy }
+                .collect { if (!it) stopSelf() }
         }
     }
 
@@ -41,7 +43,9 @@ class DownloadService : Service() {
             ServiceCompat.startForeground(
                 this,
                 DownloadNotification.ID,
-                DownloadNotification.build(this, (application as SonorusApp).downloads.state.value),
+                (application as SonorusApp).let {
+                    DownloadNotification.build(this, it.downloads.state.value, it.videoDownloads.state.value)
+                },
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
         } catch (e: RuntimeException) {

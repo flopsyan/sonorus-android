@@ -43,6 +43,12 @@ import org.sonorus.ui.screens.SettingsScreen
 import org.sonorus.ui.screens.StarsScreen
 import org.sonorus.ui.screens.StatsScreen
 import org.sonorus.ui.screens.TracksScreen
+import org.sonorus.ui.screens.MovieScreen
+import org.sonorus.ui.screens.ShowScreen
+import org.sonorus.ui.screens.VideoCollectionScreen
+import org.sonorus.ui.screens.VideoPersonScreen
+import org.sonorus.ui.screens.VideosScreen
+import org.sonorus.ui.screens.WatchScreen
 
 /** Reads a comma list like `5,4` or `1,4` out of a route argument. */
 private fun idList(raw: String?): List<Int> =
@@ -63,7 +69,7 @@ private const val SLIDE = 6
  */
 private val TABS = setOf(
     Routes.HOME, Routes.TRACKS, Routes.ARTISTS, Routes.ALBUMS, Routes.GENRES,
-    Routes.PODCASTS, Routes.SPOKEN, Routes.EBOOKS,
+    Routes.PODCASTS, Routes.SPOKEN, Routes.EBOOKS, Routes.VIDEOS,
 )
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.betweenTabs() =
@@ -205,6 +211,51 @@ fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
             Routes.READER,
             arguments = listOf(navArgument("id") { type = NavType.IntType }),
         ) { ReaderScreen(vm, it.arguments?.getInt("id") ?: 0, onBack = { nav.popBackStack() }) }
+
+        // Films and series, and the player, which replaces itself for the next episode.
+        composable(Routes.VIDEOS) { VideosScreen(vm, go) }
+
+        composable(
+            Routes.MOVIE,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { MovieScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        composable(
+            Routes.SHOW,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { ShowScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        composable(
+            Routes.VIDEO_COLLECTION,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { VideoCollectionScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        composable(
+            Routes.VIDEO_PERSON,
+            arguments = listOf(navArgument("id") { type = NavType.IntType }),
+        ) { VideoPersonScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+
+        composable(
+            Routes.WATCH,
+            arguments = listOf(
+                navArgument("id") { type = NavType.IntType },
+                navArgument("t") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) {
+            WatchScreen(
+                vm,
+                id = it.arguments?.getInt("id") ?: 0,
+                fromStart = it.arguments?.getString("t") == "0",
+                onBack = { nav.popBackStack() },
+                onNext = { next ->
+                    nav.navigate(Routes.watch(next)) { popUpTo(Routes.WATCH) { inclusive = true } }
+                },
+            )
+        }
 
         composable(
             Routes.BOOK,

@@ -33,6 +33,15 @@ object Routes {
     const val EBOOK = "ebooks/books/{id}"
     const val READER = "ebooks/books/{id}/read"
 
+    // Films and series. One place with three tabs, like the web's /videos; the
+    // player is a route of its own for the same reason the reader is.
+    const val VIDEOS = "videos"
+    const val MOVIE = "videos/movies/{id}"
+    const val SHOW = "videos/shows/{id}"
+    const val VIDEO_COLLECTION = "videos/collections/{id}"
+    const val VIDEO_PERSON = "videos/people/{id}"
+    const val WATCH = "watch/{id}?t={t}"
+
     const val PLAYLIST = "playlists/{id}"
     const val STARS = "stars/{stars}"
     const val SEARCH = "search"
@@ -57,6 +66,11 @@ object Routes {
     fun ebook(id: Int) = "ebooks/books/$id"
     fun reader(id: Int) = "ebooks/books/$id/read"
     fun stars(values: List<Int>) = "stars/${values.joinToString(",")}"
+    fun movie(id: Int) = "videos/movies/$id"
+    fun show(id: Int) = "videos/shows/$id"
+    fun videoCollection(id: Int) = "videos/collections/$id"
+    fun videoPerson(id: Int) = "videos/people/$id"
+    fun watch(id: Int, fromStart: Boolean = false) = if (fromStart) "watch/$id?t=0" else "watch/$id"
 }
 
 /** The label of a star playlist, with 0 meaning "not rated yet". */
