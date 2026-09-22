@@ -283,6 +283,28 @@ data class ImportIssue(
 )
 
 /**
+ * A song whose file the last scan did not find, kept because a rating or a
+ * playlist entry hangs on it.
+ *
+ * [albumId] is null when the record it was on has no files left either, so
+ * there is no page to send anybody to. [playlists] are this account's lists it
+ * still sits in, by name.
+ */
+@Serializable
+data class MissingTrack(
+    val id: Int,
+    val title: String = "",
+    val path: String = "",
+    val missingAt: String = "",
+    val artistId: Int? = null,
+    val artist: String = "",
+    val albumId: Int? = null,
+    val album: String = "",
+    val stars: Int = 0,
+    val playlists: List<String> = emptyList(),
+)
+
+/**
  * `users.prefs`, the one JSON blob the account remembers. It is the answer to
  * every "das soll dauerhaft so bleiben", and it follows the user to another
  * device - which is exactly why the app writes to it instead of keeping player
@@ -454,6 +476,9 @@ data class QualityProfile(
 
 @Serializable
 data class IssuesResponse(val issues: List<ImportIssue> = emptyList())
+
+@Serializable
+data class MissingResponse(val missing: List<MissingTrack> = emptyList())
 
 @Serializable
 data class UsersResponse(

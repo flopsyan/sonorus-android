@@ -107,7 +107,7 @@ fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
         composable(Routes.SEARCH) { SearchScreen(vm, go) }
         composable(Routes.DOWNLOADS) { DownloadsScreen(vm, go) }
         composable(Routes.SETTINGS) { SettingsScreen(vm, go) }
-        composable(Routes.NOTICES) { NoticesScreen(vm) }
+        composable(Routes.NOTICES) { NoticesScreen(vm, go) }
         composable(Routes.ACCOUNTS) { AccountsScreen(vm) }
         composable(Routes.STATS) { StatsScreen(vm) }
         composable(Routes.PROFILE) { ProfileScreen(vm) }

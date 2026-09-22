@@ -538,6 +538,16 @@ class SonorusApi(private val session: Session) {
         delete<JsonElement>("/api/import/issues")
     }
 
+    /** Songs whose file is gone and that a rating or a playlist still holds. */
+    suspend fun missing(): MissingResponse = get("/api/library/missing")
+
+    /**
+     * Lets go of one of them. The answer is what is left, so the screen never
+     * has to guess whether the row itself went with the rating - it does not,
+     * when the song was ever played.
+     */
+    suspend fun dropMissing(id: Int): MissingResponse = delete("/api/library/missing/$id")
+
     // --- Preferences and accounts ---------------------------------------------
 
     /** The account remembers this, so it follows the user to another device. */
