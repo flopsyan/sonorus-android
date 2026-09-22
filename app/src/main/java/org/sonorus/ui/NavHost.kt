@@ -222,8 +222,22 @@ fun SonorusNavHost(vm: AppViewModel, nav: NavHostController) {
 
         composable(
             Routes.SHOW,
-            arguments = listOf(navArgument("id") { type = NavType.IntType }),
-        ) { ShowScreen(vm, it.arguments?.getInt("id") ?: 0, go) }
+            arguments = listOf(
+                navArgument("id") { type = NavType.IntType },
+                navArgument("season") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) {
+            ShowScreen(
+                vm,
+                id = it.arguments?.getInt("id") ?: 0,
+                startSeason = it.arguments?.getString("season")?.toIntOrNull(),
+                onGo = go,
+            )
+        }
 
         composable(
             Routes.VIDEO_COLLECTION,

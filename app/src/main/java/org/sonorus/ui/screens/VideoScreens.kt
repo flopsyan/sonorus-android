@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -110,13 +112,17 @@ private enum class VideoTab(val label: String) { HOME("Übersicht"), MOVIES("Fil
 @UnstableApi
 @Composable
 fun VideosScreen(vm: AppViewModel, onGo: (String) -> Unit) {
-    var tab by rememberSaveable { mutableStateOf(VideoTab.HOME) }
+    // Three pages one swipe apart, the tabs above them saying which one is on.
+    val pager = rememberPagerState(pageCount = { VideoTab.entries.size })
+    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize()) {
-        VideoTabs(tab) { tab = it }
-        when (tab) {
-            VideoTab.HOME -> VideoOverview(vm, onGo)
-            VideoTab.MOVIES -> VideoBrowse(vm, movies = true, onGo)
-            VideoTab.SHOWS -> VideoBrowse(vm, movies = false, onGo)
+        VideoTabs(VideoTab.entries[pager.currentPage]) { scope.launch { pager.animateScrollToPage(it.ordinal) } }
+        HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
+            when (VideoTab.entries[page]) {
+                VideoTab.HOME -> VideoOverview(vm, onGo)
+                VideoTab.MOVIES -> VideoBrowse(vm, movies = true, onGo)
+                VideoTab.SHOWS -> VideoBrowse(vm, movies = false, onGo)
+            }
         }
     }
 }
@@ -320,13 +326,17 @@ private fun ContinueCard(vm: AppViewModel, item: ContinueItem, onGo: (String) ->
     } else {
         "noch ${VideoFmt.durationLong(v.duration - v.progress.position)}"
     }
-    Column(Modifier.width(236.dp).pressable(dip = 0.97f) { onGo(Routes.watch(v.id)) }) {
+    // The picture plays; the words under it lead to the title, a series straight
+    // into the season the episode is from.
+    val page = if (item.kind == "show") Routes.show(t.id, v.season) else Routes.movie(t.id)
+    Column(Modifier.width(236.dp)) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(WIDE_RATIO)
                 .clip(RoundedCornerShape(8.dp))
-                .background(colors.surface2),
+                .background(colors.surface2)
+                .pressable(dip = 0.97f) { onGo(Routes.watch(v.id)) },
         ) {
             AsyncImage(
                 model = vm.coverUrl(picture),
@@ -351,8 +361,10 @@ private fun ContinueCard(vm: AppViewModel, item: ContinueItem, onGo: (String) ->
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(t.title, style = MaterialTheme.typography.titleMedium, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.fillMaxWidth().clickable { onGo(page) }.padding(vertical = 2.dp)) {
+            Text(t.title, style = MaterialTheme.typography.titleMedium, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -793,12 +805,13 @@ private fun PeopleRow(vm: AppViewModel, label: String, people: List<VideoPerson>
 
 @UnstableApi
 @Composable
-fun ShowScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
+fun ShowScreen(vm: AppViewModel, id: Int, startSeason: Int?, onGo: (String) -> Unit) {
     val load = rememberLoad("show", id) { vm.lib.show(id).show }
     val scope = rememberCoroutineScope()
     // What a tap on a check shows at once, until the server's answer is back.
     val marks = remember { mutableStateMapOf<Int, Boolean>() }
-    var picked by rememberSaveable(id) { mutableStateOf<Int?>(null) }
+    // A Weiterschauen tile names the season its episode is from.
+    var picked by rememberSaveable(id) { mutableStateOf(startSeason) }
 
     LaunchedEffect(load.value) { marks.clear() }
 

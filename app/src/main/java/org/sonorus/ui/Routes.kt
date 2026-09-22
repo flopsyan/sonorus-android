@@ -37,7 +37,7 @@ object Routes {
     // player is a route of its own for the same reason the reader is.
     const val VIDEOS = "videos"
     const val MOVIE = "videos/movies/{id}"
-    const val SHOW = "videos/shows/{id}"
+    const val SHOW = "videos/shows/{id}?season={season}"
     const val VIDEO_COLLECTION = "videos/collections/{id}"
     const val VIDEO_PERSON = "videos/people/{id}"
     const val WATCH = "watch/{id}?t={t}"
@@ -67,7 +67,8 @@ object Routes {
     fun reader(id: Int) = "ebooks/books/$id/read"
     fun stars(values: List<Int>) = "stars/${values.joinToString(",")}"
     fun movie(id: Int) = "videos/movies/$id"
-    fun show(id: Int) = "videos/shows/$id"
+    fun show(id: Int, season: Int? = null) =
+        if (season == null) "videos/shows/$id" else "videos/shows/$id?season=$season"
     fun videoCollection(id: Int) = "videos/collections/$id"
     fun videoPerson(id: Int) = "videos/people/$id"
     fun watch(id: Int, fromStart: Boolean = false) = if (fromStart) "watch/$id?t=0" else "watch/$id"
