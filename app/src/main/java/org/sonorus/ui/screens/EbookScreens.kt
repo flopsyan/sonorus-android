@@ -65,6 +65,17 @@ import org.sonorus.ui.theme.SonorusTheme
  * One that was not says so rather than showing an empty shelf.
  */
 
+/**
+ * Width over height of a book cover.
+ *
+ * A record's sleeve is square and a book's cover is not: it is a page, and a
+ * square tile crops the top off it - which is exactly where a cover puts its
+ * title. 2:3 is the proportion nearly every one of them is drawn to, and it is
+ * used wherever a book is shown, so the shelf, the rows and the page all give it
+ * the same shape. The web app has the same number in `.card.portrait`.
+ */
+const val EBOOK_COVER_RATIO = 2f / 3f
+
 @UnstableApi
 @Composable
 fun EbooksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
@@ -118,6 +129,7 @@ fun EbookAuthorScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     subtitle = ebookSub(book),
                     meta = "",
                     coverUrl = vm.coverUrl(book.cover),
+                    ratio = EBOOK_COVER_RATIO,
                 ) { onGo(Routes.ebook(book.id)) }
             }
         }
@@ -149,7 +161,7 @@ fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         Fmt.plural(book.documents, "Kapitel", "Kapitel"),
                     ).joinToString(" · "),
                     coverUrls = listOfNotNull(vm.coverUrl(book.cover)),
-                    ratio = 2f / 3f,
+                    ratio = EBOOK_COVER_RATIO,
                     // The play button reads the book. There is nothing else it
                     // could sensibly do, and a reader expects the cover to open
                     // the book rather than a second control below it.
@@ -314,8 +326,7 @@ private fun EbookCarryOnRow(vm: AppViewModel, books: List<Ebook>, onGo: (String)
                     subtitle = ebookSub(book),
                     coverUrl = vm.coverUrl(book.cover),
                     modifier = Modifier.width(140.dp),
-                    // A book cover is portrait. Square crops the title off it.
-                    ratio = 2f / 3f,
+                    ratio = EBOOK_COVER_RATIO,
                 ) { onGo(Routes.ebook(book.id)) }
             }
         }

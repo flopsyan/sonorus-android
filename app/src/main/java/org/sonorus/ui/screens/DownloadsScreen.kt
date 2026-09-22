@@ -211,6 +211,7 @@ fun DownloadsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                                 subtitle = book.author,
                                 meta = Fmt.bytes(book.size),
                                 coverUrl = vm.coverUrl(book.cover),
+                                ratio = EBOOK_COVER_RATIO,
                             ) { onGo(Routes.ebook(book.id)) }
                         }
                     }

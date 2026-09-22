@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -451,6 +452,13 @@ fun SpokenRow(
     meta: String,
     coverUrl: String?,
     round: Boolean = false,
+    /**
+     * Width over height of the artwork. A sleeve and a face are square; a book
+     * is a page and is taller than it is wide, and a square tile cuts the title
+     * off the top of its cover. The row keeps its height either way, so a shelf
+     * of books reads at the same rhythm as a shelf of records.
+     */
+    ratio: Float = 1f,
     onClick: () -> Unit,
 ) {
     val colors = SonorusTheme.colors
@@ -464,7 +472,7 @@ fun SpokenRow(
     ) {
         Cover(
             coverUrl,
-            Modifier.size(52.dp),
+            Modifier.height(52.dp).aspectRatio(ratio),
             if (round) CircleShape else RoundedCornerShape(8.dp),
             title,
         )
