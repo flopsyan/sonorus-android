@@ -46,6 +46,7 @@ import org.sonorus.player.SKIP_MS
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.components.Cover
+import org.sonorus.ui.components.RunningTitle
 import org.sonorus.ui.components.SeekRail
 import org.sonorus.ui.components.SkipButton
 import org.sonorus.ui.components.Stars
@@ -175,9 +176,12 @@ fun isCompactWindow(height: Dp): Boolean = height < COMPACT_MAX_HEIGHT
  * dragging the divider back restores the shell where it was.
  *
  * Deliberately still: no marquee, no artwork animation, no travelling tints.
- * This is the one screen that is read while driving, so nothing on it moves that
- * does not have to. The stars are the one exception and they earn it - what
- * moves there is the answer to a tap, not something happening by itself.
+ * This is the one screen that is read while driving, so nothing on it moves by
+ * itself. What moves because it was asked to is a different thing and is
+ * allowed: the stars, and - since Florian asked for it here on 2026-09-22 - a
+ * title too long for the strip, which runs through once when it is tapped and
+ * then goes back to its ellipsis. See [RunningTitle]; the full player has had it
+ * since August and this is the screen where a name is cut shortest.
  */
 @UnstableApi
 @Composable
@@ -256,12 +260,11 @@ private fun Strip(
         ) {
             Cover(vm.coverUrl(track.cover), Modifier.size(56.dp), RoundedCornerShape(8.dp), track.title)
             Column(Modifier.weight(1f)) {
-                Text(
+                RunningTitle(
                     track.title,
                     style = MaterialTheme.typography.titleLarge,
                     color = colors.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    resetKey = track.id,
                 )
                 Text(
                     listOfNotNull(
@@ -429,6 +432,10 @@ private fun Strip(
  * which is ten characters - and what this layout exists to protect is exactly
  * the row not being squeezed. Anything worth having at this size is already on
  * it.
+ *
+ * The tapped title does carry down here, because it is the one thing that costs
+ * no room: it is the same [RunningTitle] the strip and the full player use, and
+ * those ten characters are exactly why it is wanted.
  */
 @UnstableApi
 @Composable
@@ -463,12 +470,11 @@ private fun Panel(vm: AppViewModel, state: PlayerState, track: Track) {
         ) {
             Cover(vm.coverUrl(track.cover), Modifier.size(40.dp), RoundedCornerShape(6.dp), track.title)
             Column(Modifier.weight(1f)) {
-                Text(
+                RunningTitle(
                     track.title,
                     style = MaterialTheme.typography.bodyLarge,
                     color = colors.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    resetKey = track.id,
                 )
                 if (track.artist.isNotEmpty()) {
                     Text(
