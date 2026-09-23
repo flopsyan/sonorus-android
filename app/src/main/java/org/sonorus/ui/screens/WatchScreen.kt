@@ -4,25 +4,37 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
 import android.view.SurfaceView
+import android.view.Window
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -65,12 +77,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -98,17 +115,23 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.JsonPrimitive
 import org.sonorus.data.model.AudioInfo
 import org.sonorus.data.model.Cue
 import org.sonorus.data.model.PlayerInfo
+import org.sonorus.player.Letterbox
+import org.sonorus.player.PictureShare
 import org.sonorus.player.VideoCaps
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.VideoFmt
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.theme.num
 import java.io.File
+import kotlin.coroutines.resume
 import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Numbers shared with `public/js/video-player.js`, so both clients count the same. */
 private const val NEXT_LEAD = 30.0
@@ -117,6 +140,8 @@ private const val PLAY_REPORT_EVERY = 30.0
 private const val COMPLETE_AT = 0.9
 private const val SKIP = 10.0
 private const val HIDE_AFTER_MS = 3_000L
+private const val SAMPLE_W = 192
+private const val SAMPLE_H = 108
 
 /**
  * One film or episode, full screen and always in landscape.
@@ -170,13 +195,49 @@ fun FullscreenLandscape() {
         val bars = window?.let { WindowCompat.getInsetsController(it, view) }
         bars?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         bars?.hide(WindowInsetsCompat.Type.systemBars())
+        // Android 15 and up draw into the camera cutout anyway; older ones need asking.
+        val cutoutBefore = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) window?.attributes?.layoutInDisplayCutoutMode else null
+        window?.setCutoutMode(WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES)
         view.keepScreenOn = true
         onDispose {
+            cutoutBefore?.let { window?.setCutoutMode(it) }
             bars?.show(WindowInsetsCompat.Type.systemBars())
             activity?.requestedOrientation = before
             view.keepScreenOn = false
         }
     }
+}
+
+/**
+ * Two fingers, reported once they lift, with how far they spread (above 1) or
+ * closed. Taken before the tap handler below it, which then sees no click.
+ */
+private suspend fun PointerInputScope.detectPinch(onPinch: (Float) -> Unit) = awaitEachGesture {
+    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+    var zoom = 1f
+    var pinched = false
+    do {
+        val event = awaitPointerEvent(PointerEventPass.Initial)
+        if (event.changes.count { it.pressed } >= 2) {
+            pinched = true
+            zoom *= event.calculateZoom()
+        }
+        if (pinched) event.changes.forEach { it.consume() }
+    } while (event.changes.any { it.pressed })
+    if (pinched) onPinch(zoom)
+}
+
+private suspend fun SurfaceView.copyInto(frame: Bitmap): Boolean = suspendCancellableCoroutine { done ->
+    try {
+        PixelCopy.request(this, frame, { done.resume(it == PixelCopy.SUCCESS) }, Handler(Looper.getMainLooper()))
+    } catch (e: IllegalArgumentException) {
+        done.resume(false)
+    }
+}
+
+private fun Window.setCutoutMode(mode: Int) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+    attributes = attributes.apply { layoutInDisplayCutoutMode = mode }
 }
 
 private fun Context.findActivity(): Activity? {
@@ -225,6 +286,9 @@ private class VideoSession(context: Context, private val vm: AppViewModel, val i
     var error by mutableStateOf<String?>(null)
     var clock by mutableDoubleStateOf(0.0)
     var nextDismissed by mutableStateOf(false)
+    var picture by mutableStateOf<PictureShare?>(null)
+    private val letterbox = Letterbox()
+    private var pixels = IntArray(0)
     var forceComplete = false
 
     private var failed = 0
@@ -444,6 +508,13 @@ private class VideoSession(context: Context, private val vm: AppViewModel, val i
 
     fun cueText(at: Double): String = cues.filter { it.s <= at && at <= it.e }.joinToString("\n") { it.t }
 
+    fun sample(frame: Bitmap) {
+        if (pixels.size != frame.width * frame.height) pixels = IntArray(frame.width * frame.height)
+        frame.getPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
+        letterbox.add(pixels, frame.width, frame.height)
+        picture = letterbox.share
+    }
+
     /** Called a few times a second: the clock, the time watched, the saves. */
     fun tick() {
         clock = now()
@@ -498,6 +569,9 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
     var poked by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var panel by remember { mutableStateOf(false) }
     var dragging by remember { mutableStateOf<Float?>(null) }
+    var fill by remember { mutableStateOf(vm.videoFill) }
+    var fillLabel by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    var surface by remember { mutableStateOf<SurfaceView?>(null) }
     val autoplay = vm.prefs.videoAutoplay
     val poke = {
         controls = true
@@ -533,6 +607,24 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
         }
     }
 
+    // A small copy of the running picture once a second, to learn its black bars.
+    LaunchedEffect(session) {
+        val frame = Bitmap.createBitmap(SAMPLE_W, SAMPLE_H, Bitmap.Config.ARGB_8888)
+        while (true) {
+            delay(1_000)
+            val view = surface ?: continue
+            if (!session.playing || session.buffering || session.pending != null) continue
+            if (view.copyInto(frame)) session.sample(frame)
+        }
+    }
+
+    LaunchedEffect(fillLabel) {
+        if (fillLabel != null) {
+            delay(1_200)
+            fillLabel = null
+        }
+    }
+
     // The end: straight on into the next episode, or the card that offers it.
     LaunchedEffect(session.ended) {
         val next = info.next
@@ -548,19 +640,45 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
             ((left <= NEXT_LEAD && left > 0.3 && session.pending == null) || session.ended)
     }
 
+    // Pinching out zooms past the black bars, pinching in shows the whole frame again.
+    val share = session.picture?.takeIf { fill } ?: PictureShare(1f, 1f)
+    val shareW by animateFloatAsState(share.width, tween(300), label = "fillWidth")
+    val shareH by animateFloatAsState(share.height, tween(300), label = "fillHeight")
+
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .pointerInput(Unit) {
+                detectPinch { zoom ->
+                    val on = when {
+                        zoom > 1.1f -> true
+                        zoom < 0.9f -> false
+                        else -> return@detectPinch
+                    }
+                    fill = on
+                    vm.videoFill = on
+                    fillLabel = (if (on) "Ausfüllen" else "Einpassen") to System.currentTimeMillis()
+                }
+            }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                 if (panel) panel = false else if (controls) controls = false else poke()
             },
         contentAlignment = Alignment.Center,
     ) {
         AndroidView(
-            factory = { SurfaceView(it).also { view -> session.player.setVideoSurfaceView(view) } },
-            onRelease = { session.player.clearVideoSurfaceView(it) },
-            modifier = Modifier.aspectRatio(session.aspect),
+            factory = { SurfaceView(it).also { view -> session.player.setVideoSurfaceView(view); surface = view } },
+            onRelease = { session.player.clearVideoSurfaceView(it); surface = null },
+            modifier = Modifier.layout { measurable, constraints ->
+                val boxW = constraints.maxWidth
+                val boxH = constraints.maxHeight
+                val aspect = session.aspect
+                val zoom = Letterbox.zoom(boxW.toFloat(), boxH.toFloat(), aspect, PictureShare(shareW, shareH))
+                val w = (min(boxW.toFloat(), boxH * aspect) * zoom).roundToInt()
+                val h = (w / aspect).roundToInt()
+                val placeable = measurable.measure(Constraints.fixed(w, h))
+                layout(boxW, boxH) { placeable.place((boxW - w) / 2, (boxH - h) / 2) }
+            },
         )
 
         // Subtitles sit above the controls' reach, lifted while the bar is up.
@@ -675,6 +793,18 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
                     }
                 }
             }
+        }
+
+        fillLabel?.let { (text, _) ->
+            Text(
+                text,
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier
+                    .offset(y = (-96).dp)
+                    .background(Color(0x99000000), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            )
         }
 
         if (upNext != null) {

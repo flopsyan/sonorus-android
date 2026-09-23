@@ -71,6 +71,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -219,6 +220,8 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     ) {
         Scaffold(
             containerColor = colors.bg,
+            // The default keeps the camera cutout free, which left a grey strip beside the film.
+            contentWindowInsets = if (watching) WindowInsets(0) else ScaffoldDefaults.contentWindowInsets,
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 if (!reading && !watching) TopAppBar(

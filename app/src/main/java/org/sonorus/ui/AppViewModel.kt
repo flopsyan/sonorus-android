@@ -532,6 +532,10 @@ class AppViewModel : ViewModel() {
 
     fun setVideoDownloadQuality(value: String) = app.settings.setVideoDownloadQuality(value)
 
+    var videoFill: Boolean
+        get() = app.settings.videoFill
+        set(value) { app.settings.videoFill = value }
+
     fun downloadVideos(items: List<VideoDownloads.Item>) {
         if (items.isEmpty()) return
         videoDownloads.add(items)

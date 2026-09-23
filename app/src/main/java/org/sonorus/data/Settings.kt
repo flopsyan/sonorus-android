@@ -118,6 +118,11 @@ class Settings(context: Context) {
         _videoDownloadQuality.value = value
     }
 
+    /** Films zoomed past their burnt-in black bars; set by pinching the player. */
+    var videoFill: Boolean
+        get() = prefs.getBoolean(KEY_VIDEO_FILL, false)
+        set(value) = prefs.edit().putBoolean(KEY_VIDEO_FILL, value).apply()
+
     /**
      * How a book is set: face, size, leading and margin.
      *
@@ -179,6 +184,7 @@ class Settings(context: Context) {
         const val KEY_STREAM_QUALITY = "streamQuality"
         const val KEY_DOWNLOAD_QUALITY = "downloadQuality"
         const val KEY_VIDEO_DOWNLOAD_QUALITY = "videoDownloadQuality"
+        const val KEY_VIDEO_FILL = "videoFill"
         const val KEY_READER_FONT = "readerFont"
         const val KEY_READER_SIZE = "readerSize"
         const val KEY_READER_LEADING = "readerLeading"
