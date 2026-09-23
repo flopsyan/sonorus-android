@@ -89,10 +89,8 @@ fun NoticesScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             item { NoticeSection("Datei weg, Bewertung geblieben") }
             item {
                 NoticeHint(
-                    "Ihre Datei hat der letzte Scan nicht mehr gefunden. Die Zeile steht noch, " +
-                        "weil eine Bewertung oder ein Playlist-Eintrag daran hängt - nach einer " +
-                        "Umbenennung ist das genau richtig, der nächste Scan findet sie wieder. " +
-                        "Was wirklich weg ist, räumst du hier weg."
+                    "Songs mit Bewertung oder Playlist-Eintrag, deren Datei der letzte Scan " +
+                        "nicht gefunden hat."
                 )
             }
             if (corpses.isEmpty()) {
