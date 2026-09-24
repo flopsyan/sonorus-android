@@ -55,8 +55,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -109,6 +107,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
@@ -125,6 +124,7 @@ import org.sonorus.player.PictureShare
 import org.sonorus.player.VideoCaps
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.VideoFmt
+import org.sonorus.ui.components.SeekRail
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.theme.num
 import java.io.File
@@ -142,6 +142,10 @@ private const val SKIP = 10.0
 private const val HIDE_AFTER_MS = 3_000L
 private const val SAMPLE_W = 192
 private const val SAMPLE_H = 108
+
+// How far a stream loads ahead. ExoPlayer's byte cap (about 140 MB) still holds, so a
+// high bitrate stops sooner; a download is local and keeps the defaults.
+private const val AHEAD_MS = 5 * 60_000
 
 /**
  * One film or episode, full screen and always in landscape.
@@ -257,6 +261,16 @@ private class VideoSession(context: Context, private val vm: AppViewModel, val i
         .setMediaSourceFactory(
             DefaultMediaSourceFactory(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(vm.api.client)))
         )
+        .setLoadControl(
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMsForStreaming(
+                    AHEAD_MS,
+                    AHEAD_MS,
+                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+                )
+                .build()
+        )
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             /* handleAudioFocus = */ true,
@@ -285,6 +299,7 @@ private class VideoSession(context: Context, private val vm: AppViewModel, val i
     var ended by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var clock by mutableDoubleStateOf(0.0)
+    var buffered by mutableDoubleStateOf(0.0)
     var nextDismissed by mutableStateOf(false)
     var picture by mutableStateOf<PictureShare?>(null)
     private val letterbox = Letterbox()
@@ -518,6 +533,11 @@ private class VideoSession(context: Context, private val vm: AppViewModel, val i
     /** Called a few times a second: the clock, the time watched, the saves. */
     fun tick() {
         clock = now()
+        buffered = when {
+            pending != null -> 0.0
+            mode == "local" -> duration
+            else -> offset + player.bufferedPosition / 1000.0
+        }
         val t = System.currentTimeMillis()
         if (player.isPlaying && lastTick > 0) {
             val d = (t - lastTick) / 1000.0
@@ -769,18 +789,17 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
                 // Bottom: the rail and the two times.
                 Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 10.dp)) {
                     val fraction = if (session.duration > 0) (clock / session.duration).toFloat().coerceIn(0f, 1f) else 0f
-                    Slider(
-                        value = dragging ?: fraction,
-                        onValueChange = { dragging = it; poke() },
-                        onValueChangeFinished = {
-                            dragging?.let { session.seek(it * session.duration) }
-                            dragging = null
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = colors.accent,
-                            activeTrackColor = colors.accent,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.3f),
-                        ),
+                    SeekRail(
+                        fraction = dragging ?: fraction,
+                        onScrub = { dragging = it; poke() },
+                        onSeek = { session.seek(it * session.duration) },
+                        height = 32.dp,
+                        thickness = 4.dp,
+                        rounded = true,
+                        knob = 14.dp,
+                        buffered = if (session.duration > 0) (session.buffered / session.duration).toFloat() else 0f,
+                        trackColor = Color.White.copy(alpha = 0.24f),
+                        bufferColor = Color.White.copy(alpha = 0.5f),
                     )
                     Row(Modifier.fillMaxWidth()) {
                         Text(

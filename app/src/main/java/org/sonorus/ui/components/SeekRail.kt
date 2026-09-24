@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
@@ -94,6 +95,7 @@ fun rememberPlayhead(fraction: Float, held: Boolean, trackKey: Any?): Float {
  *
  * [height] is the strip that can be grabbed, [thickness] the line that is drawn
  * in it - a thumb needs far more to aim at than the hairline the design wants.
+ * [buffered] is how far the player has loaded, drawn in [bufferColor].
  */
 @Composable
 fun SeekRail(
@@ -106,6 +108,9 @@ fun SeekRail(
     rounded: Boolean = false,
     knob: Dp = 0.dp,
     lineAtTop: Boolean = false,
+    buffered: Float = 0f,
+    trackColor: Color = SonorusTheme.colors.surface3,
+    bufferColor: Color = Color.Transparent,
 ) {
     val colors = SonorusTheme.colors
     // The gesture outlives every recomposition, so it must not keep calling the
@@ -156,8 +161,16 @@ fun SeekRail(
                 .fillMaxWidth()
                 .height(line)
                 .then(if (rounded) Modifier.clip(RoundedCornerShape(line / 2)) else Modifier)
-                .background(colors.surface3)
+                .background(trackColor)
         ) {
+            if (buffered > fraction) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(buffered.coerceIn(0f, 1f))
+                        .background(bufferColor)
+                )
+            }
             Box(
                 Modifier
                     .fillMaxHeight()
