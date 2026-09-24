@@ -5,7 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import org.sonorus.SonorusApp
-import org.sonorus.data.ApiException
+import org.sonorus.data.NO_SERVER
+import org.sonorus.data.errorMessage
 import org.sonorus.data.Library
 import org.sonorus.data.Quality
 import org.sonorus.data.ReaderStyle
@@ -121,6 +122,7 @@ class AppViewModel : ViewModel() {
         // A finished play changes the star playlists and the home page, so the
         // shell reloads what it shows in the sidebar.
         player.onPlayCounted = { refreshQuietly() }
+        player.onFailure = { say(it, isError = true) }
         // A phone that finds its server again picks up by itself.
         //
         // Watched on `offline` and not on the radio, which is the fix for the
@@ -1365,29 +1367,10 @@ class AppViewModel : ViewModel() {
         _toast.value = null
     }
 
-    /**
-     * What to put in front of somebody when something failed.
-     *
-     * An [ApiException] is Sonorus's own and already says it in German. Anything
-     * else is the network stack talking to itself - "Failed to connect to
-     * /10.0.2.2:3111", "timeout", a hostname that does not resolve - and none of
-     * that is a sentence to show on a German screen. The kinds worth telling
-     * apart are told apart; the rest becomes the one honest sentence there is.
-     */
-    fun message(error: Throwable): String = when (error) {
-        is ApiException -> error.message
-        is java.net.UnknownHostException ->
-            "Diese Adresse gibt es nicht. Steht der Server richtig in den Einstellungen?"
-        is java.net.SocketTimeoutException ->
-            "Der Server antwortet nicht rechtzeitig."
-        is javax.net.ssl.SSLException ->
-            "Die verschlüsselte Verbindung kam nicht zustande."
-        is java.io.IOException -> NO_SERVER
-        else -> error.message?.takeIf { it.isNotBlank() } ?: NO_SERVER
-    }
+    /** What to put in front of somebody when something failed - see [errorMessage]. */
+    fun message(error: Throwable): String = errorMessage(error)
 
     private companion object {
-        const val NO_SERVER = "Der Server ist nicht erreichbar."
         const val OFFLINE_TOAST = "Offline - du hörst deine Downloads."
     }
 }

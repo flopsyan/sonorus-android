@@ -199,7 +199,7 @@ fun EbookScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                             busy = true
                             scope.launch {
                                 runCatching { vm.setEbookFinished(book, !book.progress.finished) }
-                                    .onFailure { vm.say(it.message ?: "Konnte nicht gespeichert werden.") }
+                                    .onFailure { vm.say(vm.message(it), true) }
                                 busy = false
                                 load.reload()
                             }

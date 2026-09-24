@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.CancellationException
+import org.sonorus.data.errorMessage
 import org.sonorus.ui.components.ErrorNote
 import org.sonorus.ui.components.Loading
 
@@ -65,7 +66,7 @@ fun <T> rememberLoad(vararg key: Any?, fetch: suspend () -> T): Load<T> {
             // which this used to be, could not tell the two apart.
             throw cancel
         } catch (failure: Throwable) {
-            error = failure.message ?: "Der Server ist nicht erreichbar."
+            error = errorMessage(failure)
         }
         loading = false
     }

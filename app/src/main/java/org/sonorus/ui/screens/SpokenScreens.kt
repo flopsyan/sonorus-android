@@ -397,7 +397,7 @@ fun BookScreen(vm: AppViewModel, base: String, id: Int, onGo: (String) -> Unit) 
                             busy = true
                             scope.launch {
                                 runCatching { vm.api.setBookHeard(base, id, !book.finished) }
-                                    .onFailure { vm.say(it.message ?: "Konnte nicht gespeichert werden.") }
+                                    .onFailure { vm.say(vm.message(it), true) }
                                 busy = false
                                 load.reload()
                             }

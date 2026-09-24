@@ -10,11 +10,13 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import org.sonorus.data.Library
 import org.sonorus.data.PlayLog
+import org.sonorus.data.playbackMessage
 import org.sonorus.data.model.Chapter
 import org.sonorus.data.Quality
 import org.sonorus.data.QualityPolicy
@@ -137,6 +139,12 @@ class PlayerController(
 
     /** Called when a rating or a play is written, so the UI can refresh. */
     var onPlayCounted: (() -> Unit)? = null
+
+    /** Called with a sentence when a song cannot be played, so the UI can say why. */
+    var onFailure: ((String) -> Unit)? = null
+
+    /** Songs in a row that would not play - see [skipUnplayable]. */
+    private var failedInRow = 0
 
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(context)
         .setMediaSourceFactory(
@@ -1109,6 +1117,7 @@ class PlayerController(
             if (playbackState == Player.STATE_ENDED) reportListening()
             if (playbackState == Player.STATE_READY) {
                 recoveries = 0
+                failedInRow = 0
                 _state.value = _state.value.copy(
                     durationMs = exoPlayer.duration.takeIf { it > 0 } ?: 0,
                 )
@@ -1134,7 +1143,12 @@ class PlayerController(
          * takes it back off the lock screen.
          */
         override fun onPlayerError(error: PlaybackException) {
-            if (!isNetworkError(error)) return
+            val status = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+            // A 404 is the server answering about one song: it is there, the file is not.
+            if (status == 404 || !isNetworkError(error)) {
+                skipUnplayable(error.errorCode, status)
+                return
+            }
             library.markUnreachable()
 
             // A guard against the obvious loop: recovering into another track
@@ -1157,6 +1171,24 @@ class PlayerController(
         PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
         -> true
         else -> false
+    }
+
+    /**
+     * Says why a song would not play and moves past it, as the web player does.
+     * It used to stop without a word. Once every song in the queue has failed in
+     * a row, skipping on would only go round in circles.
+     */
+    private fun skipUnplayable(errorCode: Int, httpStatus: Int?) {
+        val title = _state.value.current?.title ?: "Dieser Song"
+        onFailure?.invoke("„$title“: ${playbackMessage(errorCode, httpStatus)}")
+        failedInRow += 1
+        if (failedInRow < exoPlayer.mediaItemCount && exoPlayer.hasNextMediaItem()) {
+            exoPlayer.seekToNextMediaItem()
+            exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
+        } else {
+            exoPlayer.playWhenReady = false
+        }
     }
 
     /**

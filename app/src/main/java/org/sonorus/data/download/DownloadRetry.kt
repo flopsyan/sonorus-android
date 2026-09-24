@@ -1,6 +1,8 @@
 package org.sonorus.data.download
 
 import org.sonorus.data.ApiException
+import org.sonorus.data.HttpStatusException
+import org.sonorus.data.statusMessage
 import java.io.IOException
 
 /** The server answered and said no - retrying the same request changes nothing. */
@@ -8,6 +10,9 @@ class DownloadRefused(message: String) : IOException(message)
 
 /** The phone itself could not keep the file, so the network is not to blame either. */
 class DownloadLocalFailure(message: String) : IOException(message)
+
+/** A transfer that broke in a way the app can name. Still the network, so it is retried. */
+class DownloadCutShort(message: String) : IOException(message)
 
 /**
  * Whether a failed song counts as failed, and how long to wait before the next try.
@@ -30,9 +35,10 @@ object DownloadRetry {
     private val TRANSIENT_HTTP = setOf(408, 429, 502, 503, 504)
 
     /** A proxy that cannot reach the server for a moment is the network too, not a verdict on the song. */
-    fun httpFailure(code: Int): IOException {
-        val message = "Der Server antwortet mit HTTP $code."
-        return if (code in TRANSIENT_HTTP) IOException(message) else DownloadRefused(message)
+    fun httpFailure(code: Int): IOException = when {
+        code in TRANSIENT_HTTP -> HttpStatusException(code)
+        code == 404 -> DownloadRefused("Die Datei fehlt auf dem Server.")
+        else -> DownloadRefused(statusMessage(code))
     }
 
     private val STEPS_MS = longArrayOf(2_000, 5_000, 10_000, 20_000, 30_000, 60_000)

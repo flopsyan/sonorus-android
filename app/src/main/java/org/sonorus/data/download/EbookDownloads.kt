@@ -13,10 +13,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.sonorus.data.SonorusApi
+import org.sonorus.data.errorMessage
 import org.sonorus.data.model.Ebook
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 
 /** What one book's download is doing. */
 enum class EbookDownloadStatus { NONE, RUNNING, DONE, FAILED }
@@ -72,7 +72,7 @@ class EbookDownloads(
                 _state.value = State(
                     running = _state.value.running - book.id,
                     failed = if (error == null) _state.value.failed - book.id
-                    else _state.value.failed + (book.id to (error.message ?: "Fehlgeschlagen")),
+                    else _state.value.failed + (book.id to errorMessage(error)),
                 )
             }
         }
@@ -103,7 +103,7 @@ class EbookDownloads(
             .build()
 
         api.client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+            if (!response.isSuccessful) throw DownloadRetry.httpFailure(response.code)
             val fresh = response.code != 206
             if (fresh) part.delete()
             val total = (response.body.contentLength().takeIf { it > 0 } ?: 0L) +
@@ -129,9 +129,9 @@ class EbookDownloads(
             }
         }
 
-        if (!part.isFile || part.length() == 0L) throw IOException("Leere Datei")
+        if (!part.isFile || part.length() == 0L) throw DownloadCutShort("Die Datei kam leer an.")
         target.delete()
-        if (!part.renameTo(target)) throw IOException("Konnte nicht abgelegt werden")
+        if (!part.renameTo(target)) throw DownloadLocalFailure("Die Datei konnte nicht abgelegt werden.")
 
         cacheReader()
         // Last, and only now: an entry in the index is the promise that the

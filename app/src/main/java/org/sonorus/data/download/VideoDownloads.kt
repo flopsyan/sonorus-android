@@ -24,12 +24,12 @@ import okhttp3.Request
 import org.sonorus.data.Connectivity
 import org.sonorus.data.Settings
 import org.sonorus.data.SonorusApi
+import org.sonorus.data.errorMessage
 import org.sonorus.data.model.Cue
 import org.sonorus.data.model.DownloadTicket
 import org.sonorus.player.VideoCaps
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -264,7 +264,7 @@ class VideoDownloads(
                     }
                     fruitless = 0
                     if (!job.isCancelled && failure != null && failure !is CancellationException) {
-                        synchronized(pending) { failed[next.videoId] = failure.message ?: "Download fehlgeschlagen." }
+                        synchronized(pending) { failed[next.videoId] = errorMessage(failure) }
                     }
                     active = null
                     progress = 0f
@@ -296,7 +296,7 @@ class VideoDownloads(
             answer = api.videoDownload(id, quality, VideoCaps.json)
             ticket = answer
         }
-        val url = answer.url ?: throw IOException("Der Server hat keine Adresse für den Download genannt.")
+        val url = answer.url ?: throw DownloadCutShort("Der Server hat keine Adresse für den Download genannt.")
         phase = Phase.LOADING
         progress = 0f
         publish()
@@ -386,7 +386,7 @@ class VideoDownloads(
                 }
             }
             if (expected > 0 && written != expected) {
-                throw IOException("Die Datei kam unvollständig an (${written} von ${expected} Bytes).")
+                throw DownloadCutShort("Die Datei kam unvollständig an (${written} von ${expected} Bytes).")
             }
         }
     }

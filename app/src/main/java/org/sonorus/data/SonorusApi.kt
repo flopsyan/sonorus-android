@@ -127,7 +127,7 @@ class SonorusApi(private val session: Session) {
                 res.code == 429 -> throw ApiException("blocked", "Zu viele Fehlversuche. Bitte kurz warten.")
                 // The setup page redirects here when no account exists yet.
                 res.code == 200 -> throw ApiException("bad_login", "Benutzername oder Passwort falsch.")
-                else -> throw ApiException("http_${res.code}", "Unerwartete Antwort vom Server (HTTP ${res.code}).")
+                else -> throw ApiException("http_${res.code}", statusMessage(res.code))
             }
         }
         session.store(base, user, pass)
@@ -196,16 +196,14 @@ class SonorusApi(private val session: Session) {
             val parsed = runCatching { json.parseToJsonElement(text) }.getOrNull()
                 ?: throw ApiException(
                     "not_json",
-                    // Exactly the diagnosis the web client learned to give: if the
-                    // body is not JSON it did not come from Sonorus at all - a
-                    // proxy answered instead (nginx caps request bodies at 1 MB
-                    // by default and serves its own HTML 413 page).
-                    "Unerwartete Antwort vom Server (HTTP $status).",
+                    // If the body is not JSON it did not come from Sonorus at all:
+                    // a proxy answered instead, and the status is the only clue.
+                    statusMessage(status),
                 )
 
             if (!ok) {
                 val err = runCatching { json.decodeFromJsonElement(ApiError.serializer(), parsed) }.getOrNull()
-                throw ApiException(err?.error ?: "http_$status", err?.message ?: "Fehler ($status).")
+                throw ApiException(err?.error ?: "http_$status", err?.message ?: statusMessage(status))
             }
             parsed
         }

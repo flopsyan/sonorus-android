@@ -7,6 +7,7 @@ import org.sonorus.data.Connectivity
 import org.sonorus.data.Quality
 import org.sonorus.data.Settings
 import org.sonorus.data.SonorusApi
+import org.sonorus.data.errorMessage
 import org.sonorus.data.model.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +27,6 @@ import okhttp3.Call
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -553,7 +553,7 @@ class Downloads(
                     }
                     fruitless = 0
                     if (!job.isCancelled) {
-                        failure?.let { synchronized(pending) { failed[next.id] = it.message ?: "Download fehlgeschlagen." } }
+                        failure?.let { synchronized(pending) { failed[next.id] = errorMessage(it) } }
                     }
                     // Whether it arrived or failed, this song is behind the run now -
                     // a bar that stops at a file the server refused would never
@@ -703,7 +703,7 @@ class Downloads(
             // The one check that makes an entry in the index a promise: a file
             // cut short by a dropped connection must not count as downloaded.
             if (expected > 0 && written != expected) {
-                throw IOException("Die Datei kam unvollständig an (${written} von ${expected} Bytes).")
+                throw DownloadCutShort("Die Datei kam unvollständig an (${written} von ${expected} Bytes).")
             }
             Fetched(
                 contentType = response.header("Content-Type"),
