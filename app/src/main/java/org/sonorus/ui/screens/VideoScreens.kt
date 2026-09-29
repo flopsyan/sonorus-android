@@ -717,15 +717,21 @@ private fun VideoHead(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 RackLabelText(label)
                 TitleOrLogo(vm, title, logo, onDark = false, height = 44.dp)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // The rating is one unit that moves to the next line, never a number broken across two.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         facts.joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textDim,
                     )
                     if (vote != null && vote > 0) {
-                        Icon(Icons.Filled.Star, "TMDB-Wertung", tint = colors.accent, modifier = Modifier.size(12.dp))
-                        Text("%.1f".format(vote), style = num(12.sp), color = colors.accent)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Filled.Star, "TMDB-Wertung", tint = colors.accent, modifier = Modifier.size(12.dp))
+                            Text("%.1f".format(vote), style = num(12.sp), color = colors.accent, softWrap = false)
+                        }
                     }
                 }
             }
