@@ -23,6 +23,7 @@ import org.sonorus.data.sync.WriteSync
 import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Playlist
+import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Prefs
 import org.sonorus.data.model.SortPref
 import org.sonorus.data.model.Track
@@ -1164,6 +1165,53 @@ class AppViewModel : ViewModel() {
                 .onFailure { say(message(it), true) }
         }
     }
+
+    /** The tree an answer already brought along, drawn without asking again. */
+    fun applyPlaylistTree(tree: PlaylistTree) {
+        bootstrap?.let { _phase.value = AppPhase.Ready(it.copy(playlists = tree)) }
+    }
+
+    /** A dynamic list needs no name and exists at once; [then] gets its id. */
+    fun createDynamicPlaylist(then: (Int) -> Unit) {
+        if (needsServer()) return
+        viewModelScope.launch {
+            runCatching { api.createDynamicPlaylist() }
+                .onSuccess {
+                    applyPlaylistTree(it.tree)
+                    then(it.playlist.id)
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    /** Keeps a dynamic list for good, under a name of its own. */
+    fun keepPlaylist(id: Int, name: String, then: (Playlist) -> Unit) {
+        if (needsServer()) return
+        viewModelScope.launch {
+            runCatching { api.keepPlaylist(id, name) }
+                .onSuccess {
+                    applyPlaylistTree(it.tree)
+                    then(it.playlist)
+                    say("Playlist gespeichert.")
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    fun extendPlaylist(id: Int, then: (Playlist) -> Unit) {
+        if (needsServer()) return
+        viewModelScope.launch {
+            runCatching { api.extendPlaylist(id) }
+                .onSuccess {
+                    applyPlaylistTree(it.tree)
+                    then(it.playlist)
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    /** Its filters changed, so a kept and downloaded dynamic list catches up. */
+    fun dynamicChanged(id: Int) = playlistChanged(id)
 
     fun createPlaylist(name: String, folderId: Int? = null, then: (() -> Unit)? = null) {
         if (lib.offline.value) {

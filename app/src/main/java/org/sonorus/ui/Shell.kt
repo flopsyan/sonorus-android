@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -111,7 +112,9 @@ import org.sonorus.ui.components.PlaylistPickerDialog
 import org.sonorus.ui.components.TextPromptDialog
 import org.sonorus.ui.components.PlayerBar
 import org.sonorus.ui.components.RackLabelText
+import org.sonorus.ui.components.SonorusDialog
 import org.sonorus.ui.screens.FullPlayer
+import org.sonorus.ui.screens.MiniRing
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.theme.num
 import kotlinx.coroutines.launch
@@ -707,6 +710,7 @@ private fun PlaylistLibrary(vm: AppViewModel, data: Bootstrap, onGo: (String) ->
     var renaming by remember { mutableStateOf<Playlist?>(null) }
     var deleting by remember { mutableStateOf<Playlist?>(null) }
     var newList by remember { mutableStateOf(false) }
+    var choosingKind by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
     var renamingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
     var deletingFolder by remember { mutableStateOf<Pair<Int, String>?>(null) }
@@ -729,7 +733,7 @@ private fun PlaylistLibrary(vm: AppViewModel, data: Bootstrap, onGo: (String) ->
         ) {
             RackLabelText("Playlists")
             Row {
-                IconButton(onClick = { newList = true }, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = { if (vm.lib.offline.value) newList = true else choosingKind = true }, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Filled.PlaylistAdd, "Neue Playlist",
                         tint = colors.textDim, modifier = Modifier.size(18.dp),
@@ -812,6 +816,16 @@ private fun PlaylistLibrary(vm: AppViewModel, data: Bootstrap, onGo: (String) ->
             onConfirm = { deleting = null; vm.deletePlaylist(p.id) },
         )
     }
+    if (choosingKind) {
+        PlaylistKindDialog(
+            onDismiss = { choosingKind = false },
+            onPlain = { choosingKind = false; newList = true },
+            onDynamic = {
+                choosingKind = false
+                vm.createDynamicPlaylist { id -> onGo(Routes.playlist(id)) }
+            },
+        )
+    }
     if (newList) {
         TextPromptDialog(
             title = "Neue Playlist",
@@ -868,13 +882,22 @@ private fun PlaylistRow(p: Playlist, onGo: (String) -> Unit, onMenu: () -> Unit)
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // A pinned list wears the pin instead of the list icon - the marker and
-        // the position say the same thing twice, on purpose.
-        Icon(
-            if (p.pinned) Icons.Filled.PushPin else Icons.AutoMirrored.Filled.List,
-            null,
-            tint = if (p.pinned) colors.accent else colors.textDim,
-            modifier = Modifier.size(18.dp),
-        )
+        // the position say the same thing twice, on purpose. A temporary dynamic
+        // one wears the ring of its remaining day.
+        if (p.expiresAt.isNotEmpty()) {
+            MiniRing(p.expiresAt, Modifier.size(18.dp))
+        } else {
+            Icon(
+                when {
+                    p.pinned -> Icons.Filled.PushPin
+                    p.dynamic -> Icons.Filled.FilterAlt
+                    else -> Icons.AutoMirrored.Filled.List
+                },
+                null,
+                tint = if (p.pinned) colors.accent else colors.textDim,
+                modifier = Modifier.size(18.dp),
+            )
+        }
         Text(
             p.name,
             style = MaterialTheme.typography.bodyMedium,
@@ -884,6 +907,35 @@ private fun PlaylistRow(p: Playlist, onGo: (String) -> Unit, onMenu: () -> Unit)
             modifier = Modifier.weight(1f),
         )
         Text(Fmt.number(p.trackCount), style = num(11.sp), color = colors.textFaint)
+    }
+}
+
+/** The plus asks first: an ordinary list gets a name, a dynamic one is made at once. */
+@Composable
+private fun PlaylistKindDialog(onDismiss: () -> Unit, onPlain: () -> Unit, onDynamic: () -> Unit) {
+    SonorusDialog("Neue Playlist", onDismiss) {
+        KindRow(Icons.AutoMirrored.Filled.List, "Normale Playlist", "Songs fügst du selbst hinzu.", onPlain)
+        KindRow(Icons.Filled.FilterAlt, "Dynamische Playlist", "Füllt sich aus Filtern und hält einen Tag.", onDynamic)
+    }
+}
+
+@Composable
+private fun KindRow(icon: ImageVector, title: String, sub: String, onClick: () -> Unit) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(icon, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = colors.text)
+            Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.textDim)
+        }
     }
 }
 

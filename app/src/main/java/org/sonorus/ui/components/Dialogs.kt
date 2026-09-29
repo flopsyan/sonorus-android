@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,7 +33,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -98,11 +103,20 @@ fun TextPromptDialog(
     label: String,
     initial: String = "",
     confirmLabel: String = "Speichern",
+    /** Focused with the whole text selected, so the first letter typed replaces it. */
+    selectAll: Boolean = false,
+    /** One short sentence over the field, for a dialog that has to say why it came up. */
+    hint: String = "",
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
     val colors = SonorusTheme.colors
-    var text by remember { mutableStateOf(initial) }
+    var field by remember {
+        mutableStateOf(TextFieldValue(initial, TextRange(if (selectAll) 0 else initial.length, initial.length)))
+    }
+    val text = field.text
+    val focus = remember { FocusRequester() }
+    if (selectAll) LaunchedEffect(Unit) { focus.requestFocus() }
 
     SonorusDialog(
         title = title,
@@ -111,11 +125,15 @@ fun TextPromptDialog(
         confirmEnabled = text.isNotBlank(),
         onConfirm = { onConfirm(text.trim()) },
     ) {
+        if (hint.isNotEmpty()) {
+            Text(hint, style = MaterialTheme.typography.bodyMedium, color = colors.textDim)
+            Spacer(Modifier.size(12.dp))
+        }
         RackLabelText(label)
         Spacer(Modifier.size(6.dp))
         OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
+            value = field,
+            onValueChange = { field = it },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             shape = RoundedCornerShape(8.dp),
@@ -128,7 +146,7 @@ fun TextPromptDialog(
                 unfocusedTextColor = colors.text,
                 cursorColor = colors.accent,
             ),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().focusRequester(focus),
         )
     }
 }
@@ -180,7 +198,10 @@ fun PlaylistPickerDialog(
                 }
             }
 
+            // A dynamic list is made of its filters, so a song cannot be put into one.
             for (folder in tree.folders) {
+                val lists = folder.playlists.filterNot { it.dynamic }
+                if (lists.isEmpty()) continue
                 Row(
                     Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp, start = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -189,9 +210,9 @@ fun PlaylistPickerDialog(
                     Icon(Icons.Filled.Folder, null, tint = colors.textFaint, modifier = Modifier.size(14.dp))
                     RackLabelText(folder.name)
                 }
-                for (p in folder.playlists) PickRow(p.name, p.trackCount) { onPick(p.id, p.name) }
+                for (p in lists) PickRow(p.name, p.trackCount) { onPick(p.id, p.name) }
             }
-            for (p in tree.loose) PickRow(p.name, p.trackCount) { onPick(p.id, p.name) }
+            for (p in tree.loose.filterNot { it.dynamic }) PickRow(p.name, p.trackCount) { onPick(p.id, p.name) }
 
             if (tree.folders.isEmpty() && tree.loose.isEmpty()) {
                 Text(

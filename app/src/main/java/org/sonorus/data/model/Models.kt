@@ -217,6 +217,13 @@ data class Playlist(
     val duration: Double = 0.0,
     val updatedAt: String = "",
     val createdAt: String = "",
+    /** Made of filters instead of songs; see [DynamicRules]. */
+    val dynamic: Boolean = false,
+    /** ISO instant a temporary dynamic list goes away; empty once it is kept. */
+    val expiresAt: String = "",
+    /** The name its filters write; only on a single playlist, not in the tree. */
+    val autoName: String = "",
+    val rules: DynamicRules? = null,
 )
 
 @Serializable

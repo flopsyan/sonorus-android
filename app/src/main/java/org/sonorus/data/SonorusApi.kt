@@ -417,7 +417,26 @@ class SonorusApi(private val session: Session) {
 
     suspend fun playlists(): PlaylistsResponse = get("/api/playlists")
 
-    suspend fun playlist(id: Int): PlaylistResponse = get("/api/playlists/$id")
+    /** `sort` and `dir` only order a dynamic playlist; empty keeps interpret > album > track. */
+    suspend fun playlist(id: Int, sort: String = "", dir: String = ""): PlaylistResponse =
+        get("/api/playlists/$id", mapOf("sort" to sort, "dir" to dir))
+
+    // --- Dynamic playlists ----------------------------------------------------
+
+    suspend fun createDynamicPlaylist(): PlaylistTreeResponse =
+        post("/api/playlists", buildJsonObject { put("dynamic", true) })
+
+    suspend fun dynamicOptions(): DynamicOptions = get("/api/dynamic-options")
+
+    suspend fun setPlaylistRules(id: Int, rules: JsonObject, sort: String = "", dir: String = ""): RulesResponse {
+        val order = if (sort.isEmpty()) "" else "?sort=$sort&dir=$dir"
+        return put("/api/playlists/$id/rules$order", buildJsonObject { put("rules", rules) })
+    }
+
+    suspend fun keepPlaylist(id: Int, name: String): PlaylistTreeResponse =
+        post("/api/playlists/$id/keep", buildJsonObject { put("name", name) })
+
+    suspend fun extendPlaylist(id: Int): PlaylistTreeResponse = post("/api/playlists/$id/extend")
 
     suspend fun createPlaylist(name: String, folderId: Int? = null): TreeResponse =
         post("/api/playlists", buildJsonObject {

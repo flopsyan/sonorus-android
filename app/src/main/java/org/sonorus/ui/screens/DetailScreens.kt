@@ -137,6 +137,8 @@ fun DetailHead(
     onEdit: (() -> Unit)? = null,
     /** The download control, which every collection has and only its head draws. */
     download: (@Composable () -> Unit)? = null,
+    /** One more quiet glyph after the pencil, for a page that has its own. */
+    extra: (@Composable () -> Unit)? = null,
 ) {
     val colors = SonorusTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -211,6 +213,7 @@ fun DetailHead(
                     )
                 }
             }
+            extra?.invoke()
             Spacer(Modifier.weight(1f))
             onToggleShuffle?.let { toggle ->
                 val tint by animateColorAsState(
@@ -752,8 +755,11 @@ fun PlaylistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
     val player by vm.player.state.collectAsState()
     val key = Routes.playlist(id)
     val shuffle = rememberShuffle(ShuffleDefault.PLAYLIST)
+    val offline = LocalOffline.current
 
     LoadBox(load, skeleton = { DetailSkeleton() }) { data ->
+        // Offline a dynamic list is its download, and this page shows that.
+        if (data.playlist.dynamic && !offline) return@LoadBox DynamicPlaylistPage(vm, data, onGo)
         val tracks = data.tracks
         TrackList(
             tracks = tracks,

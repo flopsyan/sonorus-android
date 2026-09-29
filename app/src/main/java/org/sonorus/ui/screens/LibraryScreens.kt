@@ -494,7 +494,7 @@ private fun CollectionRow(
 }
 
 @Composable
-private fun SortRow(
+internal fun SortRow(
     options: List<Pair<String, String>>,
     sort: String,
     dir: String,
@@ -521,18 +521,19 @@ private fun SortRow(
         if (options.isNotEmpty()) Box {
             SonorusButton(
                 text = (options.firstOrNull { it.first == sort }?.second ?: "Titel") +
-                    if (dir == "desc") " ↓" else " ↑",
+                    if (sort.isEmpty()) "" else if (dir == "desc") " ↓" else " ↑",
             ) { open = true }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 // Both directions stated outright, rather than an arrow button
                 // next to the name - "Jahr ↑" does not say which end it means.
+                // An empty key is a list's own order, which has no second direction.
                 for ((key, label) in options) {
-                    for (direction in listOf("asc", "desc")) {
+                    for (direction in if (key.isEmpty()) listOf("asc") else listOf("asc", "desc")) {
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    label + if (direction == "asc") " A-Z" else " Z-A",
-                                    color = if (key == sort && direction == dir) colors.accent else colors.text,
+                                    label + if (key.isEmpty()) "" else if (direction == "asc") " A-Z" else " Z-A",
+                                    color = if (key == sort && (key.isEmpty() || direction == dir)) colors.accent else colors.text,
                                 )
                             },
                             onClick = {
