@@ -328,6 +328,18 @@ class DownloadStore(private val root: File) {
         return s.playlists.any { it.key != exceptKey && trackId in it.trackIds }
     }
 
+    /** The downloaded collections that list [trackId]; a hand download is not one of them. */
+    fun holdersOf(trackId: Int): List<OfflineCollection> = state.playlists.filter { trackId in it.trackIds }
+
+    /**
+     * Lets go of a hand download, the way unlinking one hardlink does: answers
+     * the songs nothing holds any more, which are the ones that may be deleted.
+     */
+    fun dropManual(ids: List<Int>): List<Int> {
+        update { s -> if (ids.none { it in s.manual }) s else s.copy(manual = s.manual.filterNot { it in ids }) }
+        return ids.filterNot { isHeld(it) }
+    }
+
     /** The same question for a whole list at once - what a reconcile needs. */
     fun heldBy(exceptKey: String? = null): Set<Int> {
         val s = state

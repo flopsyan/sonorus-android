@@ -341,6 +341,22 @@ class Downloads(
         return going.size
     }
 
+    /**
+     * Gives back songs fetched outside any collection (a singles page): the
+     * hand download goes, a song a downloaded collection holds stays. Answers
+     * how many files really went.
+     */
+    fun removeLoose(trackIds: List<Int>): Int {
+        val going = store.dropManual(trackIds)
+        val removed = going.count { store.isDownloaded(it) }
+        for (id in going) cancel(id)
+        scope.launch {
+            for (id in going) store.remove(id)
+            publish()
+        }
+        return removed
+    }
+
     /** Takes a song back off the phone. */
     override fun remove(trackId: Int) {
         cancel(trackId)

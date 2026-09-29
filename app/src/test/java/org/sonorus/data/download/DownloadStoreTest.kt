@@ -148,6 +148,29 @@ class DownloadStoreTest {
     }
 
     @Test
+    fun `the holders of a song are the collections, never the hand download`() {
+        store.rememberCollection(OfflineCollection(kind = "album", id = 9, name = "Low", trackIds = listOf(1, 2)))
+        store.rememberCollection(OfflineCollection(kind = "playlist", id = 5, name = "Abends", trackIds = listOf(2)))
+        store.rememberManual(listOf(2, 3))
+
+        assertEquals(listOf("Low"), store.holdersOf(1).map { it.name })
+        assertEquals(listOf("Low", "Abends"), store.holdersOf(2).map { it.name })
+        assertTrue(store.holdersOf(3).isEmpty())
+    }
+
+    @Test
+    fun `letting go of hand downloads frees only what no collection holds`() {
+        store.rememberCollection(OfflineCollection(kind = "playlist", id = 5, trackIds = listOf(2)))
+        store.rememberManual(listOf(1, 2, 4))
+
+        // 1 was only fetched by hand, 2 is in a playlist too, 3 was never manual.
+        assertEquals(listOf(1, 3), store.dropManual(listOf(1, 2, 3)))
+        assertEquals(listOf(4), store.snapshot.manual)
+        assertTrue(store.isHeld(2))
+        assertFalse(store.isHeld(1))
+    }
+
+    @Test
     fun `a genre selection and a single genre are different collections`() {
         store.rememberCollection(OfflineCollection(kind = "genre", id = 3, ids = listOf(3), trackIds = listOf(1)))
         store.rememberCollection(

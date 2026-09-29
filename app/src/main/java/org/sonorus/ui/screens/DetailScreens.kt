@@ -271,6 +271,9 @@ fun DetailHead(
  *
  * [words] is what the confirmations count in. A Hörbuch is downloaded through
  * this same control and is not made of songs - see [DownloadWords].
+ *
+ * Without a [collection], removing keeps what a downloaded collection holds,
+ * unless the page is [everything] there is ("Alle Songs").
  */
 @UnstableApi
 @Composable
@@ -279,6 +282,7 @@ fun CollectionDownload(
     tracks: List<Track>,
     collection: OfflineCollection? = null,
     words: DownloadWords = DownloadWords.SONGS,
+    everything: Boolean = false,
 ) {
     val colors = SonorusTheme.colors
     val state by vm.downloads.state.collectAsState()
@@ -387,15 +391,18 @@ fun CollectionDownload(
     if (confirmingRemove) {
         ConfirmDialog(
             title = "Download entfernen",
-            message = removeMessage(vm, remembered, done, words),
+            message = removeMessage(vm, remembered, here, done, words, everything),
             confirmLabel = "Entfernen",
             onDismiss = { confirmingRemove = false },
             onConfirm = {
                 confirmingRemove = false
                 // Through the collection where there is one: only the songs
                 // nothing else holds are really deleted.
-                if (remembered != null) vm.removeCollection(remembered, words)
-                else vm.removeDownloads(here)
+                when {
+                    remembered != null -> vm.removeCollection(remembered, words)
+                    everything -> vm.removeDownloads(here)
+                    else -> vm.removeLoose(here, words)
+                }
             },
         )
     }
@@ -436,18 +443,23 @@ fun CollectionDownload(
 private fun removeMessage(
     vm: AppViewModel,
     collection: OfflineCollection?,
+    here: List<Track>,
     done: Int,
     words: DownloadWords,
+    everything: Boolean,
 ): String {
     val store = vm.downloads.store
-    if (collection == null) {
+    if (collection == null && everything) {
         return "${Fmt.plural(done, words.one, words.many)} werden von diesem Gerät gelöscht. " +
             "Auf dem Server bleibt alles, wie es ist."
     }
-    val going = collection.trackIds.count {
-        store.isDownloaded(it) && !store.isHeld(it, exceptKey = collection.key)
+    val ids = collection?.trackIds ?: here.map { it.id }
+    // A page without a collection lets go of its hand downloads, so only the collections count.
+    val going = ids.count {
+        store.isDownloaded(it) &&
+            (if (collection != null) !store.isHeld(it, exceptKey = collection.key) else store.holdersOf(it).isEmpty())
     }
-    val kept = collection.trackIds.count { store.isDownloaded(it) } - going
+    val kept = ids.count { store.isDownloaded(it) } - going
     val first = "${Fmt.plural(going, words.one, words.many)} werden von diesem Gerät gelöscht. " +
         "Auf dem Server bleibt alles, wie es ist."
     return if (kept > 0) {

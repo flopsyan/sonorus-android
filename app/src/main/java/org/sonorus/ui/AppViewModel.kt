@@ -494,6 +494,24 @@ class AppViewModel : ViewModel() {
         )
     }
 
+    /** A page's songs given back where no collection holds them; see [Downloads.removeLoose]. */
+    fun removeLoose(tracks: List<Track>, words: DownloadWords = DownloadWords.SONGS) {
+        val ids = tracks.map { it.id }
+        val had = ids.count { downloads.store.isDownloaded(it) }
+        val kept = had - downloads.removeLoose(ids)
+        say(
+            when {
+                kept > 0 -> "Download entfernt. ${Fmt.plural(kept, words.stays, words.stay)} - " +
+                    "sie hängen noch woanders drin."
+                else -> "Download entfernt."
+            }
+        )
+    }
+
+    /** Where a downloaded song is still held besides by hand, as "Album „X“". */
+    fun downloadHolders(track: Track): List<String> =
+        downloads.store.holdersOf(track.id).map(::holderLabel)
+
     /**
      * The download of what is playing, given back as a whole.
      *
@@ -549,6 +567,23 @@ class AppViewModel : ViewModel() {
         say("Download entfernt.")
     }
 
+    fun removeVideoDownloads(ids: List<Int>) {
+        ids.forEach(videoDownloads::remove)
+        say("Download entfernt.")
+    }
+
+    /** A season's cancel: what this run fetched of it goes, see [VideoDownloads.cancelRun]. */
+    fun cancelVideoRun(ids: List<Int>) {
+        val removed = videoDownloads.cancelRun(ids)
+        say(
+            when (removed) {
+                0 -> "Download abgebrochen."
+                1 -> "Download abgebrochen, 1 Folge wieder entfernt."
+                else -> "Download abgebrochen, $removed Folgen wieder entfernt."
+            }
+        )
+    }
+
     /** A video pref (subtitle language, autoplay): stored on the account like the web does. */
     fun saveVideoPref(key: String, value: JsonElement, apply: (Prefs) -> Prefs) {
         viewModelScope.launch { runCatching { api.setPref(key, value) } }
@@ -567,23 +602,6 @@ class AppViewModel : ViewModel() {
      *
      * Nothing is taken back, unlike [cancelDownloadRun]: what has been written
      * stays and the next attempt picks it up from there. One song is a small
-    fun removeVideoDownloads(ids: List<Int>) {
-        ids.forEach(videoDownloads::remove)
-        say("Download entfernt.")
-    }
-
-    /** A season's cancel: what this run fetched of it goes, see [VideoDownloads.cancelRun]. */
-    fun cancelVideoRun(ids: List<Int>) {
-        val removed = videoDownloads.cancelRun(ids)
-        say(
-            when (removed) {
-                0 -> "Download abgebrochen."
-                1 -> "Download abgebrochen, 1 Folge wieder entfernt."
-                else -> "Download abgebrochen, $removed Folgen wieder entfernt."
-            }
-        )
-    }
-
      * enough thing that a half of it is worth keeping, and there is no run whose
      * songs would have to be told apart from what was already on the phone.
      */

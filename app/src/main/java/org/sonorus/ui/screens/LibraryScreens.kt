@@ -139,6 +139,7 @@ fun trackActions(
         onDownload = { vm.download(listOf(it)) },
         onCancelDownload = { vm.downloads.cancel(it.id) },
         onRemoveDownload = { vm.removeDownloads(listOf(it)) },
+        holdersOf = { vm.downloadHolders(it) },
     )
 }
 
@@ -284,7 +285,7 @@ fun TracksScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     // standing order like a playlist's: "Alle Songs" is not a
                     // list somebody keeps, it is everything there is, and what
                     // arrives later is fetched by asking again.
-                    trailing = { CollectionDownload(vm, data.tracks) },
+                    trailing = { CollectionDownload(vm, data.tracks, everything = true) },
                     onPick = { key, direction ->
                         sort = key
                         dir = direction

@@ -1,5 +1,6 @@
 package org.sonorus.ui
 
+import org.sonorus.data.download.OfflineCollection
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -31,6 +32,20 @@ data class DownloadWords(val one: String, val many: String) {
         val EPISODES = DownloadWords("Folge", "Folgen")
         val PARTS = DownloadWords("Teil", "Teile")
     }
+}
+
+/** A downloaded collection named the way its page is: "Album „Low“", "Playlist „Abends“". */
+fun holderLabel(c: OfflineCollection): String {
+    val kind = when (c.kind) {
+        "album" -> "Album"
+        "artist" -> "Interpret"
+        "genre" -> "Genre"
+        "stars" -> "Bewertung"
+        "book" -> "Hörbuch"
+        "drama" -> "Hörspiel"
+        else -> "Playlist"
+    }
+    return if (c.name.isEmpty()) kind else "$kind „${c.name}“"
 }
 
 /**

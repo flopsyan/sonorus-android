@@ -72,6 +72,8 @@ data class TrackActions(
     val onDownload: (Track) -> Unit = {},
     val onCancelDownload: (Track) -> Unit = {},
     val onRemoveDownload: (Track) -> Unit = {},
+    /** The downloaded collections that still hold a song, named for the question before deleting it. */
+    val holdersOf: (Track) -> List<String> = { emptyList() },
 )
 
 @Composable
@@ -176,15 +178,36 @@ fun TrackList(
     }
 
     removing?.let { track ->
-        ConfirmDialog(
-            title = "Download entfernen",
-            message = "\"${track.title}\" wird vom Gerät gelöscht und ist ohne " +
-                "Verbindung nicht mehr da.",
-            confirmLabel = "Entfernen",
-            onDismiss = { removing = null },
-            onConfirm = { removing = null; actions.onRemoveDownload(track) },
-        )
+        val holders = remember(track) { actions.holdersOf(track) }
+        if (holders.isEmpty()) {
+            ConfirmDialog(
+                title = "Download entfernen",
+                message = "\"${track.title}\" wird vom Gerät gelöscht und ist ohne " +
+                    "Verbindung nicht mehr da.",
+                confirmLabel = "Entfernen",
+                onDismiss = { removing = null },
+                onConfirm = { removing = null; actions.onRemoveDownload(track) },
+            )
+        } else {
+            HeldDownloadDialog(holders, onDismiss = { removing = null }) {
+                removing = null
+                actions.onRemoveDownload(track)
+            }
+        }
     }
+}
+
+/** Asked before deleting a song another download still holds, like one of several hardlinks. */
+@Composable
+fun HeldDownloadDialog(holders: List<String>, onDismiss: () -> Unit, onDelete: () -> Unit) {
+    ConfirmDialog(
+        title = "Download entfernen",
+        message = "Hängt noch in: ${holders.joinToString(", ")}.",
+        confirmLabel = "Trotzdem löschen",
+        dismissLabel = "Behalten",
+        onDismiss = onDismiss,
+        onConfirm = onDelete,
+    )
 }
 
 /**

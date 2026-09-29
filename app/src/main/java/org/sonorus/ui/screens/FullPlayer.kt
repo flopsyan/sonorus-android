@@ -130,6 +130,7 @@ import org.sonorus.ui.pressable
 import org.sonorus.ui.components.Chip
 import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.Cover
+import org.sonorus.ui.components.HeldDownloadDialog
 import org.sonorus.ui.components.MenuItem
 import org.sonorus.ui.components.PlayerCoverKey
 import org.sonorus.ui.components.RackLabelText
@@ -916,7 +917,15 @@ fun SharedTransitionScope.FullPlayer(
     // Asked before anything is deleted, the same as everywhere else a download
     // can be given back. A part of a book takes the whole book with it - see
     // [AppViewModel.removeWork].
-    if (confirmingRemove) {
+    val holders = remember(confirmingRemove, track.id) {
+        if (confirmingRemove && track.audiobookId == null) vm.downloadHolders(track) else emptyList()
+    }
+    if (confirmingRemove && holders.isNotEmpty()) {
+        HeldDownloadDialog(holders, onDismiss = { confirmingRemove = false }) {
+            confirmingRemove = false
+            vm.removeWork(track)
+        }
+    } else if (confirmingRemove) {
         val whole = track.audiobookId != null
         ConfirmDialog(
             title = "Download entfernen",
