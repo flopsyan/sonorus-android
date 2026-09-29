@@ -80,6 +80,8 @@ class VideoDownloads(
         val wifiOnly: Boolean = false,
         val retrying: Boolean = false,
         val bytes: Long = 0,
+        /** What this run has finished so far; a cancel takes these back. */
+        val runDone: Set<Int> = emptySet(),
     ) {
         val busy: Boolean get() = active != null || queued.isNotEmpty()
 
@@ -104,6 +106,21 @@ class VideoDownloads(
             id in failed -> DownloadStatus.FAILED
             else -> DownloadStatus.NONE
         }
+
+        /**
+         * How far this run is over [ids], by episode plus the running file's share.
+         * Null while nothing of it has moved: a server still preparing has no honest number.
+         */
+        fun progressOf(ids: Collection<Int>): Float? {
+            val set = ids.toSet()
+            val running = active?.takeIf { it in set }
+            val waiting = queued.count { it in set }
+            if (running == null && waiting == 0) return null
+            val finished = runDone.count { it in set }
+            val share = if (running != null && phase == Phase.LOADING) progress else 0f
+            val total = finished + waiting + (if (running != null) 1 else 0)
+            return ((finished + share) / total).takeIf { it > 0f }
+        }
     }
 
     private val _state = MutableStateFlow(State())
@@ -114,6 +131,8 @@ class VideoDownloads(
 
     private val pending = ArrayDeque<Item>()
     private val failed = mutableMapOf<Int, String>()
+    // Collected as they finish, so a cancel never touches what was here before the run.
+    private val runDownloaded = mutableSetOf<Int>()
 
     @Volatile private var active: Item? = null
     @Volatile private var phase = Phase.LOADING
@@ -173,7 +192,8 @@ class VideoDownloads(
             call?.cancel()
         }
         scope.launch { partsOf(videoId).forEach { it.delete() } }
-        if (synchronized(pending) { pending.isEmpty() } && active == null) release()
+        val empty = synchronized(pending) { (pending.isEmpty() && active == null).also { if (it) runDownloaded.clear() } }
+        if (empty) release()
         publish()
     }
 
@@ -188,6 +208,20 @@ class VideoDownloads(
     fun cancelAll() {
         val ids = synchronized(pending) { pending.map { it.videoId } + listOfNotNull(active?.videoId) }
         ids.forEach(::cancel)
+    }
+
+    /** Stops [ids] and deletes those this run already fetched; answers how many were deleted. */
+    fun cancelRun(ids: Collection<Int>): Int {
+        val set = ids.toSet()
+        val (going, fetched) = synchronized(pending) {
+            val going = pending.map { it.videoId }.filter { it in set } + listOfNotNull(active?.videoId?.takeIf { it in set })
+            val fetched = runDownloaded.filter { it in set }
+            runDownloaded.removeAll(fetched.toSet())
+            going to fetched
+        }
+        going.forEach(::cancel)
+        fetched.forEach(::remove)
+        return fetched.size
     }
 
     fun onAppVisible() {
@@ -271,8 +305,10 @@ class VideoDownloads(
                     publish()
                 }
                 active = null
+                // A fresh tap after this starts a fresh run with nothing of its own to take back.
+                val empty = synchronized(pending) { pending.isEmpty().also { if (it) runDownloaded.clear() } }
                 publish()
-                if (synchronized(pending) { pending.isEmpty() }) release()
+                if (empty) release()
             } finally {
                 releaseCpu()
             }
@@ -310,11 +346,20 @@ class VideoDownloads(
         if (!part.renameTo(target)) throw DownloadLocalFailure("Die Datei konnte nicht abgelegt werden.")
         answer.key?.let { key -> runCatching { api.releaseVideoDownload(id, key) } }
 
-        val cues = subtitles(id, info.subtitles.filter { it.supported }.map { it.key })
-        store.saveCues(id, cues)
-        listOfNotNull(info.title.poster, info.title.backdrop, info.title.logo, info.still)
-            .filter { store.coverOf(it) == null }
-            .forEach { runCatching { artwork(it) } }
+        val cues: Map<String, List<Cue>>
+        // The runCatching calls below swallow a cancel; without this check a cancelled video
+        // still landed in the index, or its file stayed behind outside it.
+        try {
+            cues = subtitles(id, info.subtitles.filter { it.supported }.map { it.key })
+            store.saveCues(id, cues)
+            listOfNotNull(info.title.poster, info.title.backdrop, info.title.logo, info.still)
+                .filter { store.coverOf(it) == null }
+                .forEach { runCatching { artwork(it) } }
+            currentCoroutineContext().ensureActive()
+        } catch (e: CancellationException) {
+            target.delete()
+            throw e
+        }
 
         // A prepared copy carries only the one audio track the server picked.
         val audio = if (answer.kind == "file") info.audio else info.audio.filter { it.index == answer.audio }
@@ -334,7 +379,10 @@ class VideoDownloads(
                 completed = info.progress.completed,
             )
         )
-        synchronized(pending) { failed.remove(id) }
+        synchronized(pending) {
+            failed.remove(id)
+            runDownloaded += id
+        }
         publish()
     }
 
@@ -452,6 +500,7 @@ class VideoDownloads(
             wifiOnly = wifiOnly.value,
             retrying = retrying,
             bytes = store.videoBytes,
+            runDone = synchronized(pending) { runDownloaded.toSet() },
         )
         val items = synchronized(pending) { listOfNotNull(running) + pending }
         val ids = items.map { it.videoId }

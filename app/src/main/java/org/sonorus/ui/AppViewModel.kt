@@ -567,6 +567,23 @@ class AppViewModel : ViewModel() {
      *
      * Nothing is taken back, unlike [cancelDownloadRun]: what has been written
      * stays and the next attempt picks it up from there. One song is a small
+    fun removeVideoDownloads(ids: List<Int>) {
+        ids.forEach(videoDownloads::remove)
+        say("Download entfernt.")
+    }
+
+    /** A season's cancel: what this run fetched of it goes, see [VideoDownloads.cancelRun]. */
+    fun cancelVideoRun(ids: List<Int>) {
+        val removed = videoDownloads.cancelRun(ids)
+        say(
+            when (removed) {
+                0 -> "Download abgebrochen."
+                1 -> "Download abgebrochen, 1 Folge wieder entfernt."
+                else -> "Download abgebrochen, $removed Folgen wieder entfernt."
+            }
+        )
+    }
+
      * enough thing that a half of it is worth keeping, and there is no run whose
      * songs would have to be told apart from what was already on the phone.
      */

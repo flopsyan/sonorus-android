@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
@@ -86,6 +87,7 @@ import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.LoadBox
 import org.sonorus.ui.LocalOffline
+import org.sonorus.ui.Motion
 import org.sonorus.ui.Routes
 import org.sonorus.ui.VideoFmt
 import org.sonorus.ui.components.CardGridSkeleton
@@ -925,8 +927,6 @@ private fun SeasonHead(
     val colors = SonorusTheme.colors
     val watched = x.episodes.count { marks[it.id] ?: it.progress.completed }
     val done = watched >= x.episodes.size
-    val downloads by vm.videoDownloads.state.collectAsState()
-    val missing = x.episodes.filter { downloads.statusOf(it.id) == DownloadStatus.NONE || downloads.statusOf(it.id) == DownloadStatus.FAILED }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(x.name, style = MaterialTheme.typography.titleLarge, color = colors.text)
         Text(
@@ -941,16 +941,118 @@ private fun SeasonHead(
         if (x.overview.isNotEmpty()) {
             Text(x.overview, style = MaterialTheme.typography.bodySmall, color = colors.textDim, maxLines = 4, overflow = TextOverflow.Ellipsis)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
             if (!LocalOffline.current) {
                 SonorusButton(if (done) "Staffel als ungesehen markieren" else "Staffel als gesehen markieren") { onMark(!done) }
-                if (missing.isNotEmpty()) {
-                    SonorusButton(if (missing.size == x.episodes.size) "Staffel herunterladen" else "Rest der Staffel herunterladen") {
-                        vm.downloadVideos(missing.map { episodeItem(s, it) })
-                    }
-                }
+            }
+            SeasonDownload(vm, s, x)
+        }
+    }
+}
+
+/** The season's download control, drawn and behaving like an album's [CollectionDownload]. */
+@UnstableApi
+@Composable
+private fun SeasonDownload(vm: AppViewModel, s: ShowDetail, x: VideoSeason) {
+    val colors = SonorusTheme.colors
+    val state by vm.videoDownloads.state.collectAsState()
+    val offline = LocalOffline.current
+    var confirmingRemove by remember { mutableStateOf(false) }
+    var confirmingCancel by remember { mutableStateOf(false) }
+
+    val ids = x.episodes.map { it.id }
+    val done = ids.count { it in state.done }
+    val busy = ids.count { it == state.active || it in state.queued }
+    if (ids.isEmpty() || (offline && done == 0)) return
+    val start = {
+        val missing = x.episodes.filter { state.statusOf(it.id) == DownloadStatus.NONE || state.statusOf(it.id) == DownloadStatus.FAILED }
+        vm.downloadVideos(missing.map { episodeItem(s, it) })
+    }
+
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        if (busy > 0) {
+            val progress = state.progressOf(ids)
+            if (progress == null) {
+                CircularProgressIndicator(
+                    Modifier.size(44.dp),
+                    color = colors.accent,
+                    trackColor = colors.surface2,
+                    strokeWidth = 3.dp,
+                )
+            } else {
+                val shown by animateFloatAsState(progress, Motion.standard(), label = "seasonRing")
+                CircularProgressIndicator(
+                    progress = { shown },
+                    modifier = Modifier.size(44.dp),
+                    color = colors.accent,
+                    trackColor = colors.surface2,
+                    strokeWidth = 3.dp,
+                )
             }
         }
+        IconButton(
+            onClick = {
+                when {
+                    busy > 0 -> confirmingCancel = true
+                    done == ids.size -> confirmingRemove = true
+                    else -> start()
+                }
+            },
+            modifier = Modifier.size(44.dp),
+        ) {
+            when {
+                busy > 0 -> Icon(Icons.Filled.Stop, "Download abbrechen", tint = colors.accent, modifier = Modifier.size(20.dp))
+                done == ids.size -> Icon(
+                    Icons.Filled.DownloadDone,
+                    "Heruntergeladen - antippen zum Entfernen",
+                    tint = colors.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+                done > 0 -> Icon(
+                    Icons.Filled.DownloadForOffline,
+                    "Rest herunterladen ($done von ${ids.size})",
+                    tint = colors.accent,
+                    modifier = Modifier.size(24.dp),
+                )
+                else -> Icon(Icons.Filled.Download, "Herunterladen", tint = colors.textDim, modifier = Modifier.size(24.dp))
+            }
+        }
+    }
+
+    if (confirmingRemove) {
+        ConfirmDialog(
+            title = "Download entfernen",
+            message = (if (done == 1) "1 Folge wird" else "$done Folgen werden") + " von diesem Gerät gelöscht.",
+            confirmLabel = "Entfernen",
+            onDismiss = { confirmingRemove = false },
+            onConfirm = {
+                confirmingRemove = false
+                vm.removeVideoDownloads(ids.filter { it in state.done })
+            },
+        )
+    }
+
+    if (confirmingCancel) {
+        val fetched = state.runDone.count { it in ids }
+        ConfirmDialog(
+            title = "Download abbrechen",
+            message = when (fetched) {
+                0 -> "Auf dem Gerät ändert sich nichts."
+                1 -> "Die schon geladene Folge wird wieder gelöscht, was vorher da war, bleibt."
+                else -> "Die $fetched schon geladenen Folgen werden wieder gelöscht, was vorher da war, bleibt."
+            },
+            confirmLabel = "Download abbrechen",
+            dismissLabel = "Weiter laden",
+            onDismiss = { confirmingCancel = false },
+            onConfirm = {
+                confirmingCancel = false
+                vm.cancelVideoRun(ids)
+            },
+        )
     }
 }
 
