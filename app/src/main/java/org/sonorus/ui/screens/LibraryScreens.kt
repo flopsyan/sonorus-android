@@ -773,15 +773,14 @@ private fun BoxScope.GridScroller(
 }
 
 /**
- * One combined list for a selection of genres, with a switch per genre above
- * it - `/genres/1,4` is one list, not two. The last switch cannot be turned
- * off, because an empty selection has nothing to show.
+ * One combined list for a selection of genres - `/genres/1,4` is one list, not
+ * two. Nothing on the page combines them any more; the route stays for a
+ * downloaded selection.
  */
 @UnstableApi
 @Composable
 fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
     val selection = rememberLoad("genre", ids.joinToString(",")) { vm.lib.genre(ids) }
-    val all = rememberLoad("all-genres") { vm.lib.genres() }
     val player by vm.player.state.collectAsState()
     val key = Routes.genre(ids)
     val shuffle = rememberShuffle(ShuffleDefault.GENRE)
@@ -801,59 +800,43 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
             ),
             showAlbum = true,
             header = {
-                Column {
-                    // The same head an album gets: a genre is a collection you
-                    // put on, so it is introduced like one.
-                    DetailHead(
-                        title = data.genre.name,
-                        meta = listOf(
-                            Fmt.plural(data.genre.tracks.size, "Song", "Songs"),
-                            Fmt.durationLong(data.genre.tracks.sumOf { it.duration }),
-                        ).joinToString(" · "),
-                        coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.coverUrl(it) },
-                        onPlay = {
-                            vm.playCollection(data.genre.tracks, data.genre.name, key, shuffle.value)
-                        },
-                        shuffle = shuffle.value,
-                        onToggleShuffle = { shuffle.value = !shuffle.value },
-                        // A downloaded genre is kept in step: a song that is
-                        // tagged into it later is fetched with the rest.
-                        download = {
-                            CollectionDownload(
-                                vm,
-                                data.genre.tracks,
-                                OfflineCollection(
-                                    kind = "genre",
-                                    id = ids.firstOrNull() ?: 0,
-                                    name = data.genre.name,
-                                    ids = ids,
-                                ),
-                            )
-                        },
-                    )
-                    all.value?.genres?.let { genres ->
-                        PickerRow(
-                            // The switches that are on come first: a library of a
-                            // hundred genres makes a row that scrolls a long way,
-                            // and a switch you cannot see is one you cannot turn
-                            // off again. `sortedBy` is stable, so both halves keep
-                            // the alphabetical order the server sends.
-                            items = genres
-                                .sortedBy { it.id !in data.genre.ids }
-                                .map { it.id to it.name },
-                            selected = data.genre.ids,
-                            onPick = { onGo(Routes.genre(it)) },
+                // The same head an album gets: a genre is a collection you
+                // put on, so it is introduced like one.
+                DetailHead(
+                    title = data.genre.name,
+                    meta = listOf(
+                        Fmt.plural(data.genre.tracks.size, "Song", "Songs"),
+                        Fmt.durationLong(data.genre.tracks.sumOf { it.duration }),
+                    ).joinToString(" · "),
+                    coverUrls = albumCovers(data.genre.tracks).mapNotNull { vm.coverUrl(it) },
+                    onPlay = {
+                        vm.playCollection(data.genre.tracks, data.genre.name, key, shuffle.value)
+                    },
+                    shuffle = shuffle.value,
+                    onToggleShuffle = { shuffle.value = !shuffle.value },
+                    // A downloaded genre is kept in step: a song that is
+                    // tagged into it later is fetched with the rest.
+                    download = {
+                        CollectionDownload(
+                            vm,
+                            data.genre.tracks,
+                            OfflineCollection(
+                                kind = "genre",
+                                id = ids.firstOrNull() ?: 0,
+                                name = data.genre.name,
+                                ids = ids,
+                            ),
                         )
-                    }
-                }
+                    },
+                )
             },
         )
     }
 }
 
 /**
- * The switch row shared by the genre and the rating pickers. Clicking a switch
- * that is on removes it from the selection - unless it is the last one left.
+ * The switch row of the rating pickers. Clicking a switch that is on removes it
+ * from the selection - unless it is the last one left.
  */
 @Composable
 fun PickerRow(
