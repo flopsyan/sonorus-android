@@ -125,6 +125,7 @@ import org.sonorus.player.Letterbox
 import org.sonorus.player.PictureShare
 import org.sonorus.player.VideoCaps
 import org.sonorus.ui.AppViewModel
+import org.sonorus.ui.CueMarkup
 import org.sonorus.ui.VideoFmt
 import org.sonorus.ui.components.SeekRail
 import org.sonorus.ui.theme.SonorusTheme
@@ -528,7 +529,7 @@ private class VideoSession(context: Context, private val vm: AppViewModel, val i
         return (usable.firstOrNull { !it.forced && !it.sdh } ?: usable.firstOrNull())?.key
     }
 
-    fun cueText(at: Double): String = cues.filter { it.s <= at && at <= it.e }.joinToString("\n") { it.t }
+    fun cueText(at: Double): List<String> = cues.filter { it.s <= at && at <= it.e }.map { it.t }
 
     fun sample(frame: Bitmap) {
         if (pixels.size != frame.width * frame.height) pixels = IntArray(frame.width * frame.height)
@@ -712,7 +713,7 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
         val cue = session.cueText(clock)
         if (cue.isNotEmpty()) {
             Text(
-                cue,
+                CueMarkup.annotated(cue),
                 style = TextStyle(
                     color = Color.White,
                     fontSize = 20.sp,
