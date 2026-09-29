@@ -912,12 +912,8 @@ private fun TracksPanel(session: VideoSession, autoplay: Boolean, onAutoplay: (B
         Text("UNTERTITEL", style = org.sonorus.ui.theme.RackLabel, color = Color.White.copy(alpha = 0.6f))
         PanelRow("Aus", "", session.sub == null) { session.pickSubtitle(null) }
         for (s in info.subtitles) {
-            PanelRow(
-                VideoFmt.subtitleLabel(s),
-                if (s.supported) "" else "Bild-Untertitel, nicht unterstützt",
-                s.key == session.sub,
-                enabled = s.supported,
-            ) { session.pickSubtitle(s.key) }
+            val (main, kind) = VideoFmt.subtitleLabel(s)
+            PanelRow(main, kind, s.key == session.sub, enabled = s.supported) { session.pickSubtitle(s.key) }
         }
         if (info.kind == "show") {
             Spacer(Modifier.height(12.dp))

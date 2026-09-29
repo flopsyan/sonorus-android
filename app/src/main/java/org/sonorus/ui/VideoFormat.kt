@@ -45,12 +45,17 @@ object VideoFmt {
         return main.joinToString(" · ") to tech.joinToString(" ")
     }
 
-    fun subtitleLabel(s: SubtitleInfo): String {
+    /** The language line, and the small line under it saying what kind of track it is. */
+    fun subtitleLabel(s: SubtitleInfo): Pair<String, String> {
         val parts = mutableListOf(langName(s.lang).ifEmpty { "Unbekannt" })
         if (s.forced) parts += "erzwungen"
-        if (s.sdh) parts += "für Hörgeschädigte"
         if (usefulTitle(s.title) && !s.forced) parts += s.title
-        return parts.joinToString(" · ")
+        val kind = if (s.sdh) "Closed Captions" else "Untertitel"
+        return parts.joinToString(" · ") to when {
+            !s.supported -> "Bild-Untertitel, nicht unterstützt"
+            s.external -> "$kind · Datei"
+            else -> kind
+        }
     }
 
     /** "FSK 16" for a German rating, the plain rating for anything else. */
