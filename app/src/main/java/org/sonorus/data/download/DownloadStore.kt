@@ -6,6 +6,7 @@ import org.sonorus.data.model.Ebook
 import org.sonorus.data.model.Genre
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Track
+import org.sonorus.data.restoreReserved
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -605,9 +606,29 @@ class DownloadStore(private val root: File) {
             // out of their downloads.
             ?: index.account
 
-        publish(index.copy(account = account))
+        publish(index.restored().copy(account = account))
         if (account != null && !accountFile.isFile) writeAccount(account)
     }
+
+    // A download keeps the names it was fetched with, and nothing refreshes
+    // them - so the ones from before the server read the look-alikes back are
+    // read back here. A playlist's name is typed by the user and stays.
+    private fun OfflineSnapshot.restored() = copy(
+        tracks = tracks.map { it.copy(track = it.track.restored()) },
+        ebooks = ebooks.map {
+            it.copy(book = it.book.copy(title = restoreReserved(it.book.title), author = restoreReserved(it.book.author)))
+        },
+        playlists = playlists.map { if (it.kind == "playlist") it else it.copy(name = restoreReserved(it.name)) },
+    )
+
+    private fun Track.restored() = copy(
+        title = restoreReserved(title),
+        artist = restoreReserved(artist),
+        album = restoreReserved(album),
+        podcast = restoreReserved(podcast),
+        book = restoreReserved(book),
+        author = restoreReserved(author),
+    )
 
     private fun publish(next: OfflineSnapshot) {
         state = next

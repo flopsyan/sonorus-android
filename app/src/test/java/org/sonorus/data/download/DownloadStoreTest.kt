@@ -373,6 +373,22 @@ class DownloadStoreTest {
     }
 
     @Test
+    fun `a name stored with a look-alike is read back the way it was meant`() {
+        val file = store.targetOf(1, "flac").apply { writeBytes(ByteArray(32)) }
+        val old = Track(id = 1, title = "40\uff1a1", artist = "AC\u2215DC", album = "All Fine \u2215 eniF llA")
+        store.put(DownloadedTrack(track = old, file = file.name, bytes = file.length()))
+        store.rememberCollection(OfflineCollection(kind = "drama", id = 47, name = "125\u2215Feuermond", trackIds = listOf(1)))
+        store.rememberCollection(OfflineCollection(kind = "playlist", id = 5, name = "Rock\uff1f", trackIds = listOf(1)))
+
+        val reloaded = DownloadStore(root)
+
+        assertEquals("40:1", reloaded.entryOf(1)?.track?.title)
+        assertEquals("AC/DC", reloaded.entryOf(1)?.track?.artist)
+        assertEquals("All Fine / eniF llA", reloaded.entryOf(1)?.track?.album)
+        assertEquals(listOf("125/Feuermond", "Rock\uff1f"), reloaded.collections.map { it.name })
+    }
+
+    @Test
     fun `the file extension comes from the server, then from the codec, then a default`() {
         assertEquals("flac", DownloadStore.extensionFor(track(1, codec = "mp3"), "audio/flac"))
         // The header may carry parameters; they are not part of the type.
