@@ -110,7 +110,9 @@ private fun SonorusRoot() {
             // Configuration - see [isCompactWindow]. It is taken here at the
             // root, because this is the one box that is the whole window.
             BoxWithConstraints(Modifier.fillMaxSize().background(SonorusTheme.colors.bg)) {
-                val compact = isCompactWindow(maxHeight)
+                // A picture-in-picture window is as small as the strip's, and the
+                // swap would take the running film down with the shell.
+                val compact = isCompactWindow(maxHeight) && !vm.watching
                 when (val current = phase) {
                     is AppPhase.Starting -> Loading()
                     is AppPhase.NeedsLogin -> LoginScreen(

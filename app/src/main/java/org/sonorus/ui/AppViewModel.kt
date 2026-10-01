@@ -1,6 +1,9 @@
 package org.sonorus.ui
 
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
@@ -556,6 +559,9 @@ class AppViewModel : ViewModel() {
     var videoFill: Boolean
         get() = app.settings.videoFill
         set(value) { app.settings.videoFill = value }
+
+    /** A film or episode is open; set by the shell, read where the window size decides the layout. */
+    var watching by mutableStateOf(false)
 
     fun downloadVideos(items: List<VideoDownloads.Item>) {
         if (items.isEmpty()) return

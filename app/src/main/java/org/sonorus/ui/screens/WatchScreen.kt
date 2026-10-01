@@ -75,10 +75,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.toAndroidRect
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
@@ -247,7 +250,7 @@ private fun Window.setCutoutMode(mode: Int) {
     attributes = attributes.apply { layoutInDisplayCutoutMode = mode }
 }
 
-private fun Context.findActivity(): Activity? {
+internal fun Context.findActivity(): Activity? {
     var c: Context? = this
     while (c is ContextWrapper) {
         if (c is Activity) return c
@@ -600,6 +603,8 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
     var fill by remember { mutableStateOf(vm.videoFill) }
     var fillLabel by remember { mutableStateOf<Pair<String, Long>?>(null) }
     var surface by remember { mutableStateOf<SurfaceView?>(null) }
+    var surfaceBounds by remember { mutableStateOf<android.graphics.Rect?>(null) }
+    val inPip = rememberInPip()
     val autoplay = vm.prefs.videoAutoplay
     val poke = {
         controls = true
@@ -613,7 +618,8 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
         onDispose { session.release() }
     }
 
-    // Leaving the app pauses the film and keeps the place; it does not play on behind the lock screen.
+    // A stop pauses and keeps the place: the window closed, the phone locked, or left while paused.
+    // It does not play on behind the lock screen.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, session) {
         val observer = LifecycleEventObserver { _, event ->
@@ -673,6 +679,20 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
     val shareW by animateFloatAsState(share.width, tween(300), label = "fillWidth")
     val shareH by animateFloatAsState(share.height, tween(300), label = "fillHeight")
 
+    // The window takes the picture's shape, so with Ausfüllen on it has no black bars either.
+    PipWhilePlaying(
+        playing = session.wantsPlay && !session.ended,
+        aspect = session.aspect * share.width / share.height,
+        source = surfaceBounds,
+        onAction = { action ->
+            when (action) {
+                PipAction.BACK -> session.seek(session.now() - SKIP)
+                PipAction.TOGGLE -> session.toggle()
+                PipAction.FORWARD -> session.seek(session.now() + SKIP)
+            }
+        },
+    )
+
     Box(
         Modifier
             .fillMaxSize()
@@ -706,7 +726,7 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
                 val h = (w / aspect).roundToInt()
                 val placeable = measurable.measure(Constraints.fixed(w, h))
                 layout(boxW, boxH) { placeable.place((boxW - w) / 2, (boxH - h) / 2) }
-            },
+            }.onGloballyPositioned { surfaceBounds = it.boundsInWindow().toAndroidRect() },
         )
 
         // Subtitles sit above the controls' reach, lifted while the bar is up.
@@ -716,27 +736,32 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
                 CueMarkup.annotated(cue),
                 style = TextStyle(
                     color = Color.White,
-                    fontSize = 20.sp,
+                    fontSize = if (inPip) 11.sp else 20.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     shadow = Shadow(Color.Black, blurRadius = 6f),
                 ),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (controls) 96.dp else 28.dp, start = 48.dp, end = 48.dp)
+                    .padding(
+                        bottom = if (inPip) 6.dp else if (controls) 96.dp else 28.dp,
+                        start = if (inPip) 8.dp else 48.dp,
+                        end = if (inPip) 8.dp else 48.dp,
+                    )
                     .background(Color(0x66000000), RoundedCornerShape(4.dp))
                     .padding(horizontal = 8.dp, vertical = 2.dp),
             )
         }
 
         if (session.buffering || session.pending != null) {
-            CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(44.dp))
+            CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(if (inPip) 24.dp else 44.dp))
         }
         session.error?.let {
             Text(it, color = Color.White, modifier = Modifier.background(Color(0xAA000000), RoundedCornerShape(6.dp)).padding(12.dp))
         }
 
-        AnimatedVisibility(controls, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+        // The window takes no touches; Android draws its own buttons over it.
+        AnimatedVisibility(controls && !inPip, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().background(Color(0x66000000))) {
                 // Top: back and what is playing.
                 Row(
@@ -822,7 +847,7 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
             }
         }
 
-        fillLabel?.let { (text, _) ->
+        fillLabel?.takeIf { !inPip }?.let { (text, _) ->
             Text(
                 text,
                 color = Color.White,
@@ -834,7 +859,7 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
             )
         }
 
-        if (upNext != null) {
+        if (upNext != null && !inPip) {
             upNext.let { next ->
                 NextCard(
                     label = VideoFmt.episodeCode(next.season, next.episode, next.episodeEnd) +
@@ -850,7 +875,7 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
             }
         }
 
-        if (panel) {
+        if (panel && !inPip) {
             TracksPanel(
                 session = session,
                 autoplay = autoplay,

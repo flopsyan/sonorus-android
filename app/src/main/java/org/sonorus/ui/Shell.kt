@@ -82,6 +82,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -192,6 +193,10 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     // music player over the picture.
     val watching = route == Routes.WATCH
     if (watching) org.sonorus.ui.screens.FullscreenLandscape()
+    DisposableEffect(watching) {
+        vm.watching = watching
+        onDispose { vm.watching = false }
+    }
 
     // Everything the player touches lives in one of these, and that is the only
     // reason the artwork can travel between the bar and the full screen: a
