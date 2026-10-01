@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import org.sonorus.player.PlaybackService
 import org.sonorus.ui.AppPhase
@@ -40,6 +41,8 @@ class MainActivity : ComponentActivity() {
     private val askNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    private var controller: ListenableFuture<MediaController>? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -53,8 +56,8 @@ class MainActivity : ComponentActivity() {
         // Binding a controller is what starts the MediaSessionService, which is
         // what puts playback in the foreground so it survives leaving the app.
         val token = SessionToken(this, android.content.ComponentName(this, PlaybackService::class.java))
-        MediaController.Builder(this, token).buildAsync()
-            .addListener({ }, MoreExecutors.directExecutor())
+        controller = MediaController.Builder(this, token).buildAsync()
+            .also { it.addListener({ }, MoreExecutors.directExecutor()) }
 
         setContent { SonorusRoot() }
     }
@@ -75,6 +78,14 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         SonorusApp.instance.player.saveQueue()
+    }
+
+    // Left bound, Android unbinds it itself after a destroy and media3's own release then
+    // crashed the app ("Service not registered") - on Back from the start page, or a
+    // closed picture-in-picture window the system cleared for memory.
+    override fun onDestroy() {
+        controller?.let { MediaController.releaseFuture(it) }
+        super.onDestroy()
     }
 }
 
