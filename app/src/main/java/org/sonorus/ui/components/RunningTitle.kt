@@ -29,8 +29,8 @@ import kotlinx.coroutines.delay
 
 /**
  * What a tapped title does, in three numbers: how long it waits before it starts
- * moving, how fast it then travels, and **how long it stands at its end before
- * the ellipsis comes back**.
+ * moving, how fast it then travels (both ways), and **how long it stands at its
+ * end before it runs back**.
  *
  * The hold is the point of doing this by hand. The end of a name is the half
  * that was hidden, so it is the half worth reading, and it used to be on screen
@@ -43,7 +43,7 @@ private const val TITLE_HOLD_MS = 2200L
 
 /**
  * A name too long for the room it has, cut with an ellipsis until it is tapped,
- * and then run through once so it can be read.
+ * then run to its end, held there, and run back to its start.
  *
  * It stays still until it is asked. It used to scroll for ever, unasked, which
  * made the busiest line on the screen the one nobody had asked to move - and a
@@ -93,8 +93,11 @@ fun RunningTitle(
         }
         delay(TITLE_LEAD_MS)
         val seconds = with(density) { over.toDp().value } / TITLE_VELOCITY_DP
-        shift.animateTo(-over.toFloat(), tween((seconds * 1000).toInt(), easing = LinearEasing))
+        val travel = tween<Float>((seconds * 1000).toInt(), easing = LinearEasing)
+        shift.animateTo(-over.toFloat(), travel)
         delay(TITLE_HOLD_MS)
+        // Not a jump: the eye can follow the name back to its start.
+        shift.animateTo(0f, travel)
         running = false
     }
     Box(
