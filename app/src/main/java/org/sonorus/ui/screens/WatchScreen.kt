@@ -112,6 +112,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
@@ -120,7 +121,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.JsonPrimitive
-import org.sonorus.data.playbackMessage
+import org.sonorus.data.videoFailureMessage
 import org.sonorus.data.model.AudioInfo
 import org.sonorus.data.model.Cue
 import org.sonorus.data.model.PlayerInfo
@@ -367,11 +368,10 @@ private class VideoSession(context: Context, private val vm: AppViewModel, val i
                     load(now(), force = force, useLocal = false)
                 } else {
                     val status = (e.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
-                    error = if (mode == "encode" && status == null) {
-                        "Auch die umgewandelte Fassung ließ sich nicht abspielen."
-                    } else {
-                        playbackMessage(e.errorCode, status)
-                    }
+                    val failed = (e as? ExoPlaybackException)
+                        ?.takeIf { it.type == ExoPlaybackException.TYPE_RENDERER }
+                        ?.rendererFormat?.sampleMimeType
+                    error = videoFailureMessage(e.errorCode, status, failed)
                 }
             }
         })

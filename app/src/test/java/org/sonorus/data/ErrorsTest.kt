@@ -67,4 +67,26 @@ class ErrorsTest {
             playbackMessage(PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND, null),
         )
     }
+
+    @Test
+    fun `a video that will not play names the track whose decoder gave up`() {
+        assertEquals(
+            "Der Ton (Dolby Digital+) lässt sich auf diesem Telefon nicht abspielen.",
+            videoFailureMessage(PlaybackException.ERROR_CODE_DECODING_FAILED, null, "audio/eac3-joc"),
+        )
+        assertEquals(
+            "Das Bild (HEVC) lässt sich auf diesem Telefon nicht abspielen.",
+            videoFailureMessage(PlaybackException.ERROR_CODE_DECODER_INIT_FAILED, null, "video/hevc"),
+        )
+        assertEquals(
+            "Der Ton (MPEG) lässt sich auf diesem Telefon nicht abspielen.",
+            videoFailureMessage(PlaybackException.ERROR_CODE_DECODING_FAILED, null, "audio/mpeg"),
+        )
+        // Not a decoder: the general reason, as for a song.
+        assertEquals(
+            "Die Verbindung zum Server ist abgebrochen.",
+            videoFailureMessage(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, null, null),
+        )
+        assertEquals("Die Datei fehlt auf dem Server.", videoFailureMessage(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, 404, "video/avc"))
+    }
 }

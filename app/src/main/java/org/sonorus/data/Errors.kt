@@ -78,3 +78,26 @@ fun playbackMessage(errorCode: Int, httpStatus: Int?): String = when {
         else -> "Wiedergabefehler ${PlaybackException.getErrorCodeName(errorCode)}."
     }
 }
+
+// The names the player's Ton panel uses, keyed by the MIME type ExoPlayer reports.
+private val CODEC_NAMES = mapOf(
+    "audio/eac3" to "Dolby Digital+", "audio/eac3-joc" to "Dolby Digital+", "audio/ac3" to "Dolby Digital",
+    "audio/vnd.dts" to "DTS", "audio/vnd.dts.hd" to "DTS", "audio/true-hd" to "TrueHD", "audio/mp4a-latm" to "AAC",
+    "video/avc" to "H.264", "video/hevc" to "HEVC", "video/av01" to "AV1", "video/x-vnd.on2.vp9" to "VP9",
+)
+
+/**
+ * Why a video did not play after the last try. When a decoder gave up, the track and
+ * its codec are the reason: the old catch-all hid that the phone's own Dolby decoder failed.
+ */
+fun videoFailureMessage(errorCode: Int, httpStatus: Int?, failedMime: String?): String {
+    val track = when {
+        httpStatus != null -> null
+        failedMime?.startsWith("audio/") == true -> "Der Ton"
+        failedMime?.startsWith("video/") == true -> "Das Bild"
+        else -> null
+    }
+    if (track == null || failedMime == null) return playbackMessage(errorCode, httpStatus)
+    val codec = CODEC_NAMES[failedMime] ?: failedMime.substringAfter('/').uppercase()
+    return "$track ($codec) lässt sich auf diesem Telefon nicht abspielen."
+}
