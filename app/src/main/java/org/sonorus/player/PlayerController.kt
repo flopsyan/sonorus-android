@@ -195,7 +195,7 @@ class PlayerController(
     // and leaving early all have to show up - the track length alone would never
     // tell.
 
-    private var playCounted = false
+    private var playWritten = false
     private var playId: Int? = null
 
     /** The handle of a play written to [PlayLog] because the phone was offline. */
@@ -331,7 +331,8 @@ class PlayerController(
     /**
      * Spotify's rule, and the one the web client uses: a track counts after 30
      * seconds of real playback. A track shorter than that can never reach it,
-     * so for those a third of the length is the mark.
+     * so for those a third of the length is the mark. The server decides it from
+     * the seconds (stats.js); this side only reports the moment it gets there.
      */
     private fun countThreshold(durationSeconds: Double): Double =
         if (durationSeconds < COUNT_AFTER) durationSeconds / 3.0 else COUNT_AFTER
@@ -382,9 +383,10 @@ class PlayerController(
         followChapter()
 
         val track = _state.value.current ?: return
-        val duration = track.duration
-        if (!playCounted && duration > 0 && listened >= countThreshold(duration)) {
-            playCounted = true
+        val mark = countThreshold(track.duration.takeIf { it > 0 } ?: COUNT_AFTER)
+        // Written after the first second, so a skip still counts as time.
+        if (!playWritten && listened >= START_AFTER) {
+            playWritten = true
             reported = listened.roundToInt()
             val id = track.id
             val seconds = listened
@@ -400,20 +402,24 @@ class PlayerController(
                     runCatching { api.startPlay(id, seconds) }
                         .onSuccess {
                             playId = it.playId
-                            onPlayCounted?.invoke()
+                            if (seconds >= mark) onPlayCounted?.invoke()
                         }
                 }
             }
-        } else if ((playId != null || pendingPlay != null) && listened - reported >= REPORT_EVERY) {
-            reportListening()
+        } else if (playId != null || pendingPlay != null) {
+            val reaching = reported < mark && listened >= mark
+            if (listened - reported >= REPORT_EVERY || reaching) {
+                reportListening(if (reaching) onPlayCounted else null)
+            }
         }
     }
 
     /**
      * Sends the running total for this play, or corrects it on the phone while
-     * the play is one that has not been sent yet.
+     * the play is one that has not been sent yet. [sent] runs once the server
+     * has it.
      */
-    private fun reportListening() {
+    private fun reportListening(sent: (() -> Unit)? = null) {
         val total = listened.roundToInt()
         if (total <= reported) return
         val pending = pendingPlay
@@ -421,7 +427,9 @@ class PlayerController(
         reported = total
         when {
             pending != null -> playLog.update(pending, total)
-            id != null -> scope.launch { runCatching { api.updatePlay(id, total.toDouble()) } }
+            id != null -> scope.launch {
+                runCatching { api.updatePlay(id, total.toDouble()) }.onSuccess { sent?.invoke() }
+            }
         }
     }
 
@@ -432,7 +440,7 @@ class PlayerController(
      */
     private fun resetListening() {
         reportListening()
-        playCounted = false
+        playWritten = false
         playId = null
         pendingPlay = null
         listened = 0.0
@@ -1233,6 +1241,7 @@ class PlayerController(
     }
 
     private companion object {
+        const val START_AFTER = 1.0
         const val COUNT_AFTER = 30.0
         const val REPORT_EVERY = 20
         /** Seconds between two position reports for spoken word. */
