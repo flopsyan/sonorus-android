@@ -2,6 +2,8 @@
 
 Nativer Android-Client für [Sonorus](https://github.com/flopsyan/sonorus), den
 selbst gehosteten Mediaplayer. Die App braucht einen laufenden Sonorus-Server.
+Für Filme und Serien auf dem Fernseher gibt es die
+[Android-TV-App](https://github.com/flopsyan/sonorus-androidtv).
 
 <p>
   <img src="docs/screenshots/albums.png" alt="Alben" width="32%">
