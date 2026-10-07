@@ -2,6 +2,7 @@ package org.sonorus.player
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -13,12 +14,15 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import org.sonorus.MainActivity
 import org.sonorus.SonorusApp
+import org.sonorus.data.model.PlayerPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +30,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 
 /**
  * A foreground service is what buys the native client its two real advantages
@@ -43,6 +48,9 @@ import kotlinx.coroutines.launch
  * controller of the same player - what it starts shows up in the app's queue,
  * and what the app plays shows up in the car.
  */
+private val SHUFFLE = SessionCommand("org.sonorus.SHUFFLE", Bundle.EMPTY)
+private val REPEAT = SessionCommand("org.sonorus.REPEAT", Bundle.EMPTY)
+
 @UnstableApi
 class PlaybackService : MediaLibraryService() {
 
@@ -77,7 +85,7 @@ class PlaybackService : MediaLibraryService() {
                     .build()
             )
             .build()
-        followSpokenWord()
+        followPlayer()
     }
 
     /**
@@ -93,19 +101,59 @@ class PlaybackService : MediaLibraryService() {
      * is the only kind of skip a controller outside the app can ask for - the
      * fifteen seconds themselves are the player's own seek increments, set in
      * [PlayerController]. A button in `SLOT_BACK` or `SLOT_FORWARD` replaces the
-     * default one there, so an empty list is what gives music its prev/next back.
+     * default one there, so music keeps prev/next as long as its own buttons stay
+     * out of those two slots.
+     *
+     * Music gets shuffle and repeat instead, in the two slots Android keeps for an
+     * app's own buttons and draws either side of prev / bar / next - the order the
+     * full player has. Session commands rather than ExoPlayer's shuffle, which is
+     * off: the shuffled order is the controller's own.
      */
-    private fun followSpokenWord() {
+    private fun followPlayer() {
         scope.launch {
             app.player.state
-                .map { it.current?.isSpoken == true }
+                .map { Triple(it.current?.isSpoken == true, it.shuffle, it.repeat) }
                 .distinctUntilChanged()
-                .collect { spoken ->
+                .collect { (spoken, shuffle, repeat) ->
                     mediaSession?.setMediaButtonPreferences(
-                        if (spoken) skipButtons else emptyList()
+                        if (spoken) skipButtons else modeButtons(shuffle, repeat)
                     )
                 }
         }
+    }
+
+    private fun modeButtons(shuffle: Boolean, repeat: String) = listOf(
+        CommandButton.Builder(if (shuffle) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF)
+            .setSessionCommand(SHUFFLE)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .setDisplayName("Zufall")
+            .build(),
+        CommandButton.Builder(
+            when (repeat) {
+                "all" -> CommandButton.ICON_REPEAT_ALL
+                "one" -> CommandButton.ICON_REPEAT_ONE
+                else -> CommandButton.ICON_REPEAT_OFF
+            }
+        )
+            .setSessionCommand(REPEAT)
+            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .setDisplayName("Wiederholen")
+            .build(),
+    )
+
+    /**
+     * Onto the account like the app's own switches, or the next start would put the
+     * old mode back. Volume and mute are carried over from the stored account, as in
+     * `AppViewModel.savePlayerPrefs`; without one nothing is written rather than a default.
+     */
+    private fun saveModes() {
+        val s = app.player.state.value
+        val kept = app.library.store.snapshot.account?.prefs?.player ?: return
+        val value = Json.encodeToJsonElement(
+            PlayerPrefs.serializer(),
+            kept.copy(shuffle = s.shuffle, repeat = s.repeat),
+        )
+        scope.launch { runCatching { app.api.setPref("player", value) } }
     }
 
     /** Media3 ships a glyph that says 15, so nothing here has to be drawn. */
@@ -147,6 +195,36 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private inner class LibraryCallback : MediaLibrarySession.Callback {
+
+        // The two mode buttons are session commands, and a controller only gets the
+        // ones it is handed here - the notification included.
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult =
+            MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                        .add(SHUFFLE)
+                        .add(REPEAT)
+                        .build()
+                )
+                .build()
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                SHUFFLE.customAction -> app.player.setShuffle(!app.player.state.value.shuffle)
+                REPEAT.customAction -> app.player.cycleRepeat()
+                else -> return super.onCustomCommand(session, controller, customCommand, args)
+            }
+            saveModes()
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
