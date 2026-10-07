@@ -111,6 +111,8 @@ fun SeekRail(
     buffered: Float = 0f,
     trackColor: Color = SonorusTheme.colors.surface3,
     bufferColor: Color = Color.Transparent,
+    /** False draws the rail and takes no finger. */
+    enabled: Boolean = true,
 ) {
     val colors = SonorusTheme.colors
     // The gesture outlives every recomposition, so it must not keep calling the
@@ -128,7 +130,7 @@ fun SeekRail(
         modifier
             .fillMaxWidth()
             .height(height)
-            .pointerInput(Unit) {
+            .then(if (!enabled) Modifier else Modifier.pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     // Claims the finger, so nothing behind the rail takes the
@@ -153,7 +155,7 @@ fun SeekRail(
                     }
                     scrubTo(null)
                 }
-            },
+            }),
         contentAlignment = if (lineAtTop) Alignment.TopCenter else Alignment.Center,
     ) {
         Box(

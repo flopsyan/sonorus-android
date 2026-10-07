@@ -1,6 +1,27 @@
 package org.sonorus.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.fadeIn
@@ -28,9 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -45,6 +64,7 @@ import org.sonorus.ui.pressable
 import org.sonorus.ui.nowLines
 import org.sonorus.ui.theme.SonorusTheme
 import org.sonorus.ui.toggled
+import org.sonorus.ui.armed
 
 /**
  * The name the bar's artwork and the full player's artwork are known by.
@@ -58,9 +78,13 @@ const val PlayerCoverKey = "player-cover"
 /**
  * The transport at the bottom edge.
  *
- * The seek bar **is** the top edge of the bar, exactly as in the web app -
- * a signature element there, and the reason the progress line sits flush at the
- * top rather than inside the padding.
+ * The progress line **is** the top edge of the bar, exactly as in the web app -
+ * a signature element there, and the reason it sits flush at the top rather than
+ * inside the padding. It only shows: a thumb reaching for the bar landed on it
+ * and moved the song too often, so seeking is the full player's alone.
+ *
+ * A sideways wipe over the title steps to the next or the previous song, the
+ * same gesture the full player's artwork takes.
  *
  * [coverVisible] is false while the full player is open: the artwork is then
  * being drawn *there*, and the bar has to say so rather than draw its own copy
@@ -85,44 +109,41 @@ fun SharedTransitionScope.PlayerBar(
     modifier: Modifier = Modifier,
     onToggle: () -> Unit,
     onNext: () -> Unit,
-    onPrevious: () -> Unit,
+    /** False skips the three-second restart rule, which a wipe means to. */
+    onPrevious: (restartFirst: Boolean) -> Unit,
     /** A jump of this many milliseconds from where the playhead is. */
     onSkip: (Long) -> Unit,
     onExpand: () -> Unit,
-    onSeek: (Float) -> Unit,
 ) {
     val colors = SonorusTheme.colors
     val haptics = LocalHapticFeedback.current
-    // Where the rail is being held, if it is. While a finger is on it the bar
-    // draws that instead of the playhead - the song only follows on release.
-    var scrub by remember { mutableStateOf<Float?>(null) }
-    val reported = scrub
-        ?: if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    val fraction = rememberPlayhead(reported, held = scrub != null, trackKey = track.id)
+    val reported = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    val fraction = rememberPlayhead(reported, held = false, trackKey = track.id)
+    // How far the title is wiped sideways. Zero unless a wipe is running.
+    val wipe = remember { Animatable(0f) }
+    val next by rememberUpdatedState(onNext)
+    val previous by rememberUpdatedState(onPrevious)
 
     Column(
         modifier
             .fillMaxWidth()
             .background(colors.surface)
+            // The strip the line sits in opens the player like the rest of the bar.
+            .pressable(dip = 0.99f, onClick = onExpand)
     ) {
-        // The rail is the top edge and can be grabbed anywhere along it. The
-        // line stays the hairline it has always been; what grew is the strip
-        // around it, which reaches down into the bar's own top padding so a
-        // thumb has something to hit. No knob up here: on the very edge of the
-        // bar it would be cut in half at the start of a track.
         SeekRail(
             fraction = fraction,
-            onScrub = { scrub = it },
-            onSeek = onSeek,
+            onScrub = {},
+            onSeek = {},
             height = 14.dp,
             thickness = 3.dp,
             lineAtTop = true,
+            enabled = false,
         )
 
         Row(
             Modifier
                 .fillMaxWidth()
-                .pressable(dip = 0.99f, onClick = onExpand)
                 .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -138,7 +159,21 @@ fun SharedTransitionScope.PlayerBar(
                 RoundedCornerShape(6.dp),
                 track.title,
             )
-            Column(Modifier.weight(1f)) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clipToBounds()
+                    .pointerInput(Unit) {
+                        titleWipe(
+                            wipe = wipe,
+                            onArmed = { haptics.armed() },
+                            onNext = { next() },
+                            onPrevious = { previous(false) },
+                        )
+                    }
+                    .offset { IntOffset(wipe.value.roundToInt(), 0) }
+                    .graphicsLayer { alpha = 1f - 0.7f * (abs(wipe.value) / size.width).coerceIn(0f, 1f) }
+            ) {
                 // A book names its chapter and the book where a song names its
                 // title and its interpret - see [nowLines].
                 val lines = nowLines(track, chapter)
@@ -176,7 +211,7 @@ fun SharedTransitionScope.PlayerBar(
                     tint = colors.textDim,
                 )
             } else {
-                IconButton(onClick = onPrevious) {
+                IconButton(onClick = { onPrevious(true) }) {
                     Icon(Icons.Filled.SkipPrevious, "Zurück", tint = colors.textDim)
                 }
             }
@@ -200,6 +235,59 @@ fun SharedTransitionScope.PlayerBar(
                     Icon(Icons.Filled.SkipNext, "Weiter", tint = colors.textDim)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Wipe the title sideways for the next or the previous song, as on the full
+ * player's artwork: left is forward, a third of the width arms it, and a wipe
+ * that stops short slides back. Only a sideways drag is taken, so a tap still
+ * reaches the bar and opens the player.
+ */
+private suspend fun PointerInputScope.titleWipe(
+    wipe: Animatable<Float, AnimationVector1D>,
+    onArmed: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+) = coroutineScope {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        var dx = 0f
+        val start = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+            change.consume()
+            dx = over
+        } ?: return@awaitEachGesture
+        val width = size.width.toFloat()
+        val skipAfter = width / 3f
+        var armed = false
+        launch { wipe.snapTo(dx) }
+        val ended = horizontalDrag(start.id) { change ->
+            dx += change.positionChange().x
+            change.consume()
+            launch { wipe.snapTo(dx) }
+            val far = abs(dx) >= skipAfter
+            if (far != armed) {
+                armed = far
+                if (far) onArmed()
+            }
+        }
+        val step = when {
+            !ended -> 0
+            dx <= -skipAfter -> 1
+            dx >= skipAfter -> -1
+            else -> 0
+        }
+        launch {
+            if (step == 0) {
+                wipe.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                return@launch
+            }
+            // Out the way it was wiped, then the new title comes in from the other side.
+            wipe.animateTo(-step * width, tween(Motion.Quick))
+            if (step > 0) onNext() else onPrevious()
+            wipe.snapTo(step * width)
+            wipe.animateTo(0f, tween(Motion.Standard, easing = Motion.Decelerate))
         }
     }
 }
