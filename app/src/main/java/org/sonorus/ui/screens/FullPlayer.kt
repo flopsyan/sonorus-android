@@ -1305,10 +1305,9 @@ private fun StreamQualitySheet(vm: AppViewModel, track: Track, onDismiss: () -> 
     val exception by vm.losslessException.collectAsState()
     var asking by remember { mutableStateOf(false) }
 
-    // A downloaded song is not streamed, so the list of streaming qualities has
-    // nothing to say about it. What it plays in was decided when it was
-    // fetched - and the one thing still worth asking for is the original, this
-    // once, which is the same exception the WLAN rule uses.
+    // A downloaded song is not streamed: it plays in what it was fetched at, and
+    // the one thing still worth asking for is the original, this once - the same
+    // exception the WLAN rule uses.
     val here = remember(track.id, exception) { vm.downloadedQuality(track) }
     val streamingThisOne = exception == track.id
 
@@ -1348,33 +1347,24 @@ private fun StreamQualitySheet(vm: AppViewModel, track: Track, onDismiss: () -> 
                 Modifier.padding(horizontal = 20.dp),
             )
             Spacer(Modifier.height(10.dp))
-            if (here != null && !streamingThisOne) {
+            if (here == Quality.ORIGINAL) {
                 Text(
                     "Läuft vom Gerät - ${here.label}.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = colors.text,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
                 )
-                if (here != Quality.ORIGINAL) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .pressable(onClick = { asking = true })
-                            .padding(horizontal = 20.dp, vertical = 14.dp)
-                    ) {
-                        Text(
-                            "Einmalig in ${shortCodec(track.codec)} vom Server",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = colors.accent,
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            "Nur dieser Song. Der nächste läuft wieder vom Gerät.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.textFaint,
-                        )
-                    }
-                }
+            } else if (here != null) {
+                // The list a streamed song gets, with what plays ticked. The original
+                // goes through the dialog above, which says it comes from the server.
+                QualityOptions(
+                    selected = if (streamingThisOne) Quality.ORIGINAL else here,
+                    losslessAllowed = allowed,
+                    originalLabel = shortCodec(track.codec),
+                    onPick = { quality ->
+                        if (quality == Quality.ORIGINAL && !streamingThisOne) asking = true else onDismiss()
+                    },
+                )
             } else if (onlyFormat != null) {
                 Text(
                     "$onlyFormat - wird nicht umgewandelt.",
