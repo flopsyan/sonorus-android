@@ -466,6 +466,10 @@ class PlayerController(
      */
     private var persisting = false
 
+    /** [persisting] for the screens: the full player may only close for an empty queue after this. */
+    private val _queueRestored = MutableStateFlow(false)
+    val queueRestored: StateFlow<Boolean> = _queueRestored.asStateFlow()
+
     /** Where the playhead stood when it was last written down. */
     private var savedPositionMs = 0L
 
@@ -551,6 +555,7 @@ class PlayerController(
             // Even a restore that found nothing has had its turn, or nothing
             // played afterwards would ever be written down either.
             persisting = true
+            _queueRestored.value = true
         }
     }
 

@@ -85,10 +85,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -252,8 +255,9 @@ fun SharedTransitionScope.FullPlayer(
     // rating, playlists, the download of one part, shuffle and repeat. And the
     // skips mean something different - a chapter is not a track.
     val spoken = track.isSpoken
-    var showQueue by remember { mutableStateOf(false) }
-    var showLyrics by remember { mutableStateOf(false) }
+    // Saveable for the same reason as the player's own open state, see Shell.
+    var showQueue by rememberSaveable { mutableStateOf(false) }
+    var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showOffset by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
@@ -271,12 +275,24 @@ fun SharedTransitionScope.FullPlayer(
     // and the offset card are part of this screen, so they have to be peeled off
     // by hand - innermost first. Without this, opening the words and pressing
     // back dropped straight out to the library, which is not where you were.
-    BackHandler {
-        when {
-            showOffset -> showOffset = false
-            showQueue -> showQueue = false
-            showLyrics -> showLyrics = false
-            else -> onClose()
+    //
+    // The newest handler gets Back, and the pages' one is registered while the
+    // scaffold lays out. Brought back in one frame with them after Android rebuilt
+    // the activity, the player's was older and Back paged the library behind it.
+    // So it is registered once more after the first frame.
+    var settled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        settled = true
+    }
+    key(settled) {
+        BackHandler {
+            when {
+                showOffset -> showOffset = false
+                showQueue -> showQueue = false
+                showLyrics -> showLyrics = false
+                else -> onClose()
+            }
         }
     }
 
@@ -437,8 +453,9 @@ fun SharedTransitionScope.FullPlayer(
                                     sharedContentState = rememberSharedContentState(PlayerCoverKey),
                                     animatedVisibilityScope = visibilityScope,
                                 )
-                                .fillMaxWidth()
-                                .aspectRatio(1f)
+                                // Height first: in a split screen the box is lower
+                                // than wide, and a full-width square ran over the title.
+                                .aspectRatio(1f, matchHeightConstraintsFirst = true)
                                 // The artwork follows the finger, so a wipe says
                                 // what it is about to do before it is let go.
                                 .offset { IntOffset(swipe.value.toInt(), 0) }

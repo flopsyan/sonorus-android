@@ -109,7 +109,9 @@ class AppViewModel : ViewModel() {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private val _phase = MutableStateFlow<AppPhase>(AppPhase.Starting)
+    // A screen Android rebuilt while the music played on starts from what the last one
+    // showed, not from a spinner: the process and the player never went away.
+    private val _phase = MutableStateFlow(lastReady?.let { AppPhase.Ready(it) } ?: AppPhase.Starting)
     val phase: StateFlow<AppPhase> = _phase.asStateFlow()
 
     private val _toast = MutableStateFlow<Toast?>(null)
@@ -122,6 +124,7 @@ class AppViewModel : ViewModel() {
     val bootstrap: Bootstrap? get() = (_phase.value as? AppPhase.Ready)?.bootstrap
 
     init {
+        viewModelScope.launch { _phase.collect { lastReady = (it as? AppPhase.Ready)?.bootstrap } }
         start()
         // A finished play changes the star playlists and the home page, so the
         // shell reloads what it shows in the sidebar.
@@ -348,7 +351,9 @@ class AppViewModel : ViewModel() {
         // the two only made every song quiet with no control in the app to undo
         // it. See [org.sonorus.player.PlayerController].
         val p = data.prefs.player
-        player.setShuffle(p.shuffle)
+        // Only a change: setting the same mode again re-deals a shuffled queue, and this runs
+        // on every start and every time the server is found again.
+        if (player.state.value.shuffle != p.shuffle) player.setShuffle(p.shuffle)
         player.setRepeat(p.repeat)
         // And the queue itself, which does not: it is a fact about this phone.
         // After the modes on purpose - shuffle has to be the one it was left on
@@ -1461,5 +1466,8 @@ class AppViewModel : ViewModel() {
 
     private companion object {
         const val OFFLINE_TOAST = "Offline - du hörst deine Downloads."
+
+        /** What the last view model showed, kept for the life of the process like the player. */
+        @Volatile var lastReady: Bootstrap? = null
     }
 }

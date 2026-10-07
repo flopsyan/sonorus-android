@@ -89,6 +89,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -157,7 +158,9 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     val playerState by vm.player.state.collectAsState()
     val toast by vm.toast.collectAsState()
     val offline by vm.offline.collectAsState()
-    var expanded by remember { mutableStateOf(false) }
+    // Saveable, so the player is still open after Android rebuilt the activity in the
+    // background, and after the split-screen strip took the shell's place for a while.
+    var expanded by rememberSaveable { mutableStateOf(false) }
     var listsOpen by remember { mutableStateOf(false) }
     var spokenOpen by remember { mutableStateOf(false) }
     // What the bar keeps drawing while it folds away - see the bar itself.
@@ -165,9 +168,11 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
     playerState.current?.let { lastTrack = it }
 
     // Clearing the queue with the full player open would leave it standing there
-    // with nothing in it, so it closes with the last song.
-    LaunchedEffect(playerState.current) {
-        if (playerState.current == null) expanded = false
+    // with nothing in it, so it closes with the last song. Not before the stored
+    // queue is back, though: after a cold start the player is empty for a moment.
+    val queueRestored by vm.player.queueRestored.collectAsState()
+    LaunchedEffect(playerState.current, queueRestored) {
+        if (queueRestored && playerState.current == null) expanded = false
     }
 
     LaunchedEffect(toast) {
