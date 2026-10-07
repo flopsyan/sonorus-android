@@ -517,9 +517,23 @@ class AppViewModel : ViewModel() {
         )
     }
 
-    /** Where a downloaded song is still held besides by hand, as "Album „X“". */
+    /**
+     * Where a downloaded song is still held besides by hand, as "Album „X“". A download
+     * of several star levels or genres names only the ones this song is in: all six
+     * levels at once said nothing about where it hangs.
+     */
     fun downloadHolders(track: Track): List<String> =
-        downloads.store.holdersOf(track.id).map(::holderLabel)
+        downloads.store.holdersOf(track.id).map { c ->
+            when {
+                c.selection.size < 2 -> holderLabel(c)
+                c.kind == "stars" -> holderLabel(c.copy(name = starLabel(starsOf(track))))
+                c.kind == "genre" -> {
+                    val own = c.name.split(", ").filter { it in track.genres }
+                    holderLabel(if (own.isEmpty()) c else c.copy(name = own.joinToString(", ")))
+                }
+                else -> holderLabel(c)
+            }
+        }.distinct()
 
     /**
      * The download of what is playing, given back as a whole.
