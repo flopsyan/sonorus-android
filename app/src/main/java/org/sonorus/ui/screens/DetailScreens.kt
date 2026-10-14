@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Stop
@@ -250,6 +252,21 @@ fun DetailHead(
                 }
             }
         }
+    }
+}
+
+/** The heart on a detail page. [kind] is the collection's path, as the API names it. */
+@Composable
+fun FavoriteButton(vm: AppViewModel, kind: String, id: Int, initial: Boolean) {
+    val colors = SonorusTheme.colors
+    var on by remember(kind, id, initial) { mutableStateOf(initial) }
+    IconButton(onClick = { vm.setFavorite(kind, id, !on) { on = it } }, modifier = Modifier.size(44.dp)) {
+        Icon(
+            if (on) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+            if (on) "Aus Favoriten entfernen" else "Zu Favoriten",
+            tint = if (on) colors.accent else colors.textDim,
+            modifier = Modifier.size(24.dp),
+        )
     }
 }
 
@@ -524,6 +541,7 @@ fun AlbumScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                     shuffle = shuffle.value,
                     onToggleShuffle = { shuffle.value = !shuffle.value },
                     onEdit = { editing = true },
+                    extra = { FavoriteButton(vm, "albums", album.id, album.favorite) },
                     // Kept in step with the server: a song that appears on the
                     // record after a scan is fetched, one that goes is let go.
                     download = {
@@ -589,6 +607,7 @@ fun ArtistScreen(vm: AppViewModel, id: Int, onGo: (String) -> Unit) {
                         shuffle = shuffle.value,
                         onToggleShuffle = { shuffle.value = !shuffle.value },
                         onEdit = { editing = true },
+                        extra = { FavoriteButton(vm, "artists", artist.id, artist.favorite) },
                         // Kept in step like an album: a song that appears under
                         // this artist after a scan is fetched, one that goes is
                         // let go. The list is the same one the button gets, so

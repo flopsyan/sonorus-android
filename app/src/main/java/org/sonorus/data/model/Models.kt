@@ -106,6 +106,8 @@ data class Album(
      */
     val genres: List<String> = emptyList(),
     val tracks: List<Track> = emptyList(),
+    /** Per account; a favourite also stands above the full list. */
+    val favorite: Boolean = false,
 )
 
 /**
@@ -163,6 +165,7 @@ data class ArtistSummary(
     val covers: List<String> = emptyList(),
     val trackCount: Int = 0,
     val albumCount: Int = 0,
+    val favorite: Boolean = false,
 )
 
 @Serializable
@@ -177,6 +180,7 @@ data class Artist(
     val albums: List<Album> = emptyList(),
     val tracks: List<Track> = emptyList(),
     val singles: List<Track> = emptyList(),
+    val favorite: Boolean = false,
 )
 
 @Serializable
@@ -191,6 +195,7 @@ data class Genre(
     val covers: List<String> = emptyList(),
     val cover: String? = null,
     val trackCount: Int = 0,
+    val favorite: Boolean = false,
 )
 
 /**
@@ -204,6 +209,8 @@ data class GenreSelection(
     val name: String = "",
     val names: List<String> = emptyList(),
     val tracks: List<Track> = emptyList(),
+    /** Only ever true for a single genre; a combined selection is no item of its own. */
+    val favorite: Boolean = false,
 )
 
 @Serializable
@@ -449,6 +456,9 @@ data class PlaylistResponse(
 
 @Serializable
 data class TreeResponse(val tree: PlaylistTree = PlaylistTree())
+
+@Serializable
+data class FavoriteResponse(val favorite: Boolean = false)
 
 @Serializable
 data class RatingResponse(

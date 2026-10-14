@@ -19,7 +19,12 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridItemScope
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -384,13 +389,14 @@ private fun AlbumRows(
     labelOf: (Album) -> String,
 ) {
     val rows = rememberLazyListState()
+    val favorites = albums.filter { it.favorite }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = rows,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            items(albums, key = { it.id }) { album ->
+            withFavorites(albums, favorites, "Alle Alben", { it.id }) { album ->
                 CollectionRow(
                     title = album.title,
                     subtitle = listOfNotNull(
@@ -401,7 +407,7 @@ private fun AlbumRows(
                 ) { onGo(Routes.album(album.id)) }
             }
         }
-        ListScroller(rows, albums.size) { labelOf(albums[it]) }
+        ListScroller(rows, albums.size, favoritesOffset(favorites)) { labelOf(albums[it]) }
     }
 }
 
@@ -410,15 +416,61 @@ private fun AlbumRows(
 private fun BoxScope.ListScroller(
     state: LazyListState,
     count: Int,
+    /** Items above the full list (the favourites), which the scroller does not count. */
+    offset: Int = 0,
     labelAt: (Int) -> String,
 ) {
     FastScroller(
         itemCount = count,
-        firstVisible = state.firstVisibleItemIndex,
+        firstVisible = (state.firstVisibleItemIndex - offset).coerceAtLeast(0),
         visibleCount = state.layoutInfo.visibleItemsInfo.size.coerceAtLeast(1),
         labelAt = labelAt,
-        onScrollTo = { state.scrollToItem(it) },
+        onScrollTo = { state.scrollToItem(it + offset) },
     )
+}
+
+// --- Favourites -------------------------------------------------------------
+// A favourite stands under its own label above the full list and stays in it too.
+
+/** How far the full list is pushed down, so the fast scroller can step over the favourites. */
+private fun favoritesOffset(favorites: List<*>) = if (favorites.isEmpty()) 0 else favorites.size + 2
+
+private fun <T> LazyGridScope.withFavorites(
+    all: List<T>,
+    favorites: List<T>,
+    allLabel: String,
+    id: (T) -> Int,
+    entry: @Composable LazyGridItemScope.(T) -> Unit,
+) {
+    if (favorites.isNotEmpty()) {
+        item(key = "fav-head", span = { GridItemSpan(maxLineSpan) }) {
+            RackLabelText("Favoriten", Modifier.padding(horizontal = 8.dp, vertical = 8.dp))
+        }
+        items(favorites, key = { "fav-${id(it)}" }) { entry(it) }
+        item(key = "all-head", span = { GridItemSpan(maxLineSpan) }) {
+            RackLabelText(allLabel, Modifier.padding(horizontal = 8.dp, vertical = 8.dp))
+        }
+    }
+    items(all, key = { id(it) }) { entry(it) }
+}
+
+private fun <T> LazyListScope.withFavorites(
+    all: List<T>,
+    favorites: List<T>,
+    allLabel: String,
+    id: (T) -> Int,
+    entry: @Composable LazyItemScope.(T) -> Unit,
+) {
+    if (favorites.isNotEmpty()) {
+        item(key = "fav-head") {
+            RackLabelText("Favoriten", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        }
+        items(favorites, key = { "fav-${id(it)}" }) { entry(it) }
+        item(key = "all-head") {
+            RackLabelText(allLabel, Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        }
+    }
+    items(all, key = { id(it) }) { entry(it) }
 }
 
 @Composable
@@ -580,11 +632,13 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             onPick = { _, _ -> },
         )
         if (artists.isEmpty()) return@Column EmptyNote("Nichts gefunden.")
+        val favorites = artists.filter { it.favorite }
+        val offset = favoritesOffset(favorites)
         Box(Modifier.fillMaxSize()) {
         if (view == "list") {
             LazyColumn(state = rows, modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp)) {
-                items(artists, key = { it.id }) { artist ->
+                withFavorites(artists, favorites, "Alle Interpreten", { it.id }) { artist ->
                     CollectionRow(
                         title = artist.name,
                         subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
@@ -594,7 +648,7 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                     ) { onGo(Routes.artist(artist.id)) }
                 }
             }
-            ListScroller(rows, artists.size) { scrollLabel(artists[it].name) }
+            ListScroller(rows, artists.size, offset) { scrollLabel(artists[it].name) }
         } else {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
@@ -602,7 +656,7 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(8.dp, 8.dp, 8.dp, 24.dp),
         ) {
-            items(artists, key = { it.id }) { artist ->
+            withFavorites(artists, favorites, "Alle Interpreten", { it.id }) { artist ->
                 MediaCard(
                     title = artist.name,
                     subtitle = Fmt.plural(artist.trackCount, "Song", "Songs"),
@@ -614,7 +668,7 @@ fun ArtistsScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 ) { onGo(Routes.artist(artist.id)) }
             }
         }
-        GridScroller(grid, artists.size) { scrollLabel(artists[it].name) }
+        GridScroller(grid, artists.size, offset) { scrollLabel(artists[it].name) }
         }
         }
         }
@@ -688,6 +742,7 @@ fun AlbumGrid(
 ) {
     if (albums.isEmpty()) return EmptyNote("Noch keine Alben.")
     val grid = rememberLazyGridState()
+    val favorites = albums.filter { it.favorite }
     Box(Modifier.fillMaxSize()) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(150.dp),
@@ -695,7 +750,7 @@ fun AlbumGrid(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(8.dp, 8.dp, 8.dp, 24.dp),
     ) {
-        items(albums, key = { it.id }) { album ->
+        withFavorites(albums, favorites, "Alle Alben", { it.id }) { album ->
             MediaCard(
                 title = album.title,
                 subtitle = listOfNotNull(
@@ -712,7 +767,7 @@ fun AlbumGrid(
             ) { onGo(Routes.album(album.id)) }
         }
     }
-    GridScroller(grid, albums.size) { labelOf(albums[it]) }
+    GridScroller(grid, albums.size, favoritesOffset(favorites)) { labelOf(albums[it]) }
     }
 }
 
@@ -730,6 +785,7 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             )
         }
         val grid = rememberLazyGridState()
+        val favorites = data.genres.filter { it.favorite }
         Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
@@ -737,7 +793,7 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(8.dp, 8.dp, 8.dp, 24.dp),
         ) {
-            items(data.genres, key = { it.id }) { genre ->
+            withFavorites(data.genres, favorites, "Alle Genres", { it.id }) { genre ->
                 MediaCard(
                     title = genre.name,
                     subtitle = Fmt.plural(genre.trackCount, "Song", "Songs"),
@@ -748,7 +804,7 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
                 ) { onGo(Routes.genre(listOf(genre.id))) }
             }
         }
-        GridScroller(grid, data.genres.size) { scrollLabel(data.genres[it].name) }
+        GridScroller(grid, data.genres.size, favoritesOffset(favorites)) { scrollLabel(data.genres[it].name) }
         }
     }
 }
@@ -763,14 +819,16 @@ fun GenresScreen(vm: AppViewModel, onGo: (String) -> Unit) {
 private fun BoxScope.GridScroller(
     state: LazyGridState,
     count: Int,
+    /** Items above the full list (the favourites), which the scroller does not count. */
+    offset: Int = 0,
     labelAt: (Int) -> String,
 ) {
     FastScroller(
         itemCount = count,
-        firstVisible = state.firstVisibleItemIndex,
+        firstVisible = (state.firstVisibleItemIndex - offset).coerceAtLeast(0),
         visibleCount = state.layoutInfo.visibleItemsInfo.size.coerceAtLeast(1),
         labelAt = labelAt,
-        onScrollTo = { state.scrollToItem(it) },
+        onScrollTo = { state.scrollToItem(it + offset) },
     )
 }
 
@@ -816,6 +874,9 @@ fun GenreScreen(vm: AppViewModel, ids: List<Int>, onGo: (String) -> Unit) {
                     },
                     shuffle = shuffle.value,
                     onToggleShuffle = { shuffle.value = !shuffle.value },
+                    extra = if (ids.size == 1) {
+                        { FavoriteButton(vm, "genres", ids[0], data.genre.favorite) }
+                    } else null,
                     // A downloaded genre is kept in step: a song that is
                     // tagged into it later is fetched with the rest.
                     download = {

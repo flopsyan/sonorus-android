@@ -1313,6 +1313,19 @@ class AppViewModel : ViewModel() {
         withTree(then) { api.renamePlaylist(id, name) }
     }
 
+    /** Online only: a favourite changes nothing that plays, so it is not worth a pending write. */
+    fun setFavorite(kind: String, id: Int, favorite: Boolean, then: (Boolean) -> Unit) {
+        if (needsServer()) return
+        viewModelScope.launch {
+            runCatching { api.setFavorite(kind, id, favorite) }
+                .onSuccess {
+                    then(it.favorite)
+                    say(if (it.favorite) "Zu Favoriten hinzugefügt." else "Aus Favoriten entfernt.")
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
     fun pinPlaylist(id: Int, pinned: Boolean, then: () -> Unit = {}) =
         withTree(then) { api.pinPlaylist(id, pinned) }
 

@@ -306,6 +306,10 @@ class SonorusApi(private val session: Session) {
 
     // --- Ratings and plays ----------------------------------------------------
 
+    /** [kind] is the collection's path: artists, albums or genres. */
+    suspend fun setFavorite(kind: String, id: Int, favorite: Boolean): FavoriteResponse =
+        put("/api/$kind/$id/favorite", buildJsonObject { put("favorite", favorite) })
+
     suspend fun rate(trackId: Int, stars: Int): RatingResponse =
         put("/api/tracks/$trackId/rating", buildJsonObject { put("stars", stars) })
 
