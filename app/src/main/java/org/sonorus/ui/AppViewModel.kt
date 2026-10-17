@@ -330,6 +330,7 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             app.settings.downloadsOnly = false
             player.clearQueue()
+            ratings.clear()
             api.logout()
             lib.store.forgetAccount()
             _phase.value = AppPhase.NeedsLogin()
@@ -940,22 +941,6 @@ class AppViewModel : ViewModel() {
     // --- Ratings --------------------------------------------------------------
 
     /**
-     * The ratings handed out on this phone since the screens fetched their data.
-     *
-     * A [Track] is one immutable row of a server response, and nothing on a
-     * screen refetches after a rating - so without this the star the user just
-     * gave would be accepted by the server and still be drawn the old way, which
-     * looks exactly like nothing happened. Refetching the whole list instead is
-     * the wrong trade on a list of several hundred songs, and it would not help
-     * the full player at all: its track comes from the playback queue, not from
-     * a screen's load.
-     *
-     * So every place that draws a rating asks [starsOf] instead of reading the
-     * row, and the map is what makes the answer current.
-     */
-    private val ratings = mutableStateMapOf<Int, Int>()
-
-    /**
      * What a rating looks like while the server has not confirmed it: the value
      * to *draw*, which is not always the value being written. Clearing a rating
      * keeps its stars on screen, pale, until the server agrees - a row that
@@ -1496,5 +1481,25 @@ class AppViewModel : ViewModel() {
 
         /** What the last view model showed, kept for the life of the process like the player. */
         @Volatile var lastReady: Bootstrap? = null
+
+        /**
+         * The ratings handed out on this phone since the screens fetched their data.
+         *
+         * A [Track] is one immutable row of a server response, and nothing on a
+         * screen refetches after a rating - so without this the star the user just
+         * gave would be accepted by the server and still be drawn the old way, which
+         * looks exactly like nothing happened. Refetching the whole list instead is
+         * the wrong trade on a list of several hundred songs, and it would not help
+         * the full player at all: its track comes from the playback queue, not from
+         * a screen's load.
+         *
+         * So every place that draws a rating asks [starsOf] instead of reading the
+         * row, and the map is what makes the answer current.
+         *
+         * Process-scoped like the queue it corrects: Android rebuilds the activity
+         * behind a locked screen while the music plays on, and a map that went with
+         * the old view model left the queue's unrated row to draw empty stars.
+         */
+        val ratings = mutableStateMapOf<Int, Int>()
     }
 }
