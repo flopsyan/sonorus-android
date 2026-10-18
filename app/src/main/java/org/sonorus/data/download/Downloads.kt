@@ -332,7 +332,7 @@ class Downloads(
      */
     fun removeCollection(collection: OfflineCollection): Int {
         val going = collection.trackIds.filter { !store.isHeld(it, exceptKey = collection.key) }
-        for (id in going) cancel(id)
+        for (id in going) stop(id)
         store.forgetCollection(collection.key)
         scope.launch {
             for (id in going) store.remove(id)
@@ -349,7 +349,7 @@ class Downloads(
     fun removeLoose(trackIds: List<Int>): Int {
         val going = store.dropManual(trackIds)
         val removed = going.count { store.isDownloaded(it) }
-        for (id in going) cancel(id)
+        for (id in going) stop(id)
         scope.launch {
             for (id in going) store.remove(id)
             publish()
@@ -359,7 +359,7 @@ class Downloads(
 
     /** Takes a song back off the phone. */
     override fun remove(trackId: Int) {
-        cancel(trackId)
+        stop(trackId)
         scope.launch {
             store.remove(trackId)
             publish()
@@ -367,14 +367,13 @@ class Downloads(
     }
 
     fun removeAll(trackIds: List<Int>) {
-        for (id in trackIds) cancel(id)
+        for (id in trackIds) stop(id)
         scope.launch {
             for (id in trackIds) store.remove(id)
             publish()
         }
     }
 
-    /** Stops a download that has not finished. What is written stays, and resumes. */
     /**
      * Stop fetching this song, and stop meaning it.
      *
@@ -385,6 +384,18 @@ class Downloads(
      * `add` does, so this takes nothing back permanently.
      */
     fun cancel(trackId: Int) {
+        store.exclude(listOf(trackId))
+        stop(trackId)
+    }
+
+    /**
+     * Stops a download that has not finished. What is written stays, and resumes.
+     *
+     * No exclusion: letting a song go is not refusing it. A song a reconcile drops
+     * because its rating left a downloaded star list was excluded here, and rated
+     * back in it was never fetched again.
+     */
+    private fun stop(trackId: Int) {
         synchronized(pending) {
             pending.removeAll { it.id == trackId }
             failed.remove(trackId)
@@ -393,7 +404,6 @@ class Downloads(
             current?.cancel()
             call?.cancel()
         }
-        store.exclude(listOf(trackId))
         // The last one out turns the light off: with nothing waiting there is
         // nothing for the service to say, and it may be waiting rather than
         // running - in which case no worker will end and stop it.
