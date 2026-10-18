@@ -376,6 +376,7 @@ class AppViewModel : ViewModel() {
         viewModelScope.launch {
             val sent = runCatching { writeSync.flush() }.getOrNull()
             countWaiting()
+            settleDrafts()
             if (sent != null && sent.sent > 0) refreshQuietly()
             if (sent != null && sent.dropped > 0) {
                 say(
@@ -952,6 +953,16 @@ class AppViewModel : ViewModel() {
      */
     private val drafts = mutableStateMapOf<Int, Int>().apply {
         for (write in pending.writes) if (write.kind == "rating") put(write.trackId, write.stars)
+    }
+
+    /**
+     * Drafts whose write the queue has sent since: the server has them, so they are drawn in
+     * full. Only the direct path in [rate] cleared its draft, so a rating that went up with a
+     * flush stayed pale until the activity was rebuilt.
+     */
+    private fun settleDrafts() {
+        val waiting = pending.writes.filter { it.kind == "rating" }.map { it.trackId }.toSet()
+        for (id in drafts.keys.toList()) if (id !in waiting) drafts.remove(id)
     }
 
     /** The rating to draw for [track]: what this phone last set, else the row's. */
