@@ -327,7 +327,8 @@ class Library(
         else reachableAfter { api.shuffle(limit, unrated) }
 
     suspend fun lyrics(id: Int): LyricsResponse =
-        if (offline.value) Offline.lyrics(store.snapshot, id) else reachableAfter { api.lyrics(id) }
+        if (offline.value) Offline.lyrics(store.snapshot, id)
+        else reachableAfter { api.lyrics(id) }.also { store.applyLyrics(id, it.lyrics) }
 
     /** Named songs in the order they were asked for - how a queue is rebuilt. */
     suspend fun tracksByIds(ids: List<Int>): TracksResponse =

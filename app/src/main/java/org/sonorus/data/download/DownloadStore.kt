@@ -4,6 +4,7 @@ import org.sonorus.data.model.Bootstrap
 import org.sonorus.data.model.Cue
 import org.sonorus.data.model.Ebook
 import org.sonorus.data.model.Genre
+import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Track
 import org.sonorus.data.restoreReserved
@@ -469,6 +470,18 @@ class DownloadStore(private val root: File) {
         s.copy(tracks = s.tracks.map {
             if (it.track.id == trackId) it.copy(track = it.track.copy(stars = stars)) else it
         })
+    }
+
+    /**
+     * The words the server sends now, written onto the row this phone holds. The copy
+     * taken with the download is otherwise kept for good, also after the server has
+     * repaired them (lyrics a tagger had run onto one line) or found a `.lrc` since.
+     */
+    fun applyLyrics(trackId: Int, lyrics: Lyrics) = update { s ->
+        val entry = s.tracks.firstOrNull { it.track.id == trackId } ?: return@update s
+        val next = lyrics.takeIf { it.text.isNotEmpty() || it.lines.isNotEmpty() }
+        if (entry.lyrics == next) return@update s
+        s.copy(tracks = s.tracks.map { if (it.track.id == trackId) it.copy(lyrics = next) else it })
     }
 
     /**

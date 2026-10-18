@@ -1,6 +1,8 @@
 package org.sonorus.data.download
 
 import org.sonorus.data.model.Bootstrap
+import org.sonorus.data.model.Lyrics
+import org.sonorus.data.model.LyricsLine
 import org.sonorus.data.model.Track
 import org.sonorus.data.model.User
 import org.junit.After
@@ -45,6 +47,21 @@ class DownloadStoreTest {
         val file = store.targetOf(id, extension)
         file.writeBytes(ByteArray(bytes))
         return DownloadedTrack(track = track(id), file = file.name, bytes = file.length())
+    }
+
+    @Test
+    fun `lyrics repaired on the server replace the copy taken with the download`() {
+        val broken = Lyrics(text = "to men[00:20.59] As I", lines = listOf(LyricsLine(16.33, "to men[00:20.59] As I")), synced = true)
+        val fixed = Lyrics(text = "to me\nAs I", lines = listOf(LyricsLine(16.33, "to me"), LyricsLine(20.59, "As I")), synced = true)
+        store.put(store(1).copy(lyrics = broken))
+        store.put(store(2))
+
+        store.applyLyrics(1, fixed)
+        store.applyLyrics(2, Lyrics())
+
+        val reread = DownloadStore(root).snapshot.tracks.associateBy { it.track.id }
+        assertEquals(fixed, reread.getValue(1).lyrics)
+        assertNull("no words stays no words", reread.getValue(2).lyrics)
     }
 
     @Test
