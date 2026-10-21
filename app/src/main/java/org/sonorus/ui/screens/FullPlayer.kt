@@ -49,6 +49,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
@@ -71,6 +72,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -100,6 +102,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -259,6 +262,9 @@ fun SharedTransitionScope.FullPlayer(
     var showQueue by rememberSaveable { mutableStateOf(false) }
     var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showOffset by remember { mutableStateOf(false) }
+    // The song the verdict sheet was opened for: the track can end under the sheet,
+    // and the verdict must not land on the next one.
+    var reviewing by remember { mutableStateOf<Int?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
     var showStreamQuality by remember { mutableStateOf(false) }
@@ -893,6 +899,13 @@ fun SharedTransitionScope.FullPlayer(
                         }
                     }
                     Spacer(Modifier.weight(1f))
+                    // Between the quality chip and the queue: only words from a .lrc
+                    // nobody has judged yet, and only while they are up.
+                    if (showLyrics && lyrics.reviewable) {
+                        IconButton(onClick = { reviewing = track.id }) {
+                            Icon(Icons.Outlined.CheckCircle, "Passt der Songtext?", tint = colors.textDim)
+                        }
+                    }
                     IconButton(onClick = {
                         showQueue = !showQueue
                         if (showQueue) {
@@ -925,6 +938,16 @@ fun SharedTransitionScope.FullPlayer(
 
     if (showStreamQuality) {
         StreamQualitySheet(vm, track, onDismiss = { showStreamQuality = false })
+    }
+
+    reviewing?.let { trackId ->
+        LyricsReviewSheet(
+            onPick = { fits ->
+                reviewing = null
+                vm.reviewLyrics(trackId, fits)
+            },
+            onDismiss = { reviewing = null },
+        )
     }
 
     if (showQuality) {
@@ -1282,6 +1305,43 @@ private fun QualitySheet(vm: AppViewModel, onDismiss: () -> Unit) {
                 selected = download,
                 onPick = { vm.setDownloadQuality(it) },
             )
+        }
+    }
+}
+
+/** The two verdicts on words from a .lrc, each row saying what it leads to - like the web dialog. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LyricsReviewSheet(onPick: (Boolean) -> Unit, onDismiss: () -> Unit) {
+    val colors = SonorusTheme.colors
+    val sheet = rememberModalBottomSheetState()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = colors.surface) {
+        Column(Modifier.padding(bottom = 28.dp)) {
+            RackLabelText("Passt der Songtext?", Modifier.padding(horizontal = 20.dp))
+            Spacer(Modifier.height(10.dp))
+            ReviewChoice(Icons.Filled.Check, "Passt", "Wird vorgemerkt, um ihn fest in die Datei zu übernehmen.") {
+                onPick(true)
+            }
+            ReviewChoice(Icons.Filled.Close, "Passt nicht", "Der Songtext wird entfernt.") { onPick(false) }
+        }
+    }
+}
+
+@Composable
+private fun ReviewChoice(icon: ImageVector, label: String, hint: String, onClick: () -> Unit) {
+    val colors = SonorusTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(icon, null, tint = colors.textDim)
+        Column {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.text)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = colors.textDim)
         }
     }
 }

@@ -269,6 +269,10 @@ class SonorusApi(private val session: Session) {
         put<JsonElement>("/api/tracks/$id/lyrics-offset", buildJsonObject { put("offset", offset) })
     }
 
+    /** Whether the words of a `.lrc` fit. Answers with the lyrics the song has now. */
+    suspend fun reviewLyrics(id: Int, fits: Boolean): LyricsResponse =
+        post("/api/tracks/$id/lyrics-review", buildJsonObject { put("fits", fits) })
+
     suspend fun artists(q: String = ""): ArtistsResponse = get("/api/artists", mapOf("q" to q))
 
     suspend fun artist(id: Int): ArtistResponse = get("/api/artists/$id")

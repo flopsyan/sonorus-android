@@ -1135,6 +1135,26 @@ class AppViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Says whether the words of a `.lrc` fit [trackId]. Fitting ones stay; the others
+     * are gone at once, and whatever the file carries itself takes their place. The
+     * files are dealt with later on the workstation - the server never writes music.
+     */
+    fun reviewLyrics(trackId: Int, fits: Boolean) {
+        if (needsServer()) return
+        viewModelScope.launch {
+            runCatching { api.reviewLyrics(trackId, fits) }
+                .onSuccess {
+                    // A download keeps its own copy of the words, and it must not bring
+                    // rejected ones back on the next flight.
+                    lib.store.applyLyrics(trackId, it.lyrics)
+                    if (lyricsFor == trackId) _lyrics.value = it.lyrics
+                    say(if (fits) "Songtext vorgemerkt." else "Songtext entfernt.")
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
     // --- Playlist management --------------------------------------------------
     // Every one of these answers with the whole tree, so the sidebar is redrawn
     // from the server's answer rather than from a guess about what changed.

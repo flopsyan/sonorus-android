@@ -131,6 +131,8 @@ data class Lyrics(
     val lines: List<LyricsLine> = emptyList(),
     val synced: Boolean = false,
     val offset: Double = 0.0,
+    /** Words from a `.lrc` nobody has said yes or no to yet, see [org.sonorus.ui.AppViewModel.reviewLyrics]. */
+    val reviewable: Boolean = false,
 ) {
     /** The line being sung at [seconds], or -1 before the first one. */
     fun lineAt(seconds: Double): Int {
