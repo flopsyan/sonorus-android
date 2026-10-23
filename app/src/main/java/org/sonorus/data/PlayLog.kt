@@ -41,7 +41,7 @@ class PlayLog(
     private val file: File,
     offline: StateFlow<Boolean>,
     /** Hands one play to the server. Throws when it did not get there. */
-    private val send: suspend (trackId: Int, seconds: Double, playedAt: String) -> Unit,
+    private val send: suspend (trackId: Int, seconds: Double, playedAt: String, source: String) -> Unit,
     scope: CoroutineScope,
 ) {
 
@@ -53,6 +53,8 @@ class PlayLog(
         val seconds: Int,
         /** ISO-8601 in UTC, which is the shape the server parses. */
         val playedAt: String,
+        /** The list the queue came from; empty in a file written before 0.30.0. */
+        val source: String = "",
     )
 
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -82,8 +84,8 @@ class PlayLog(
      * Writes down a play that has just passed the threshold, and returns the
      * handle [update] needs. Called instead of `POST /api/plays`, never as well.
      */
-    fun record(trackId: Int, seconds: Int): Long = synchronized(lock) {
-        val entry = Pending(nextId++, trackId, seconds.coerceAtLeast(0), Instant.now().toString())
+    fun record(trackId: Int, seconds: Int, source: String = ""): Long = synchronized(lock) {
+        val entry = Pending(nextId++, trackId, seconds.coerceAtLeast(0), Instant.now().toString(), source)
         // A bound rather than an unbounded file: something has to give if the
         // phone is offline for months, and the oldest play is the one worth
         // least. Reaching this at all would take some 40 days of continuous
@@ -122,7 +124,7 @@ class PlayLog(
             // No dispatcher hop of its own: `send` is a suspend function and the
             // one behind it already moves to IO (`SonorusApi.call`). Hopping
             // twice only takes the work off whatever scheduler is driving it.
-            val sent = runCatching { send(next.trackId, next.seconds.toDouble(), next.playedAt) }
+            val sent = runCatching { send(next.trackId, next.seconds.toDouble(), next.playedAt, next.source) }
             // A play whose track the server does not know is gone for good -
             // the file was removed from the library while the phone was away.
             // Dropping it is the only thing that keeps the queue from jamming

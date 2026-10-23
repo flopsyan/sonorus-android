@@ -554,9 +554,9 @@ object Offline {
     }
 
     /**
-     * The home page without a server. The two shelves that come out of the play
-     * log stay empty on purpose: nothing offline can know what was heard most,
-     * and a shelf filled with a guess would be a lie about the library.
+     * The home page without a server: the downloads, newest first. The song of the
+     * day, "Weiterhören" and the play log stay empty on purpose: nothing offline can
+     * know them, and a guess would be a lie about the library.
      */
     fun home(s: OfflineSnapshot): HomeResponse {
         val ids = music(s).map { it.id }.toSet()
@@ -567,7 +567,6 @@ object Offline {
             newestAlbums = albums(s, sort = "year", dir = "desc").albums.take(12),
             recentlyAdded = tracks.sortedByDescending { it.at }.map { it.track }.take(12),
             recentlyPlayed = emptyList(),
-            mostPlayed = emptyList(),
         )
     }
 

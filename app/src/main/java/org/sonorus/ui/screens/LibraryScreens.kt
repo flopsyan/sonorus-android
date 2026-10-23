@@ -82,7 +82,6 @@ import org.sonorus.ui.components.scrollLabel
 import org.sonorus.ui.components.albumCovers
 import org.sonorus.ui.components.CardGridSkeleton
 import org.sonorus.ui.components.DetailSkeleton
-import org.sonorus.ui.components.HomeSkeleton
 import org.sonorus.ui.components.TrackListSkeleton
 import org.sonorus.ui.components.CoverMosaic
 import org.sonorus.ui.components.EmptyNote
@@ -146,94 +145,6 @@ fun trackActions(
         onRemoveDownload = { vm.removeDownloads(listOf(it)) },
         holdersOf = { vm.downloadHolders(it) },
     )
-}
-
-// --- Home -------------------------------------------------------------------
-
-@UnstableApi
-@Composable
-fun HomeScreen(vm: AppViewModel, onGo: (String) -> Unit) {
-    val load = rememberLoad("home") { vm.lib.home() }
-    LoadBox(load, skeleton = { HomeSkeleton() }) { data ->
-        val playing = vm.player.state
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-            item {
-                Row(
-                    Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    SonorusButton("Zufällig abspielen", primary = true, modifier = Modifier.weight(1f)) {
-                        vm.shufflePlay()
-                    }
-                    // The other reason to start a random run: rating a library
-                    // is done by ear, and picking the next unrated song out of
-                    // a list of a few thousand by hand is what makes it stop
-                    // happening. Only offered while there is anything left.
-                    if (data.unrated > 0) {
-                        SonorusButton("Unbewertete", modifier = Modifier.weight(1f)) {
-                            vm.shufflePlay(unrated = true)
-                        }
-                    }
-                }
-            }
-            if (data.recentlyPlayed.isNotEmpty()) {
-                item { Shelf("Zuletzt gehört", data.recentlyPlayed, vm, onGo) }
-            }
-            if (data.recentlyAdded.isNotEmpty()) {
-                item { Shelf("Zuletzt hinzugefügt", data.recentlyAdded, vm, onGo) }
-            }
-            if (data.mostPlayed.isNotEmpty()) {
-                item { Shelf("Meistgehört", data.mostPlayed, vm, onGo) }
-            }
-            if (data.newestAlbums.isNotEmpty()) {
-                item {
-                    Section("Neueste Alben") {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            items(data.newestAlbums, key = { it.id }) { album ->
-                                MediaCard(
-                                    title = album.title,
-                                    subtitle = listOfNotNull(
-                                        album.artist.takeIf { it.isNotEmpty() },
-                                        Fmt.year(album.releaseDate, album.year).takeIf { it.isNotEmpty() },
-                                    ).joinToString(" · "),
-                                    coverUrl = vm.coverUrl(album.cover),
-                                    modifier = Modifier.width(150.dp),
-                                ) { onGo(Routes.album(album.id)) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@UnstableApi
-@Composable
-private fun Shelf(label: String, tracks: List<Track>, vm: AppViewModel, onGo: (String) -> Unit) {
-    Section(label) {
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            items(tracks, key = { it.id }) { track ->
-                MediaCard(
-                    title = track.title,
-                    subtitle = track.artist,
-                    coverUrl = vm.coverUrl(track.cover),
-                    modifier = Modifier.width(150.dp),
-                ) {
-                    // A shelf on the home page is no list you can look at, so
-                    // the queue belongs to the page itself - which no track list
-                    // carries, and every row marks itself as playing elsewhere.
-                    vm.player.playTracks(tracks, tracks.indexOf(track), label, Routes.HOME)
-                }
-            }
-        }
-    }
 }
 
 // --- All songs --------------------------------------------------------------

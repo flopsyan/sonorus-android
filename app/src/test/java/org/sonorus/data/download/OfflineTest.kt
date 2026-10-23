@@ -254,7 +254,6 @@ class OfflineTest {
         val home = Offline.home(s)
 
         assertTrue(home.recentlyPlayed.isEmpty())
-        assertTrue(home.mostPlayed.isEmpty())
         assertEquals(0, home.unrated)
         // Most recently downloaded first - the only "recent" a phone can know.
         assertEquals(listOf(2, 1), home.recentlyAdded.map { it.id })

@@ -390,16 +390,17 @@ class PlayerController(
             reported = listened.roundToInt()
             val id = track.id
             val seconds = listened
+            val source = _state.value.sourceKey
             // Offline there is nobody to tell, and a request per song that can
             // only time out is worth not making - so the play is written down
             // instead and goes out with the next connection. It carries the
             // moment it happened, because the server would otherwise stamp it
             // on arrival and file a fortnight of holiday under one day.
             if (library.offline.value) {
-                pendingPlay = playLog.record(id, reported)
+                pendingPlay = playLog.record(id, reported, source)
             } else {
                 scope.launch {
-                    runCatching { api.startPlay(id, seconds) }
+                    runCatching { api.startPlay(id, seconds, source = source) }
                         .onSuccess {
                             playId = it.playId
                             if (seconds >= mark) onPlayCounted?.invoke()

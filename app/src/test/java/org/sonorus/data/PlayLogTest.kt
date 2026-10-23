@@ -47,16 +47,16 @@ class PlayLogTest {
     }
 
     /** One play as the server saw it arrive. */
-    private data class Sent(val trackId: Int, val seconds: Double, val playedAt: String)
+    private data class Sent(val trackId: Int, val seconds: Double, val playedAt: String, val source: String = "")
 
     @Test
     fun `a play written while offline survives the process`() = runTest {
-        PlayLog(file, MutableStateFlow(true), { _, _, _ -> }, backgroundScope)
+        PlayLog(file, MutableStateFlow(true), { _, _, _, _ -> }, backgroundScope)
             .record(trackId = 7, seconds = 120)
         assertTrue("written straight away, not on the way out", file.exists())
 
         // A second instance is what a restarted app sees.
-        val reopened = PlayLog(file, MutableStateFlow(true), { _, _, _ -> }, backgroundScope)
+        val reopened = PlayLog(file, MutableStateFlow(true), { _, _, _, _ -> }, backgroundScope)
         assertEquals(1, reopened.waiting.value)
     }
 
@@ -64,7 +64,7 @@ class PlayLogTest {
     fun `coming back online sends what is waiting and empties the file`() = runTest {
         val offline = MutableStateFlow(true)
         val sent = mutableListOf<Sent>()
-        val log = PlayLog(file, offline, { t, s, at -> sent += Sent(t, s, at) }, backgroundScope)
+        val log = PlayLog(file, offline, { t, s, at, from -> sent += Sent(t, s, at, from) }, backgroundScope)
         log.record(trackId = 7, seconds = 120)
         log.record(trackId = 9, seconds = 60)
         testScheduler.runCurrent()
@@ -83,7 +83,7 @@ class PlayLogTest {
     fun `a play carries the moment it was heard, not the moment it was sent`() = runTest {
         val offline = MutableStateFlow(true)
         val sent = mutableListOf<Sent>()
-        val log = PlayLog(file, offline, { t, s, at -> sent += Sent(t, s, at) }, backgroundScope)
+        val log = PlayLog(file, offline, { t, s, at, from -> sent += Sent(t, s, at, from) }, backgroundScope)
         val before = Instant.now()
         log.record(trackId = 7, seconds = 120)
         val after = Instant.now()
@@ -99,7 +99,7 @@ class PlayLogTest {
     @Test
     fun `a server that still refuses leaves the plays on the phone`() = runTest {
         val offline = MutableStateFlow(true)
-        val log = PlayLog(file, offline, { _, _, _ -> throw IOException("no route") }, backgroundScope)
+        val log = PlayLog(file, offline, { _, _, _, _ -> throw IOException("no route") }, backgroundScope)
         log.record(trackId = 7, seconds = 120)
 
         offline.value = false
@@ -115,7 +115,7 @@ class PlayLogTest {
         val log = PlayLog(
             file,
             offline,
-            { t, _, _ -> if (t == 7) throw ApiException("not_found", "weg") else sent += t },
+            { t, _, _, _ -> if (t == 7) throw ApiException("not_found", "weg") else sent += t },
             backgroundScope,
         )
         log.record(trackId = 7, seconds = 120)
@@ -132,7 +132,7 @@ class PlayLogTest {
     fun `correcting the seconds of a running play does not move its timestamp`() = runTest {
         val offline = MutableStateFlow(true)
         val sent = mutableListOf<Sent>()
-        val log = PlayLog(file, offline, { t, s, at -> sent += Sent(t, s, at) }, backgroundScope)
+        val log = PlayLog(file, offline, { t, s, at, from -> sent += Sent(t, s, at, from) }, backgroundScope)
         val id = log.record(trackId = 7, seconds = 30)
         val stampedAt = Instant.now()
         log.update(id, 240)
@@ -146,5 +146,32 @@ class PlayLogTest {
             "the timestamp belongs to the start of the play",
             Instant.parse(sent.single().playedAt).isAfter(stampedAt.plusSeconds(1)),
         )
+    }
+
+    @Test
+    fun `a play keeps the list it was started from`() = runTest {
+        val offline = MutableStateFlow(true)
+        val sent = mutableListOf<Sent>()
+        val log = PlayLog(file, offline, { t, s, at, from -> sent += Sent(t, s, at, from) }, backgroundScope)
+        log.record(trackId = 7, seconds = 120, source = "albums/3")
+
+        offline.value = false
+        testScheduler.runCurrent()
+
+        assertEquals("albums/3", sent.single().source)
+    }
+
+    @Test
+    fun `a file written before the source existed still reads`() = runTest {
+        file.writeText("""[{"id":1,"trackId":7,"seconds":120,"playedAt":"2026-10-20T18:00:00Z"}]""")
+        val offline = MutableStateFlow(true)
+        val sent = mutableListOf<Sent>()
+        val log = PlayLog(file, offline, { t, s, at, from -> sent += Sent(t, s, at, from) }, backgroundScope)
+        assertEquals(1, log.waiting.value)
+
+        offline.value = false
+        testScheduler.runCurrent()
+
+        assertEquals("", sent.single().source)
     }
 }

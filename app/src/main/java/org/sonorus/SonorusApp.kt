@@ -110,7 +110,7 @@ class SonorusApp : Application() {
         playLog = PlayLog(
             file = File(filesDir, "offline/plays.json"),
             offline = library.offline,
-            send = { trackId, seconds, playedAt -> api.startPlay(trackId, seconds, playedAt) },
+            send = { trackId, seconds, playedAt, source -> api.startPlay(trackId, seconds, playedAt, source) },
             scope = scope,
         )
         // The plays have their own log; the queue above carries the edits -

@@ -420,10 +420,52 @@ data class HomeResponse(
     val stats: LibraryStats = LibraryStats(),
     /** How many songs still have no star. Zero means there is nothing to rate. */
     val unrated: Int = 0,
+    /** Null when no song qualifies, and from a server older than 0.30.0. */
+    val daily: DailyTrack? = null,
+    val resume: List<ResumeTile> = emptyList(),
+    val favorites: HomeFavorites = HomeFavorites(),
+    /** Rating -> count, with 0 meaning "Nicht bewertet" - the shape of [Bootstrap.stars]. */
+    val stars: Map<String, Int> = emptyMap(),
+    /**
+     * The shelves of the old home page. A server from 0.30.0 on sends none of them but
+     * [recentlyPlayed], which Android Auto's "Zuletzt gehört" reads; the downloads fill the
+     * other two while offline.
+     */
     val newestAlbums: List<Album> = emptyList(),
     val recentlyAdded: List<Track> = emptyList(),
     val recentlyPlayed: List<Track> = emptyList(),
-    val mostPlayed: List<Track> = emptyList(),
+)
+
+/** "Heute aufgelegt": one well rated, long unheard song, the same all day on every device. */
+@Serializable
+data class DailyTrack(
+    val track: Track,
+    /** Calendar days since it was last heard before today; null when the history has no play of it. */
+    val daysSince: Int? = null,
+)
+
+/**
+ * A list listening was started from, for "Weiterhören". [key] is the route that list lives
+ * under ("albums/12", "stars/5,4"), or "shuffle" / "shuffle-unrated" for a random run.
+ */
+@Serializable
+data class ResumeTile(
+    val key: String,
+    val kind: String = "",
+    val title: String = "",
+    val sub: String = "",
+    val cover: String? = null,
+    val covers: List<String> = emptyList(),
+    val round: Boolean = false,
+    /** What to draw without covers: "shuffle", "star-outline", "music", "filter" or "star". */
+    val icon: String = "",
+)
+
+@Serializable
+data class HomeFavorites(
+    val artists: List<ArtistSummary> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val genres: List<Genre> = emptyList(),
 )
 
 @Serializable

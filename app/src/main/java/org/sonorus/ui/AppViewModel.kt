@@ -28,6 +28,7 @@ import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.Playlist
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Prefs
+import org.sonorus.data.model.ResumeTile
 import org.sonorus.data.model.SortPref
 import org.sonorus.data.model.Track
 import org.sonorus.data.model.TreeResponse
@@ -1049,13 +1050,57 @@ class AppViewModel : ViewModel() {
                             it.tracks,
                             0,
                             if (unrated) "Unbewertete" else "Zufall",
-                            // A mix dealt by the server is no list on screen, so
-                            // it belongs to the page the button sits on.
-                            Routes.HOME,
+                            // A mix dealt by the server is no list on screen. Its own
+                            // key is what lets "Weiterhören" offer it again.
+                            if (unrated) "shuffle-unrated" else "shuffle",
                         )
                     }
                 }
                 .onFailure { say(message(it), true) }
+        }
+    }
+
+    /**
+     * "Weiterhören" on the home page: the list behind [tile] again, under its own key so it
+     * stays the same tile. Mixed if the player is set to mix, from the top otherwise.
+     */
+    fun playResume(tile: ResumeTile) {
+        when (tile.key) {
+            "shuffle" -> return shufflePlay()
+            "shuffle-unrated" -> return shufflePlay(unrated = true)
+        }
+        viewModelScope.launch {
+            runCatching { resumeTracks(tile.key).filterNot { it.missing } }
+                .onSuccess { list ->
+                    when {
+                        list.isEmpty() -> say("Hier gibt es nichts zum Abspielen.")
+                        player.state.value.shuffle -> player.shuffleTracks(list, tile.title, tile.key)
+                        else -> player.playTracks(list, 0, tile.title, tile.key)
+                    }
+                }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    /** The keys are the routes of these lists, as the server hands them back. */
+    private suspend fun resumeTracks(key: String): List<Track> {
+        val parts = key.split('/')
+        fun ids(at: Int) = parts[at].split(',').map(String::toInt)
+        return when (parts[0]) {
+            "albums" -> lib.album(parts[1].toInt()).album.tracks
+            "playlists" -> lib.playlist(parts[1].toInt()).tracks
+            "genres" -> lib.genre(ids(1)).genre.tracks
+            "stars" -> lib.stars(ids(1)).tracks
+            "tracks" -> lib.tracks(sort = prefs.trackSort.key, dir = prefs.trackSort.dir).tracks
+            "artists" -> {
+                val artist = lib.artist(parts[1].toInt()).artist
+                when (parts.getOrNull(2)) {
+                    "singles" -> artist.singles
+                    "stars" -> ids(3).let { wanted -> artist.tracks.filter { it.stars in wanted } }
+                    else -> artist.tracks
+                }
+            }
+            else -> emptyList()
         }
     }
 

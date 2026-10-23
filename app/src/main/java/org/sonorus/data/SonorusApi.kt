@@ -330,11 +330,13 @@ class SonorusApi(private val session: Session) {
      * enough to file a late evening under the day before. With the `Z` there is
      * nothing left to interpret.
      */
-    suspend fun startPlay(trackId: Int, seconds: Double, playedAt: String = ""): PlayResponse =
+    suspend fun startPlay(trackId: Int, seconds: Double, playedAt: String = "", source: String = ""): PlayResponse =
         post("/api/plays", buildJsonObject {
             put("trackId", trackId)
             put("seconds", seconds)
             if (playedAt.isNotEmpty()) put("playedAt", playedAt)
+            // The route the queue came from, for "Weiterhören"; the server keeps only real lists.
+            if (source.isNotEmpty()) put("source", source)
         })
 
     suspend fun updatePlay(playId: Int, seconds: Double) {
