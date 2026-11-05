@@ -287,15 +287,23 @@ class OfflineTest {
 
     @Test
     fun `the words of a song ride along with it`() {
-        val words = org.sonorus.data.model.Lyrics(text = "Ground control", synced = false)
+        val words = org.sonorus.data.model.Lyrics(
+            text = "Ground control",
+            lines = listOf(org.sonorus.data.model.LyricsLine(1.0, "Ground control")),
+            synced = true,
+        )
+        val untimed = org.sonorus.data.model.Lyrics(text = "Major Tom", synced = false)
         val s = OfflineSnapshot(
             tracks = listOf(
                 DownloadedTrack(track = track(1), file = "1.mp3", lyrics = words),
                 DownloadedTrack(track = track(2), file = "2.mp3"),
+                DownloadedTrack(track = track(3), file = "3.mp3", lyrics = untimed),
             )
         )
 
         assertEquals("Ground control", Offline.lyrics(s, 1).lyrics.text)
         assertEquals("", Offline.lyrics(s, 2).lyrics.text)
+        // Stored before the server stopped sending untimed lyrics; not shown any more.
+        assertEquals("", Offline.lyrics(s, 3).lyrics.text)
     }
 }

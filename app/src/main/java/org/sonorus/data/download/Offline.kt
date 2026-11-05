@@ -352,8 +352,9 @@ object Offline {
         return TracksResponse(total = hits.size, tracks = hits)
     }
 
+    /** Timed only, like the server: untimed words a download kept from before are dropped. */
     fun lyrics(s: OfflineSnapshot, id: Int): LyricsResponse =
-        LyricsResponse(s.tracks.firstOrNull { it.track.id == id }?.lyrics ?: Lyrics())
+        LyricsResponse(s.tracks.firstOrNull { it.track.id == id }?.lyrics?.takeIf { it.lines.isNotEmpty() } ?: Lyrics())
 
     /**
      * The sorts the web app offers, on the list this phone has. Text is compared
