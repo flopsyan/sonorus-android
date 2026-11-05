@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -51,6 +52,19 @@ import kotlinx.serialization.json.Json
 private val SHUFFLE = SessionCommand("org.sonorus.SHUFFLE", Bundle.EMPTY)
 private val REPEAT = SessionCommand("org.sonorus.REPEAT", Bundle.EMPTY)
 
+/**
+ * Prev/next from outside the app (lock screen, notification, headset, car) go through
+ * [PlayerController], so they walk the same history as the app's own buttons. Sent
+ * straight to ExoPlayer they left it behind, and the app's Zurück then jumped forward.
+ */
+@UnstableApi
+private class SessionPlayer(private val controller: PlayerController) : ForwardingPlayer(controller.exoPlayer) {
+    override fun seekToPrevious() = controller.previous()
+    override fun seekToPreviousMediaItem() = controller.previous(restartFirst = false)
+    override fun seekToNext() = controller.next()
+    override fun seekToNextMediaItem() = controller.next()
+}
+
 @UnstableApi
 class PlaybackService : MediaLibraryService() {
 
@@ -71,7 +85,7 @@ class PlaybackService : MediaLibraryService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        mediaSession = MediaLibrarySession.Builder(this, app.player.exoPlayer, LibraryCallback())
+        mediaSession = MediaLibrarySession.Builder(this, SessionPlayer(app.player), LibraryCallback())
             .setSessionActivity(openApp)
             // Artwork has to come through the same OkHttp client as everything
             // else, and for the same reason the stream does: `/covers` needs the
@@ -93,9 +107,7 @@ class PlaybackService : MediaLibraryService() {
      *
      * Spoken word gets the same fifteen seconds the app's own players show, and
      * music keeps prev/next. The notification was the one surface still stepping
-     * whole **files**: it drives the ExoPlayer directly rather than going through
-     * [PlayerController], so the controller's chapter logic never ran for it and
-     * a press in the middle of a book landed in the next part.
+     * whole **files**: a press in the middle of a book landed in the next part.
      *
      * The buttons are bound to `COMMAND_SEEK_BACK`/`COMMAND_SEEK_FORWARD`, which
      * is the only kind of skip a controller outside the app can ask for - the
