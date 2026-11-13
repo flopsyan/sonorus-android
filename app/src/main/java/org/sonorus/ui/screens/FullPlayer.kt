@@ -1772,6 +1772,12 @@ private fun LyricOffsetCard(
             .padding(bottom = 4.dp)
             .background(colors.surface2, RoundedCornerShape(14.dp))
             .border(1.dp, colors.line, RoundedCornerShape(14.dp))
+            // A tap that misses a button must stay on the card: the line behind it would jump there.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            )
             .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
