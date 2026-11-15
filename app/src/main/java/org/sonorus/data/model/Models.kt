@@ -502,6 +502,13 @@ data class PlaylistResponse(
 data class TreeResponse(val tree: PlaylistTree = PlaylistTree())
 
 @Serializable
+data class AddTracksResponse(
+    val added: Int = 0,
+    val duplicates: List<Int> = emptyList(),
+    val tree: PlaylistTree = PlaylistTree(),
+)
+
+@Serializable
 data class FavoriteResponse(val favorite: Boolean = false)
 
 @Serializable

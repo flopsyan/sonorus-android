@@ -421,6 +421,17 @@ fun Shell(vm: AppViewModel, data: Bootstrap) {
         }
     }
 
+    val duplicate by vm.duplicateAdd.collectAsState()
+    duplicate?.let { d ->
+        ConfirmDialog(
+            title = "Schon in der Playlist",
+            message = "Der Song ist schon in \"${d.playlistName}\".",
+            confirmLabel = "Nochmal hinzufügen",
+            onDismiss = { vm.cancelAddAgain() },
+            onConfirm = { vm.addAgain() },
+        )
+    }
+
     val editingSingle by vm.editingSingle.collectAsState()
     editingSingle?.let { track ->
         org.sonorus.ui.screens.EditSingleDialog(

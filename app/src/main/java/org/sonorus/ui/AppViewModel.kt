@@ -1104,21 +1104,58 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    /** Adds a track to a playlist and refreshes the sidebar counts. */
+    /** A song the picked playlist already holds, waiting for "add it again?". */
+    data class DuplicateAdd(val playlistId: Int, val trackId: Int, val playlistName: String)
+
+    private val _duplicateAdd = MutableStateFlow<DuplicateAdd?>(null)
+    val duplicateAdd: StateFlow<DuplicateAdd?> = _duplicateAdd.asStateFlow()
+
+    /**
+     * Adds a track to a playlist and refreshes the sidebar counts. A song that is
+     * already there is asked about first; offline only a downloaded list can tell.
+     */
     fun addToPlaylist(playlistId: Int, trackId: Int, playlistName: String) {
         if (lib.offline.value) {
-            offlineAdd(playlistId, trackId, playlistName)
+            val held = downloads.store.collectionOf("playlist", listOf(playlistId))?.trackIds.orEmpty()
+            if (trackId in held) _duplicateAdd.value = DuplicateAdd(playlistId, trackId, playlistName)
+            else offlineAdd(playlistId, trackId, playlistName)
             return
         }
         viewModelScope.launch {
-            runCatching { api.addToPlaylist(playlistId, listOf(trackId)) }
+            runCatching { api.addToPlaylistIfNew(playlistId, listOf(trackId)) }
                 .onSuccess {
-                    say("Zu \"$playlistName\" hinzugefügt.")
-                    refreshQuietly()
-                    playlistChanged(playlistId)
+                    if (it.duplicates.isNotEmpty()) {
+                        _duplicateAdd.value = DuplicateAdd(playlistId, trackId, playlistName)
+                    } else {
+                        addedToPlaylist(playlistId, playlistName)
+                    }
                 }
                 .onFailure { say(message(it), true) }
         }
+    }
+
+    fun addAgain() {
+        val d = _duplicateAdd.value ?: return
+        _duplicateAdd.value = null
+        if (lib.offline.value) {
+            offlineAdd(d.playlistId, d.trackId, d.playlistName)
+            return
+        }
+        viewModelScope.launch {
+            runCatching { api.addToPlaylist(d.playlistId, listOf(d.trackId)) }
+                .onSuccess { addedToPlaylist(d.playlistId, d.playlistName) }
+                .onFailure { say(message(it), true) }
+        }
+    }
+
+    fun cancelAddAgain() {
+        _duplicateAdd.value = null
+    }
+
+    private fun addedToPlaylist(playlistId: Int, playlistName: String) {
+        say("Zu \"$playlistName\" hinzugefügt.")
+        refreshQuietly()
+        playlistChanged(playlistId)
     }
 
     // --- Lyrics ---------------------------------------------------------------

@@ -470,6 +470,13 @@ class SonorusApi(private val session: Session) {
             put("trackIds", JsonArray(trackIds.map { JsonPrimitive(it) }))
         })
 
+    /** Adds nothing while one of the songs is already in the list, and names those. */
+    suspend fun addToPlaylistIfNew(id: Int, trackIds: List<Int>): AddTracksResponse =
+        post("/api/playlists/$id/tracks", buildJsonObject {
+            put("trackIds", JsonArray(trackIds.map { JsonPrimitive(it) }))
+            put("checkDuplicates", true)
+        })
+
     suspend fun removeFromPlaylist(playlistId: Int, itemId: Int): TreeResponse =
         delete("/api/playlists/$playlistId/items/$itemId")
 
