@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Holds the things the whole app shares. They are plain singletons rather than
@@ -91,7 +92,8 @@ class SonorusApp : Application() {
         // Internal storage, not the shared music folder: these files belong to
         // the app, are removed with it, and need no storage permission - which
         // is also what keeps a cold start free of a permission dialog.
-        store = DownloadStore(File(filesDir, "offline"))
+        // A big library makes the index tens of MB, too much for the caller's thread.
+        store = DownloadStore(File(filesDir, "offline"), Executors.newSingleThreadExecutor())
         // Before the library: a reading position saved without a server is
         // queued here, so the library has to be handed the queue.
         pending = PendingWrites(File(filesDir, "offline/pending.json"))

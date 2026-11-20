@@ -13,14 +13,15 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.util.concurrent.Executor
 
 /**
  * The downloads on disk, and the index that says what they are.
  *
  * The index is one JSON file rather than a database, for the same reason the
- * rest of the app has no Room: there is one writer, the whole thing is a few
- * hundred rows, and a file that can be pulled off the phone and read is worth a
- * great deal when the question is "why did this not play in a plane".
+ * rest of the app has no Room: there is one writer, and a file that can be
+ * pulled off the phone and read is worth a great deal when the question is "why
+ * did this not play in a plane".
  *
  * Two rules make it safe to be a file:
  *
@@ -32,10 +33,17 @@ import java.io.File
  *    arrived and its length checks out, so an entry in the index is a promise
  *    that the file behind it can be played.
  *
+ * [writer] runs the file writes. Thousands of songs with their lyrics make the
+ * index tens of MB, so the app hands it a background thread and a change costs
+ * the caller only the copy in memory. The default writes in place for the tests.
+ *
  * Deliberately free of Android: its only tie to the outside is the directory it
  * is handed, which is what lets all of it be tested on a plain JVM.
  */
-class DownloadStore(private val root: File) {
+class DownloadStore(
+    private val root: File,
+    private val writer: Executor = Executor(Runnable::run),
+) {
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -569,6 +577,32 @@ class DownloadStore(private val root: File) {
         }
     }
 
+    /** The newest snapshot the file does not hold yet. Set while a write is queued or running. */
+    private var unwritten: OfflineSnapshot? = null
+
+    private fun write(next: OfflineSnapshot) {
+        val stamped = next.copy(version = OfflineSnapshot.VERSION)
+        publish(stamped)
+        val queued = unwritten != null
+        unwritten = stamped
+        // A queued write takes the newest snapshot, so a burst of changes costs one or two writes.
+        if (!queued) writer.execute(::drain)
+    }
+
+    private fun drain() {
+        while (true) {
+            val next = synchronized(lock) { unwritten } ?: return
+            // A failed write must not end the loop, or `unwritten` would block every later one.
+            runCatching { persist(next) }
+            synchronized(lock) {
+                if (unwritten === next) {
+                    unwritten = null
+                    return
+                }
+            }
+        }
+    }
+
     /**
      * Whole file, then rename: a kill mid-write cannot leave half an index.
      *
@@ -576,16 +610,14 @@ class DownloadStore(private val root: File) {
      * having it in both would let a stale copy in the index win on the next
      * load.
      */
-    private fun write(next: OfflineSnapshot) {
+    private fun persist(next: OfflineSnapshot) {
         root.mkdirs()
-        val stamped = next.copy(version = OfflineSnapshot.VERSION)
-        tempFile.writeText(json.encodeToString(OfflineSnapshot.serializer(), stamped.copy(account = null)))
+        tempFile.writeText(json.encodeToString(OfflineSnapshot.serializer(), next.copy(account = null)))
         if (!tempFile.renameTo(indexFile)) {
             // Some filesystems refuse to rename onto an existing file.
             indexFile.delete()
             tempFile.renameTo(indexFile)
         }
-        publish(stamped)
     }
 
     private fun writeAccount(account: Bootstrap) {

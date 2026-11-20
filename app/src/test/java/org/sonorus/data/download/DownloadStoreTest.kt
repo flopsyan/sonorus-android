@@ -246,6 +246,28 @@ class DownloadStoreTest {
     }
 
     @Test
+    fun `a change is seen at once and written later, and a burst is written once`() {
+        val later = ArrayDeque<Runnable>()
+        val async = DownloadStore(root, writer = { later.addLast(it) })
+
+        async.put(store(1))
+        async.applyRating(1, 3)
+        async.applyRating(1, 5)
+
+        assertEquals(5, async.entryOf(1)?.track?.stars)
+        assertEquals("nothing on disk until the writer runs", 0, DownloadStore(root).count)
+        assertEquals("three changes, one write queued", 1, later.size)
+
+        later.removeFirst().run()
+        assertEquals(5, DownloadStore(root).entryOf(1)?.track?.stars)
+
+        async.applyRating(1, 2)
+        assertEquals("a new change after the write queues a new one", 1, later.size)
+        later.removeFirst().run()
+        assertEquals(2, DownloadStore(root).entryOf(1)?.track?.stars)
+    }
+
+    @Test
     fun `downloading a song again replaces the old file rather than leaving two`() {
         store.put(store(1, extension = "mp3"))
         store.put(store(1, extension = "flac", bytes = 64))

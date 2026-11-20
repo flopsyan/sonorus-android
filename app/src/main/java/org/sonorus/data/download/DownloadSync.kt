@@ -211,13 +211,17 @@ object Reconcile {
         downloaded: Set<Int>,
         excluded: Set<Int> = emptySet(),
         heldElsewhere: Set<Int> = emptySet(),
-    ): Plan = Plan(
-        // Everything the collection holds and the phone does not - which also
-        // picks up what an interrupted run never got to, not only what is new.
-        add = current.filter { it !in downloaded && it !in excluded }.distinct(),
-        // Only what really left the collection, and only if nothing else wants
-        // it. A song still on the phone that was never in this list is none of
-        // its business.
-        delete = previous.filter { it !in current && it in downloaded && it !in heldElsewhere }.distinct(),
-    )
+    ): Plan {
+        // A set, or a star selection of thousands of songs is compared pair by pair on the main thread.
+        val now = current.toSet()
+        return Plan(
+            // Everything the collection holds and the phone does not - which also
+            // picks up what an interrupted run never got to, not only what is new.
+            add = current.filter { it !in downloaded && it !in excluded }.distinct(),
+            // Only what really left the collection, and only if nothing else wants
+            // it. A song still on the phone that was never in this list is none of
+            // its business.
+            delete = previous.filter { it !in now && it in downloaded && it !in heldElsewhere }.distinct(),
+        )
+    }
 }
