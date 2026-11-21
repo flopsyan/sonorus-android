@@ -481,7 +481,7 @@ class PlayerController(
         // is easy to forget in the eleventh.
         scope.launch {
             _state
-                .map { QueueKey(it.queue.map(Track::id), it.order, it.pos, it.source, it.sourceKey) }
+                .map { QueueKey(it.queue, it.order, it.pos, it.source, it.sourceKey) }
                 .distinctUntilChanged()
                 .collect { saveQueue() }
         }
@@ -1010,7 +1010,7 @@ class PlayerController(
      * is no network. That is what makes a download worth having on a mobile
      * connection: the same song, and not a byte of data for it.
      */
-    fun mediaItem(track: Track): MediaItem {
+    fun mediaItem(track: Track, artwork: Uri? = library.coverUrl(track.cover)?.toUri()): MediaItem {
         // The one-off beats the download. It is a deliberate "this song, in
         // full, now", and answering it out of a file that was fetched small
         // would be refusing it without saying so.
@@ -1035,12 +1035,18 @@ class PlayerController(
                     .setAlbumTitle(track.album.ifEmpty { null })
                     // The downloaded cover for the same reason: the notification
                     // draws artwork, and offline there is nothing to fetch.
-                    .setArtworkUri(library.coverUrl(track.cover)?.toUri())
+                    .setArtworkUri(artwork)
                     .setTrackNumber(track.trackNo)
                     .setReleaseYear(track.year)
                     .build()
             )
             .build()
+    }
+
+    /** A whole queue. The artwork is looked up per cover: ten thousand songs share a few hundred. */
+    fun mediaItems(tracks: List<Track>): List<MediaItem> {
+        val artwork = HashMap<String?, Uri?>()
+        return tracks.map { mediaItem(it, artwork.getOrPut(it.cover) { library.coverUrl(it.cover)?.toUri() }) }
     }
 
     /**
@@ -1061,7 +1067,7 @@ class PlayerController(
     }
 
     private fun pushPlaylist(tracks: List<Track>, index: Int, positionMs: Long) {
-        exoPlayer.setMediaItems(tracks.map(::mediaItem), index, positionMs)
+        exoPlayer.setMediaItems(mediaItems(tracks), index, positionMs)
         exoPlayer.prepare()
     }
 
@@ -1086,8 +1092,8 @@ class PlayerController(
         exoPlayer.removeMediaItems(at + 1, count)
         exoPlayer.removeMediaItems(0, at)
         // Only the running track is left, and it sits at 0.
-        if (index > 0) exoPlayer.addMediaItems(0, tracks.take(index).map(::mediaItem))
-        exoPlayer.addMediaItems(tracks.drop(index + 1).map(::mediaItem))
+        if (index > 0) exoPlayer.addMediaItems(0, mediaItems(tracks.take(index)))
+        exoPlayer.addMediaItems(mediaItems(tracks.drop(index + 1)))
     }
 
     private inner class PlayerListener : Player.Listener {
@@ -1289,9 +1295,12 @@ private data class SavedQueue(
 /**
  * What has to change before the queue is worth writing down again. The playhead
  * is deliberately not in it: it moves twice a second and has its own rule.
+ *
+ * The queue itself and not a list of its ids: from one tick to the next it is the
+ * same object, which compares at once where a fresh list of ids was walked whole.
  */
 private data class QueueKey(
-    val ids: List<Int>,
+    val queue: List<Track>,
     val order: List<Int>,
     val pos: Int,
     val source: String,

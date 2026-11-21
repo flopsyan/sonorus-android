@@ -71,14 +71,15 @@ class DownloadSync(
         return total
     }
 
-    /** Every collection of one kind - the star lists after a rating, say. */
-    suspend fun reconcileKind(kind: String): Change {
-        if (lib.offline.value) return Change()
-        var total = Change()
-        for (collection in store.collections.filter { it.kind == kind }) {
-            total += reconcileOne(collection)
-        }
-        return total
+    /**
+     * One rating, carried into the star selections this phone keeps. The server is not
+     * asked for them again: with "Nicht bewertet" downloaded that was the whole library,
+     * megabytes for the one song that moved.
+     */
+    suspend fun rated(trackId: Int, stars: Int) {
+        if (lib.offline.value) return
+        if (!applyRated(store, downloads, trackId, stars)) return
+        lib.tracksByIds(listOf(trackId)).tracks.firstOrNull()?.let { downloads.add(listOf(it), manual = false) }
     }
 
     /** One collection, if it is one this phone keeps in step. */
@@ -185,6 +186,29 @@ internal fun applyReconcile(
     }
     for (id in plan.delete) downloads.remove(id)
     return DownloadSync.Change(added = plan.add.size, removed = plan.delete.size)
+}
+
+/**
+ * What one rating does to the downloaded star selections, and whether the song has to be
+ * fetched for one of them. Out here for the reason [applyReconcile] is.
+ */
+internal fun applyRated(store: DownloadStore, downloads: DownloadTarget, trackId: Int, stars: Int): Boolean {
+    var wanted = false
+    var left = false
+    for (collection in store.collections) {
+        if (collection.kind != "stars") continue
+        val inside = stars in collection.selection
+        if (inside) wanted = true
+        if (inside == (trackId in collection.trackIds)) continue
+        if (!inside) left = true
+        store.rememberCollection(
+            collection.copy(trackIds = if (inside) collection.trackIds + trackId else collection.trackIds - trackId)
+        )
+    }
+    val here = store.isDownloaded(trackId)
+    // Only a song this rating took out of a selection, and only if nothing else holds it.
+    if (left && here && !store.isHeld(trackId)) downloads.remove(trackId)
+    return wanted && !here && trackId !in store.snapshot.excluded
 }
 
 /**

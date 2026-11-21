@@ -46,6 +46,7 @@ import org.sonorus.player.SKIP_MS
 import org.sonorus.ui.AppViewModel
 import org.sonorus.ui.Fmt
 import org.sonorus.ui.components.Cover
+import org.sonorus.ui.components.Elapsed
 import org.sonorus.ui.components.RunningTitle
 import org.sonorus.ui.components.SeekRail
 import org.sonorus.ui.components.SkipButton
@@ -296,10 +297,12 @@ private fun Strip(
             ?: if (state.durationMs > 0) {
                 (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
             } else 0f
-        val fraction = rememberPlayhead(reported, held = scrub != null, trackKey = track.id)
+        val playhead = rememberPlayhead(
+            reported, held = scrub != null, trackKey = track.id, durationMs = state.durationMs,
+        )
         Column(Modifier.fillMaxWidth()) {
             SeekRail(
-                fraction = fraction,
+                fraction = { playhead.floatValue },
                 onScrub = { scrub = it },
                 onSeek = { f ->
                     if (state.durationMs > 0) vm.player.seekTo((state.durationMs * f).toLong())
@@ -310,11 +313,7 @@ private fun Strip(
                 knob = 9.dp,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    Fmt.duration((fraction * state.durationMs / 1000).toDouble()),
-                    style = num(11.sp),
-                    color = colors.textDim,
-                )
+                Elapsed(playhead, state.durationMs, num(11.sp))
                 Text(
                     Fmt.duration(state.durationMs / 1000.0),
                     style = num(11.sp),

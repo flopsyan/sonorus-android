@@ -310,7 +310,7 @@ fun CollectionDownload(
     var confirmingRemove by remember { mutableStateOf(false) }
     var confirmingCancel by remember { mutableStateOf(false) }
 
-    val here = tracks.filter { !it.missing }
+    val here = remember(tracks) { tracks.filter { !it.missing } }
     // What this phone remembers of the collection, if it is one that is kept in
     // step at all. Recomputed whenever the download state changes, which is the
     // same moment the store behind it does.
@@ -328,10 +328,16 @@ fun CollectionDownload(
      * half-downloaded list look complete - and the button offered to delete it
      * instead of to finish it.
      */
-    val ids = if (offline && remembered != null) remembered.trackIds else here.map { it.id }
+    val ids = remember(here, offline, remembered) {
+        if (offline && remembered != null) remembered.trackIds else here.map { it.id }
+    }
     if (ids.isEmpty()) return
-    val done = ids.count { it in state.done }
-    val busy = ids.count { it == state.active || it in state.queued }
+    // Counted when the downloads change, not on every redraw: a page of ten thousand
+    // songs against a queue of hundreds froze the screen while a download ran.
+    val (done, busy) = remember(ids, state.done, state.queued, state.active) {
+        val queued = state.queued.toHashSet()
+        ids.count { it in state.done } to ids.count { it == state.active || it in queued }
+    }
     val start = {
         if (collection != null) vm.downloadCollection(collection, here, words)
         else vm.download(here, words)

@@ -1,24 +1,21 @@
 package org.sonorus.ui.components
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.requiredSize
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -26,11 +23,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import org.sonorus.ui.Fmt
 import org.sonorus.ui.landed
 import org.sonorus.ui.theme.SonorusTheme
 import kotlin.math.abs
@@ -47,6 +52,9 @@ private const val TICK_MS = 500
 /** A step this big is not playback - a seek, or the next song starting. */
 private const val JUMP = 0.05f
 
+/** No step is shorter than a frame. */
+private const val FRAME_MS = 16L
+
 /**
  * The playhead as something that moves rather than something that steps.
  *
@@ -61,16 +69,32 @@ private const val JUMP = 0.05f
  * starting from zero, snaps - sliding backwards through a whole song would be a
  * lie about what happened. Neither is a rail being held, which belongs to the
  * finger and must not lag behind it.
+ *
+ * It walks **a pixel at a time**, and the answer is a state to be read where the
+ * rail is drawn. As an animation read by the player it redrew the whole screen on
+ * every frame for as long as a song ran, to move a line a twentieth of a pixel.
  */
 @Composable
-fun rememberPlayhead(fraction: Float, held: Boolean, trackKey: Any?): Float {
-    val playhead = remember { Animatable(0f) }
-    LaunchedEffect(trackKey) { playhead.snapTo(0f) }
+fun rememberPlayhead(fraction: Float, held: Boolean, trackKey: Any?, durationMs: Long): FloatState {
+    val playhead = remember { mutableFloatStateOf(0f) }
+    // No rail is wider than the window, so this is the finest step one can show.
+    val width = LocalWindowInfo.current.containerSize.width.coerceAtLeast(1)
+    val step = (durationMs / width).coerceAtLeast(FRAME_MS)
+    LaunchedEffect(trackKey) { playhead.floatValue = 0f }
     LaunchedEffect(fraction, held) {
-        if (held || abs(fraction - playhead.value) > JUMP) playhead.snapTo(fraction)
-        else playhead.animateTo(fraction, tween(TICK_MS, easing = LinearEasing))
+        val from = playhead.floatValue
+        if (held || fraction == from || abs(fraction - from) > JUMP || step >= TICK_MS) {
+            playhead.floatValue = fraction
+            return@LaunchedEffect
+        }
+        val start = System.nanoTime()
+        do {
+            delay(step)
+            val walked = ((System.nanoTime() - start) / 1e6f / TICK_MS).coerceAtMost(1f)
+            playhead.floatValue = from + (fraction - from) * walked
+        } while (walked < 1f)
     }
-    return playhead.value
+    return playhead
 }
 
 /**
@@ -96,10 +120,13 @@ fun rememberPlayhead(fraction: Float, held: Boolean, trackKey: Any?): Float {
  * [height] is the strip that can be grabbed, [thickness] the line that is drawn
  * in it - a thumb needs far more to aim at than the hairline the design wants.
  * [buffered] is how far the player has loaded, drawn in [bufferColor].
+ *
+ * [fraction] is asked while drawing, so a moving playhead repaints the line and
+ * nothing around it.
  */
 @Composable
 fun SeekRail(
-    fraction: Float,
+    fraction: () -> Float,
     onScrub: (Float?) -> Unit,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
@@ -130,6 +157,15 @@ fun SeekRail(
         modifier
             .fillMaxWidth()
             .height(height)
+            // The knob rides the end of the played part, drawn here because the
+            // rounded line below would clip it.
+            .drawWithContent {
+                drawContent()
+                if (dot > 0.dp) {
+                    val at = Offset(size.width * fraction().coerceIn(0f, 1f), size.height / 2)
+                    drawCircle(colors.accent, radius = dot.toPx() / 2, center = at)
+                }
+            }
             .then(if (!enabled) Modifier else Modifier.pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -164,40 +200,22 @@ fun SeekRail(
                 .height(line)
                 .then(if (rounded) Modifier.clip(RoundedCornerShape(line / 2)) else Modifier)
                 .background(trackColor)
-        ) {
-            if (buffered > fraction) {
-                Box(
-                    Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(buffered.coerceIn(0f, 1f))
-                        .background(bufferColor)
-                )
-            }
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(fraction)
-                    .background(colors.accent)
-            )
-        }
-        // The knob rides the end of the played part. A box as wide as that part,
-        // with the dot on its right edge, puts it there without measuring
-        // anything - and it hangs outside the rounded line, which would clip it.
-        if (dot > 0.dp) {
-            Box(
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxWidth(fraction)
-            ) {
-                Box(
-                    Modifier
-                        .align(Alignment.CenterEnd)
-                        .offset(x = dot / 2)
-                        .requiredSize(dot)
-                        .clip(CircleShape)
-                        .background(colors.accent)
-                )
-            }
-        }
+                .drawBehind {
+                    drawRect(bufferColor, size = Size(size.width * buffered.coerceIn(0f, 1f), size.height))
+                    drawRect(colors.accent, size = Size(size.width * fraction().coerceIn(0f, 1f), size.height))
+                }
+        )
     }
+}
+
+/**
+ * The elapsed time under a rail. Its own composable, so the walking playhead
+ * redraws this figure once a second and not the player around it.
+ */
+@Composable
+fun Elapsed(playhead: FloatState, durationMs: Long, style: TextStyle) {
+    val text by remember(playhead, durationMs) {
+        derivedStateOf { Fmt.duration((playhead.floatValue * durationMs / 1000).toDouble()) }
+    }
+    Text(text, style = style, color = SonorusTheme.colors.textDim)
 }

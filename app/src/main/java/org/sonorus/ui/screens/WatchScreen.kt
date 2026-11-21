@@ -823,7 +823,7 @@ private fun VideoPlayer(vm: AppViewModel, info: PlayerInfo, fromStart: Boolean, 
                 Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 10.dp)) {
                     val fraction = if (session.duration > 0) (clock / session.duration).toFloat().coerceIn(0f, 1f) else 0f
                     SeekRail(
-                        fraction = dragging ?: fraction,
+                        fraction = { dragging ?: fraction },
                         onScrub = { dragging = it; poke() },
                         onSeek = { session.seek(it * session.duration) },
                         height = 32.dp,

@@ -118,7 +118,7 @@ fun SharedTransitionScope.PlayerBar(
     val colors = SonorusTheme.colors
     val haptics = LocalHapticFeedback.current
     val reported = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    val fraction = rememberPlayhead(reported, held = false, trackKey = track.id)
+    val playhead = rememberPlayhead(reported, held = false, trackKey = track.id, durationMs = durationMs)
     // How far the title is wiped sideways. Zero unless a wipe is running.
     val wipe = remember { Animatable(0f) }
     val next by rememberUpdatedState(onNext)
@@ -132,7 +132,7 @@ fun SharedTransitionScope.PlayerBar(
             .pressable(dip = 0.99f, onClick = onExpand)
     ) {
         SeekRail(
-            fraction = fraction,
+            fraction = { playhead.floatValue },
             onScrub = {},
             onSeek = {},
             height = 14.dp,
@@ -185,7 +185,8 @@ fun SharedTransitionScope.PlayerBar(
                     // A title too long for the bar scrolls past instead of
                     // ending in an ellipsis: on a phone that is most of them,
                     // and the bar is the only place the running song is named.
-                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                    // Not behind the open player, where it only costs frames.
+                    modifier = Modifier.basicMarquee(iterations = if (coverVisible) Int.MAX_VALUE else 0),
                 )
                 Text(
                     listOfNotNull(

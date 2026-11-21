@@ -208,20 +208,26 @@ class SonorusApi(private val session: Session) {
             parsed
         }
 
+    // Decoded off the caller's thread: a list of ten thousand songs takes long enough to freeze the screen.
+    private suspend inline fun <reified T> answer(request: Request): T {
+        val parsed = call(request)
+        return withContext(Dispatchers.Default) { json.decodeFromJsonElement<T>(parsed) }
+    }
+
     private suspend inline fun <reified T> get(path: String, query: Map<String, String?> = emptyMap()): T =
-        json.decodeFromJsonElement<T>(call(Request.Builder().url(url(path, query)).get().build()))
+        answer(Request.Builder().url(url(path, query)).get().build())
 
     private suspend inline fun <reified T> post(path: String, body: JsonObject = JsonObject(emptyMap())): T =
-        json.decodeFromJsonElement<T>(call(Request.Builder().url(url(path)).post(jsonBody(body)).build()))
+        answer(Request.Builder().url(url(path)).post(jsonBody(body)).build())
 
     private suspend inline fun <reified T> put(path: String, body: JsonObject): T =
-        json.decodeFromJsonElement<T>(call(Request.Builder().url(url(path)).put(jsonBody(body)).build()))
+        answer(Request.Builder().url(url(path)).put(jsonBody(body)).build())
 
     private suspend inline fun <reified T> patch(path: String, body: JsonObject): T =
-        json.decodeFromJsonElement<T>(call(Request.Builder().url(url(path)).patch(jsonBody(body)).build()))
+        answer(Request.Builder().url(url(path)).patch(jsonBody(body)).build())
 
     private suspend inline fun <reified T> delete(path: String): T =
-        json.decodeFromJsonElement<T>(call(Request.Builder().url(url(path)).delete().build()))
+        answer(Request.Builder().url(url(path)).delete().build())
 
     // --- Bootstrap and library ------------------------------------------------
 

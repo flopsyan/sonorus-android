@@ -8,10 +8,13 @@ import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.PlaylistTree
 import org.sonorus.data.model.Track
 import org.sonorus.data.restoreReserved
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
+import kotlinx.serialization.json.encodeToStream
 import java.io.File
 import java.util.concurrent.Executor
 
@@ -33,9 +36,10 @@ import java.util.concurrent.Executor
  *    arrived and its length checks out, so an entry in the index is a promise
  *    that the file behind it can be played.
  *
- * [writer] runs the file writes. Thousands of songs with their lyrics make the
- * index tens of MB, so the app hands it a background thread and a change costs
- * the caller only the copy in memory. The default writes in place for the tests.
+ * [writer] runs the file writes. Thousands of songs make the index several MB,
+ * so the app hands it a background thread that waits a moment first: a change
+ * costs the caller only the copy in memory, and a burst of changes one write.
+ * The default writes in place for the tests.
  *
  * Deliberately free of Android: its only tie to the outside is the directory it
  * is handed, which is what lets all of it be tested on a plain JVM.
@@ -53,6 +57,9 @@ class DownloadStore(
 
     val audioDir = File(root, "audio")
     val coverDir = File(root, "covers")
+
+    /** The words of the downloaded songs, a file each - see [lyricsOf]. */
+    private val lyricsDir = File(root, "lyrics")
 
     /** The EPUBs, and beside them the reader's own files - see [readerDir]. */
     val ebookDir = File(root, "ebooks")
@@ -98,6 +105,18 @@ class DownloadStore(
 
     private val lock = Any()
 
+    /** One writer per lyrics file at a time. */
+    private val lyricsLock = Any()
+
+    /** The newest snapshot the file does not hold yet. */
+    private var unwritten: OfflineSnapshot? = null
+
+    /** A write is handed to [writer] and has not finished. */
+    private var writing = false
+
+    /** Writes in a row that failed. */
+    private var failures = 0
+
     @Volatile
     private var state: OfflineSnapshot = OfflineSnapshot()
 
@@ -123,6 +142,9 @@ class DownloadStore(
 
     val count: Int get() = byId.size
 
+    /** The ids of everything downloaded, without a copy: the map is replaced, never changed. */
+    val ids: Set<Int> get() = byId.keys
+
     val bytes: Long get() = state.tracks.sumOf { it.bytes }
 
     /** The index entry of a downloaded track, or null if it is not here. */
@@ -145,12 +167,70 @@ class DownloadStore(
     // --- Writing --------------------------------------------------------------
 
     /** Records a finished download. Replaces an older copy of the same song. */
-    fun put(entry: DownloadedTrack) = update { s ->
-        // A second download with another extension leaves the old file behind.
-        s.tracks.firstOrNull { it.track.id == entry.track.id }
-            ?.takeIf { it.file != entry.file }
-            ?.let { File(audioDir, it.file).delete() }
-        s.copy(tracks = s.tracks.filter { it.track.id != entry.track.id } + entry)
+    fun put(entry: DownloadedTrack) {
+        // Words that did not get written cost a button, not the download.
+        runCatching { writeLyrics(entry.track.id, entry.lyrics) }
+        update { s ->
+            // A second download with another extension leaves the old file behind.
+            s.tracks.firstOrNull { it.track.id == entry.track.id }
+                ?.takeIf { it.file != entry.file }
+                ?.let { File(audioDir, it.file).delete() }
+            s.copy(tracks = s.tracks.filter { it.track.id != entry.track.id } + entry.copy(lyrics = null))
+        }
+    }
+
+    // --- Lyrics -----------------------------------------------------------------
+    // A file per song beside the index, not in it. Inline they were four fifths of
+    // the index - 30 of 36 MB for ten thousand songs - kept in memory whole, read
+    // at every start and written again with every rating.
+
+    private fun lyricsFile(trackId: Int) = File(lyricsDir, "$trackId.json")
+
+    /** The words taken along with a downloaded song, or null. Reads a file, so not for the main thread. */
+    fun lyricsOf(trackId: Int): Lyrics? {
+        val entry = byId[trackId] ?: return null
+        val stored = synchronized(lyricsLock) {
+            runCatching { json.decodeFromString(Lyrics.serializer(), lyricsFile(trackId).readText()) }.getOrNull()
+        }
+        // An index from before the files carries them itself until [splitLyrics] has run.
+        return stored ?: entry.lyrics
+    }
+
+    private fun writeLyrics(trackId: Int, words: Lyrics?) {
+        synchronized(lyricsLock) {
+            val file = lyricsFile(trackId)
+            if (words == null) {
+                file.delete()
+                return
+            }
+            lyricsDir.mkdirs()
+            val temp = File(lyricsDir, "$trackId.json.tmp")
+            temp.writeText(json.encodeToString(Lyrics.serializer(), words))
+            if (!temp.renameTo(file)) {
+                file.delete()
+                temp.renameTo(file)
+            }
+        }
+    }
+
+    /**
+     * Moves the words an older index carries inline into their files, once, and
+     * lets go of the copies in memory. A file that is already there is the newer
+     * answer and stays.
+     */
+    private fun splitLyrics() {
+        val moved = HashSet<Int>()
+        for (entry in state.tracks) {
+            val words = entry.lyrics ?: continue
+            val id = entry.track.id
+            synchronized(lyricsLock) {
+                if (lyricsFile(id).isFile || runCatching { writeLyrics(id, words) }.isSuccess) moved += id
+            }
+        }
+        update { s ->
+            if (moved.isEmpty()) s
+            else s.copy(tracks = s.tracks.map { if (it.lyrics != null && it.track.id in moved) it.copy(lyrics = null) else it })
+        }
     }
 
     // --- The download queue -----------------------------------------------------
@@ -197,7 +277,7 @@ class DownloadStore(
 
     /** The book's own metadata, refreshed without touching the file. */
     fun refreshEbook(book: Ebook) = update { s ->
-        if (s.ebooks.none { it.book.id == book.id }) s
+        if (s.ebooks.none { it.book.id == book.id && it.book != book }) s
         else s.copy(ebooks = s.ebooks.map { if (it.book.id == book.id) it.copy(book = book) else it })
     }
 
@@ -300,7 +380,9 @@ class DownloadStore(
      * other's baseline.
      */
     fun rememberCollection(collection: OfflineCollection) = update { s ->
-        s.copy(playlists = s.playlists.filterNot { it.key == collection.key } + collection)
+        // Every reconcile ends here, and most of them found nothing new.
+        if (collection in s.playlists) s
+        else s.copy(playlists = s.playlists.filterNot { it.key == collection.key } + collection)
     }
 
     /** The collections this phone is keeping in step with the server. */
@@ -426,7 +508,7 @@ class DownloadStore(
         else s.copy(excluded = s.excluded.filterNot { it in trackIds })
     }
 
-    fun rememberGenres(genres: List<Genre>) = update { s -> s.copy(genres = genres) }
+    fun rememberGenres(genres: List<Genre>) = update { s -> if (s.genres == genres) s else s.copy(genres = genres) }
 
     /**
      * The last look at the account. Stored on every successful bootstrap,
@@ -462,6 +544,7 @@ class DownloadStore(
      */
     fun remove(trackId: Int) = update { s ->
         s.tracks.firstOrNull { it.track.id == trackId }?.let { File(audioDir, it.file).delete() }
+        lyricsFile(trackId).delete()
         val kept = s.tracks.filterNot { it.track.id == trackId }
         val have = kept.map { it.track.id }.toSet()
         s.copy(
@@ -481,15 +564,20 @@ class DownloadStore(
     }
 
     /**
-     * The words the server sends now, written onto the row this phone holds. The copy
-     * taken with the download is otherwise kept for good, also after the server has
+     * The words the server sends now, kept in place of the copy taken with the
+     * download. That copy is otherwise kept for good, also after the server has
      * repaired them (lyrics a tagger had run onto one line) or found a `.lrc` since.
+     * Reads and writes a file, so not for the main thread.
      */
-    fun applyLyrics(trackId: Int, lyrics: Lyrics) = update { s ->
-        val entry = s.tracks.firstOrNull { it.track.id == trackId } ?: return@update s
+    fun applyLyrics(trackId: Int, lyrics: Lyrics) {
+        val entry = byId[trackId] ?: return
         val next = lyrics.takeIf { it.text.isNotEmpty() || it.lines.isNotEmpty() }
-        if (entry.lyrics == next) return@update s
-        s.copy(tracks = s.tracks.map { if (it.track.id == trackId) it.copy(lyrics = next) else it })
+        if (lyricsOf(trackId) == next) return
+        writeLyrics(trackId, next)
+        // An inline copy not moved out yet would bring removed words back.
+        if (entry.lyrics != null) update { s ->
+            s.copy(tracks = s.tracks.map { if (it.track.id == trackId) it.copy(lyrics = null) else it })
+        }
     }
 
     /**
@@ -535,6 +623,7 @@ class DownloadStore(
         synchronized(lock) {
             audioDir.deleteRecursively()
             coverDir.deleteRecursively()
+            lyricsDir.deleteRecursively()
             ebookDir.deleteRecursively()
             videoDir.deleteRecursively()
             audioDir.mkdirs()
@@ -555,6 +644,7 @@ class DownloadStore(
         update { s ->
             val kept = s.tracks.filter { File(audioDir, it.file).let { f -> f.isFile && f.length() > 0 } }
             dropped = s.tracks.size - kept.size
+            if (dropped > 0) (s.tracks - kept.toSet()).forEach { lyricsFile(it.track.id).delete() }
             val covers = s.covers.filter { File(coverDir, coverName(it)).isFile }
             val books = s.ebooks.filter { File(ebookDir, it.file).let { f -> f.isFile && f.length() > 0 } }
             dropped += s.ebooks.size - books.size
@@ -577,42 +667,52 @@ class DownloadStore(
         }
     }
 
-    /** The newest snapshot the file does not hold yet. Set while a write is queued or running. */
-    private var unwritten: OfflineSnapshot? = null
-
     private fun write(next: OfflineSnapshot) {
         val stamped = next.copy(version = OfflineSnapshot.VERSION)
         publish(stamped)
-        val queued = unwritten != null
         unwritten = stamped
-        // A queued write takes the newest snapshot, so a burst of changes costs one or two writes.
-        if (!queued) writer.execute(::drain)
+        schedule()
+    }
+
+    // One write at a time, and it takes the newest snapshot, so a burst of changes costs one write.
+    private fun schedule() {
+        if (writing) return
+        writing = true
+        writer.execute(::drain)
     }
 
     private fun drain() {
-        while (true) {
-            val next = synchronized(lock) { unwritten } ?: return
-            // A failed write must not end the loop, or `unwritten` would block every later one.
-            runCatching { persist(next) }
-            synchronized(lock) {
-                if (unwritten === next) {
-                    unwritten = null
-                    return
-                }
+        val next = synchronized(lock) { unwritten.also { if (it == null) writing = false } } ?: return
+        val written = runCatching { persist(next) }.isSuccess
+        synchronized(lock) {
+            writing = false
+            if (written) {
+                failures = 0
+                if (unwritten === next) unwritten = null
+            } else {
+                failures++
             }
+            // A failed write stays unwritten: it is tried again here, and after that with the next change.
+            if (unwritten != null && failures < MAX_FAILURES) schedule()
         }
     }
 
     /**
      * Whole file, then rename: a kill mid-write cannot leave half an index.
      *
+     * Streamed into the file. Built as one String first, the index of ten thousand
+     * songs took 180 MB of a 256 MB heap, and the write died of it.
+     *
      * The account is stripped before writing. It lives in [accountFile] and
      * having it in both would let a stale copy in the index win on the next
      * load.
      */
+    @OptIn(ExperimentalSerializationApi::class)
     private fun persist(next: OfflineSnapshot) {
         root.mkdirs()
-        tempFile.writeText(json.encodeToString(OfflineSnapshot.serializer(), next.copy(account = null)))
+        tempFile.outputStream().buffered().use {
+            json.encodeToStream(OfflineSnapshot.serializer(), next.copy(account = null), it)
+        }
         if (!tempFile.renameTo(indexFile)) {
             // Some filesystems refuse to rename onto an existing file.
             indexFile.delete()
@@ -638,9 +738,12 @@ class DownloadStore(
      * leaves an empty download list and a phone that is still logged in, which
      * is exactly what the situation is.
      */
+    @OptIn(ExperimentalSerializationApi::class)
     private fun load() {
-        val index = runCatching { indexFile.takeIf { it.isFile }?.readText() }.getOrNull()
-            ?.let { runCatching { json.decodeFromString(OfflineSnapshot.serializer(), it) }.getOrNull() }
+        val index = runCatching {
+            indexFile.takeIf { it.isFile }?.inputStream()?.buffered()
+                ?.use { json.decodeFromStream(OfflineSnapshot.serializer(), it) }
+        }.getOrNull()
             ?.takeIf { it.version == OfflineSnapshot.VERSION }
             ?: OfflineSnapshot()
 
@@ -653,6 +756,7 @@ class DownloadStore(
 
         publish(index.restored().copy(account = account))
         if (account != null && !accountFile.isFile) writeAccount(account)
+        if (state.tracks.any { it.lyrics != null }) writer.execute(::splitLyrics)
     }
 
     // A download keeps the names it was fetched with, and nothing refreshes
@@ -682,13 +786,18 @@ class DownloadStore(
     }
 
     companion object {
+        /** Tries in a row before a failing write waits for the next change. */
+        private const val MAX_FAILURES = 3
+
         /**
          * The file name a cover path gets on disk. Flattened rather than nested,
          * because the server serves one directory and a path separator in a file
          * name is how a download escapes its own folder.
          */
-        fun coverName(path: String): String =
-            path.trim('/').replace(Regex("[^A-Za-z0-9._-]"), "_")
+        fun coverName(path: String): String = path.trim('/').replace(UNSAFE, "_")
+
+        // Compiled once: a queue of ten thousand songs asks for ten thousand cover names.
+        private val UNSAFE = Regex("[^A-Za-z0-9._-]")
 
         /**
          * The extension a downloaded file gets. It is cosmetic - the player

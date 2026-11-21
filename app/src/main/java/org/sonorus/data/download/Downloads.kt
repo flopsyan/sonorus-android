@@ -799,7 +799,7 @@ class Downloads(
         val inFlight = if (running == null || activeExpected <= 0) 0L
         else (activeBytes.toDouble() / activeExpected * estimate(running)).toLong()
         _state.value = State(
-            done = store.snapshot.tracks.map { it.track.id }.toSet(),
+            done = store.ids,
             queued = queued,
             active = running?.id,
             activeTitle = running?.title.orEmpty(),

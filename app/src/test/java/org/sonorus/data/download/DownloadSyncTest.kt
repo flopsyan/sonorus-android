@@ -3,6 +3,7 @@ package org.sonorus.data.download
 import org.sonorus.data.model.Track
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -103,5 +104,103 @@ class DownloadSyncTest {
         assertEquals(DownloadSync.Change(), change)
         assertTrue(target.added.isEmpty())
         assertNull(store.collectionOf("book", listOf(9)))
+    }
+
+    // --- One rating, without asking the server for the whole selection ----------
+
+    private fun stars(vararg ids: Int) =
+        OfflineCollection(kind = "stars", id = 5, name = "5, 4, 3, Nicht bewertet", ids = listOf(5, 4, 3, 0), trackIds = ids.toList())
+
+    /** A song that lies on the phone, the way a finished download left it. */
+    private fun downloaded(id: Int) {
+        val file = store.targetOf(id, "mp3").apply { writeBytes(ByteArray(8)) }
+        store.put(DownloadedTrack(track = part(id), file = file.name, bytes = 8))
+    }
+
+    @Test
+    fun `a song rated out of a downloaded star selection leaves it, and goes unless something holds it`() {
+        store.rememberCollection(stars(1, 2, 3))
+        downloaded(1)
+        downloaded(2)
+        store.rememberManual(listOf(2))
+
+        assertFalse(applyRated(store, target, trackId = 1, stars = 2))
+        assertFalse(applyRated(store, target, trackId = 2, stars = 1))
+
+        assertEquals(listOf(3), store.collectionOf("stars", listOf(5, 4, 3, 0))?.trackIds)
+        assertEquals("the hand download stays", listOf(1), target.removed)
+    }
+
+    @Test
+    fun `a song rated into the selection joins it and is fetched if it is not here`() {
+        store.rememberCollection(stars(1))
+        downloaded(2)
+
+        assertTrue("not on the phone: fetch it", applyRated(store, target, trackId = 3, stars = 4))
+        assertFalse("already here", applyRated(store, target, trackId = 2, stars = 0))
+
+        assertEquals(listOf(1, 3, 2), store.collectionOf("stars", listOf(5, 4, 3, 0))?.trackIds)
+        assertTrue(target.removed.isEmpty())
+    }
+
+    @Test
+    fun `a rating inside the selection changes nothing, and one deleted by hand stays deleted`() {
+        store.rememberCollection(stars(1, 2))
+        downloaded(1)
+        store.exclude(listOf(2))
+        val before = store.snapshot
+
+        assertFalse(applyRated(store, target, trackId = 1, stars = 5))
+        assertFalse("excluded by hand", applyRated(store, target, trackId = 2, stars = 3))
+
+        assertTrue("no write for nothing", before === store.snapshot)
+        assertTrue(target.removed.isEmpty())
+    }
+
+    @Test
+    fun `a rating touches no other kind of collection`() {
+        store.rememberCollection(OfflineCollection(kind = "playlist", id = 5, trackIds = listOf(1)))
+        downloaded(1)
+
+        assertFalse(applyRated(store, target, trackId = 1, stars = 1))
+
+        assertEquals(listOf(1), store.collectionOf("playlist", listOf(5))?.trackIds)
+        assertTrue(target.removed.isEmpty())
+    }
+
+    // --- An index that fell behind the phone -------------------------------------
+    // 0.31.1 could lose index writes without a word, so the file may be older than
+    // what lies in the audio folder. The start reconcile has to mend that.
+
+    @Test
+    fun `a download the index lost is fetched again, and nothing it still lists is deleted`() {
+        store.rememberCollection(stars(1, 2))
+        downloaded(1)
+        // Song 2 finished, but its entry never reached the file.
+        store.targetOf(2, "mp3").writeBytes(ByteArray(8))
+        val stale = DownloadStore(root)
+
+        val change = applyReconcile(stale, target, stale.collections.single(), listOf(part(1), part(2)))
+
+        assertEquals(listOf(2), target.added)
+        assertTrue(target.removed.isEmpty())
+        assertEquals(DownloadSync.Change(added = 1), change)
+    }
+
+    @Test
+    fun `a baseline older than the phone deletes only what really left and is held by nothing`() {
+        // The file still says 1, 2, 3; song 3 left the selection since, song 4 joined and was fetched.
+        store.rememberCollection(stars(1, 2, 3))
+        downloaded(1)
+        downloaded(2)
+        downloaded(3)
+        store.rememberManual(listOf(2))
+        val stale = DownloadStore(root)
+        store.targetOf(4, "mp3").writeBytes(ByteArray(8))
+
+        applyReconcile(stale, target, stale.collections.single(), listOf(part(1), part(4)))
+
+        assertEquals("the one the index never heard of", listOf(4), target.added)
+        assertEquals("3 left and nothing holds it; 2 was fetched by hand", listOf(3), target.removed)
     }
 }

@@ -59,9 +59,124 @@ class DownloadStoreTest {
         store.applyLyrics(1, fixed)
         store.applyLyrics(2, Lyrics())
 
-        val reread = DownloadStore(root).snapshot.tracks.associateBy { it.track.id }
-        assertEquals(fixed, reread.getValue(1).lyrics)
-        assertNull("no words stays no words", reread.getValue(2).lyrics)
+        val reread = DownloadStore(root)
+        assertEquals(fixed, reread.lyricsOf(1))
+        assertNull("no words stays no words", reread.lyricsOf(2))
+    }
+
+    @Test
+    fun `the words lie beside the index, not in it`() {
+        val words = Lyrics(text = "Ground control", lines = listOf(LyricsLine(1.0, "Ground control")), synced = true)
+        store.put(store(1).copy(lyrics = words))
+
+        assertNull("the entry itself carries none", store.entryOf(1)?.lyrics)
+        assertFalse(File(root, "library.json").readText().contains("Ground control"))
+        assertEquals(words, DownloadStore(root).lyricsOf(1))
+
+        store.remove(1)
+        assertFalse("gone with the song", File(root, "lyrics/1.json").exists())
+        assertNull(store.lyricsOf(1))
+    }
+
+    @Test
+    fun `an index that still carries the words hands them over to their files`() {
+        val old = Lyrics(text = "to me", lines = listOf(LyricsLine(16.33, "to me")), synced = true)
+        val newer = Lyrics(text = "As I", lines = listOf(LyricsLine(20.59, "As I")), synced = true)
+        store.put(store(1))
+        store.put(store(2))
+        store.put(store(3))
+        // The index as 0.31.1 wrote it: the words inside each entry.
+        val index = File(root, "library.json")
+        val words = ""","lyrics":{"text":"to me","lines":[{"time":16.33,"text":"to me"}],"synced":true}"""
+        index.writeText(index.readText().replace(Regex(""""file":"([12])\.mp3","bytes":32""")) { it.value + words })
+        // Song 2 was asked about online before the move ran.
+        File(root, "lyrics").mkdirs()
+        File(root, "lyrics/2.json").writeText("""{"text":"As I","lines":[{"time":20.59,"text":"As I"}],"synced":true}""")
+
+        val later = ArrayDeque<Runnable>()
+        val moved = DownloadStore(root, writer = { later.addLast(it) })
+        assertEquals("readable before the move has run", old, moved.lyricsOf(1))
+        while (later.isNotEmpty()) later.removeFirst().run()
+
+        assertEquals(old, moved.lyricsOf(1))
+        assertEquals("the file that was already there is the newer answer", newer, moved.lyricsOf(2))
+        assertNull(moved.lyricsOf(3))
+        assertTrue(moved.snapshot.tracks.none { it.lyrics != null })
+        assertFalse(index.readText().contains("lyrics"))
+        assertEquals(old, DownloadStore(root).lyricsOf(1))
+    }
+
+    @Test
+    fun `words taken away before the move ran do not come back with it`() {
+        store.put(store(1))
+        val index = File(root, "library.json")
+        index.writeText(
+            index.readText().replace(
+                """"bytes":32""",
+                """"bytes":32,"lyrics":{"text":"wrong","lines":[{"time":1.0,"text":"wrong"}],"synced":true}""",
+            )
+        )
+        val later = ArrayDeque<Runnable>()
+        val old = DownloadStore(root, writer = { later.addLast(it) })
+
+        old.applyLyrics(1, Lyrics())
+        while (later.isNotEmpty()) later.removeFirst().run()
+
+        assertNull(old.lyricsOf(1))
+        assertNull(DownloadStore(root).lyricsOf(1))
+    }
+
+    @Test
+    fun `a write that fails is tried again and loses nothing`() {
+        val later = ArrayDeque<Runnable>()
+        val async = DownloadStore(root, writer = { later.addLast(it) })
+        // A directory where the temporary file belongs makes every write fail.
+        val block = File(root, "library.json.tmp").apply { mkdirs() }
+
+        async.put(store(1))
+        later.removeFirst().run()
+        assertTrue("still held in memory", async.isDownloaded(1))
+        assertEquals("nothing reached the file", 0, DownloadStore(root).count)
+        assertEquals("and the write is queued once more", 1, later.size)
+
+        block.delete()
+        later.removeFirst().run()
+        assertEquals(1, DownloadStore(root).count)
+        assertTrue(later.isEmpty())
+    }
+
+    @Test
+    fun `a write that keeps failing waits for the next change instead of spinning`() {
+        val later = ArrayDeque<Runnable>()
+        val async = DownloadStore(root, writer = { later.addLast(it) })
+        val block = File(root, "library.json.tmp").apply { mkdirs() }
+
+        async.put(store(1))
+        var tries = 0
+        while (later.isNotEmpty()) {
+            later.removeFirst().run()
+            tries++
+        }
+        assertEquals(3, tries)
+
+        block.delete()
+        async.put(store(2))
+        while (later.isNotEmpty()) later.removeFirst().run()
+        assertEquals("the next change writes both", 2, DownloadStore(root).count)
+    }
+
+    @Test
+    fun `a baseline that did not change is not written again`() {
+        val later = ArrayDeque<Runnable>()
+        val async = DownloadStore(root, writer = { later.addLast(it) })
+        val list = OfflineCollection(kind = "stars", id = 5, ids = listOf(5, 4), trackIds = listOf(1, 2))
+        async.rememberCollection(list)
+        while (later.isNotEmpty()) later.removeFirst().run()
+
+        async.rememberCollection(list.copy())
+        async.rememberGenres(emptyList())
+
+        assertTrue("nothing queued", later.isEmpty())
     }
 
     @Test

@@ -136,6 +136,7 @@ import org.sonorus.ui.pressable
 import org.sonorus.ui.components.Chip
 import org.sonorus.ui.components.ConfirmDialog
 import org.sonorus.ui.components.Cover
+import org.sonorus.ui.components.Elapsed
 import org.sonorus.ui.components.HeldDownloadDialog
 import org.sonorus.ui.components.MenuItem
 import org.sonorus.ui.components.PlayerCoverKey
@@ -710,9 +711,11 @@ fun SharedTransitionScope.FullPlayer(
                     ?: if (state.durationMs > 0) {
                         (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
                     } else 0f
-                val fraction = rememberPlayhead(reported, held = scrub != null, trackKey = track.id)
+                val playhead = rememberPlayhead(
+                    reported, held = scrub != null, trackKey = track.id, durationMs = state.durationMs,
+                )
                 SeekRail(
-                    fraction = fraction,
+                    fraction = { playhead.floatValue },
                     onScrub = { scrub = it },
                     onSeek = { f ->
                         if (state.durationMs > 0) {
@@ -728,11 +731,7 @@ fun SharedTransitionScope.FullPlayer(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(
-                        Fmt.duration((fraction * state.durationMs / 1000).toDouble()),
-                        style = num(12.sp),
-                        color = colors.textDim,
-                    )
+                    Elapsed(playhead, state.durationMs, num(12.sp))
                     Text(
                         Fmt.duration(state.durationMs / 1000.0),
                         style = num(12.sp),

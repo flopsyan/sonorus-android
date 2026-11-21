@@ -87,6 +87,9 @@ data class DownloadedTrack(
     /**
      * The words, taken along with the song. They are their own endpoint online,
      * and a plane is exactly where reading along cannot ask for them.
+     *
+     * Only on the way in, and in an index written before the words had files of
+     * their own: the store keeps them in one per song, see `DownloadStore.lyricsOf`.
      */
     val lyrics: Lyrics? = null,
 )
@@ -353,8 +356,8 @@ object Offline {
     }
 
     /** Timed only, like the server: untimed words a download kept from before are dropped. */
-    fun lyrics(s: OfflineSnapshot, id: Int): LyricsResponse =
-        LyricsResponse(s.tracks.firstOrNull { it.track.id == id }?.lyrics?.takeIf { it.lines.isNotEmpty() } ?: Lyrics())
+    fun lyrics(stored: Lyrics?): LyricsResponse =
+        LyricsResponse(stored?.takeIf { it.lines.isNotEmpty() } ?: Lyrics())
 
     /**
      * The sorts the web app offers, on the list this phone has. Text is compared

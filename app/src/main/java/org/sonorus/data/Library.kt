@@ -25,6 +25,7 @@ import org.sonorus.data.model.EbooksResponse
 import org.sonorus.data.model.GenreResponse
 import org.sonorus.data.model.GenresResponse
 import org.sonorus.data.model.HomeResponse
+import org.sonorus.data.model.Lyrics
 import org.sonorus.data.model.LyricsResponse
 import org.sonorus.data.model.PlaylistResponse
 import org.sonorus.data.model.PodcastResponse
@@ -37,12 +38,14 @@ import org.sonorus.data.model.StarsResponse
 import org.sonorus.data.model.TracksResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 
 /**
@@ -327,8 +330,11 @@ class Library(
         else reachableAfter { api.shuffle(limit, unrated) }
 
     suspend fun lyrics(id: Int): LyricsResponse =
-        if (offline.value) Offline.lyrics(store.snapshot, id)
-        else reachableAfter { api.lyrics(id) }.also { store.applyLyrics(id, it.lyrics) }
+        if (offline.value) withContext(Dispatchers.IO) { Offline.lyrics(store.lyricsOf(id)) }
+        else reachableAfter { api.lyrics(id) }.also { keepLyrics(id, it.lyrics) }
+
+    /** The download's own copy of the words follows what the server says now. */
+    suspend fun keepLyrics(id: Int, lyrics: Lyrics) = withContext(Dispatchers.IO) { store.applyLyrics(id, lyrics) }
 
     /** Named songs in the order they were asked for - how a queue is rebuilt. */
     suspend fun tracksByIds(ids: List<Int>): TracksResponse =

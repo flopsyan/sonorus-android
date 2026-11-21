@@ -1015,9 +1015,8 @@ class AppViewModel : ViewModel() {
                     onDone(it.stars)
                     refreshQuietly()
                     // A star moves a song between the star playlists, so a
-                    // downloaded one has to follow. Costs nothing when none is
-                    // downloaded, which is the ordinary case.
-                    viewModelScope.launch { runCatching { downloadSync.reconcileKind("stars") } }
+                    // downloaded one has to follow.
+                    viewModelScope.launch { runCatching { downloadSync.rated(trackId, it.stars) } }
                 }
                 .onFailure {
                     // Nothing was lost - it is queued, and the stars stay pale
@@ -1229,7 +1228,7 @@ class AppViewModel : ViewModel() {
                 .onSuccess {
                     // A download keeps its own copy of the words, and it must not bring
                     // rejected ones back on the next flight.
-                    lib.store.applyLyrics(trackId, it.lyrics)
+                    lib.keepLyrics(trackId, it.lyrics)
                     if (lyricsFor == trackId) _lyrics.value = it.lyrics
                     say(if (fits) "Songtext vorgemerkt." else "Songtext entfernt.")
                 }

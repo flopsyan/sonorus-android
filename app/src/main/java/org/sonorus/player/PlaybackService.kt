@@ -326,7 +326,7 @@ class PlaybackService : MediaLibraryService() {
                 future.set(
                     if (queued == null || queued.tracks.isEmpty()) unchanged
                     else MediaSession.MediaItemsWithStartPosition(
-                        queued.tracks.map(app.player::mediaItem),
+                        app.player.mediaItems(queued.tracks),
                         queued.startIndex,
                         C.TIME_UNSET,
                     )
